@@ -66,3 +66,11 @@
 # (tag rshapes-ported, 71 fns/6 scenes); rtext stb-extraction infra committed;
 # rtext.zig drafting in progress. Re-run `python3 tools/token_usage.py` next
 # pause for precise per-turn figures; session cumulative ~76.1M at this point.
+
+# --- checkpoint: 5/10 modules (2026-06-28) ----------------------------------
+# Ported & validated (all green, tagged): raymath (bit-exact, 146 fns),
+# rcamera (bit-exact, 12 fns), rshapes (71 fns), rtext (61 fns), rtextures
+# (120 fns) — the math + 2D + text + image/texture + camera layer (~12.4k Zig
+# lines). Main pixel gate 10/10; mathtest + camtest bit-exact. 16 commits,
+# 6 tags. Remaining: rgestures, rlgl, rcore(+glfw), rmodels, raudio (see
+# PROGRESS.md resume guide). Session cumulative ~138917768 tokens at this point.

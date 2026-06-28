@@ -4,25 +4,49 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
-## Resume point
+## Resume point — 5/10 modules ported & validated; main gate 10/10 green
 
-**rshapes + rtext + rtextures DONE (pixel byte-exact).** Next module: **rcore**
-(window/input/timing + the global `CoreData CORE`) with the `platforms/
-rcore_desktop_glfw.c` backend. rcore needs CoreData mirrored as an extern struct
-with comptime offset asserts vs C ground truth — build tools/offsets.c →
-src/c_layout.zig FIRST (copy sqlite-zig's gen_layout pattern). glfw stays linked
-C. Then rmodels (cgltf/par_shapes/m3d shim), raudio (miniaudio/dr_* shim; PCM
-diff, no pixels). rlgl.h/rcamera.h/rgestures.h are header-only (out-of-line via
-rcore's RLGL_IMPLEMENTATION) — port after their callers.
+**DONE (all green, tagged):** raymath (bit-exact), rcamera (bit-exact),
+rshapes + rtext + rtextures (pixel byte-exact). That's the entire **math + 2D
+drawing + text/fonts + image/texture + camera** layer in Zig (~12.4k lines).
 
-**older rtextures detail** —
-needs its own stb shim (stb_image + stb_image_write + stb_image_resize2 +
-stb_perlin + qoi, with RL_MALLOC, STBI_NO_* config from rtextures.c lines
-~70-280) and procedural-image scenes (GenImage*/Image*/LoadTextureFromImage/
-DrawTexture) since the current battery loads no textures. Then rcore+glfw
-(needs CoreData offset tooling: tools/offsets.c → src/c_layout.zig), rmodels
-(cgltf/par_shapes/m3d shim), raudio (miniaudio/dr_* shim; validate via decoded
-PCM diff, no pixels).
+**Remaining 5 modules, in suggested order (each harder than the last):**
+
+1. **rgestures.h** (557 lines, header-only, out-of-line via rcore's
+   `RGESTURES_IMPLEMENTATION`). Gesture recognizer with internal state
+   (`GESTURES` global). Easiest remaining: pure-ish, validate with a
+   state/behavior numeric harness (feed a deterministic touch-event sequence,
+   diff the detected gesture + state). Pattern = camgrid (numeric diff).
+2. **rlgl.h** (5442 lines, header-only, the GL abstraction; owns `static rlglData
+   RLGL`). Big. Currently the C rlgl provides all the `rl*` symbols the ported
+   modules call — so porting it swaps the engine under them. Validate via the
+   existing pixel gate (rlgl drives every draw). Mirror `RLGL` state; keep the GL
+   calls (glad) as extern C. Highest-leverage but central-risk; do carefully.
+3. **rcore.c** (4629 lines) + `platforms/rcore_desktop_glfw.c` (~2700). The
+   window/input/timing core; owns the global `CoreData CORE` read across modules.
+   **Build `tools/offsets.c` → `src/c_layout.zig` FIRST** (copy sqlite-zig's
+   `gen_layout.sh` pattern) and mirror `CoreData` with comptime `@offsetOf`/
+   `@sizeOf` asserts. **Decision needed:** rcore.c `#include`s the platform `.c`
+   (one TU) — either port both together into rcore.zig (calling GLFW via extern),
+   or split the platform into its own C TU first. GLFW stays linked C. Everything
+   depends on rcore, so the gate fully covers it.
+4. **rmodels.c** (7334 lines). 3D meshes/models/materials. Needs its own
+   third-party shim (cgltf + par_shapes + m3d + tinyobj + vox_loader, same
+   pattern as the rtext/rtextures shims) AND new **3D scenes** (BeginMode3D +
+   DrawCube/DrawModel/DrawMesh) since the battery is 2D. Depends on rlgl + raymath
+   + rtextures (all portable/ported).
+5. **raudio.c** (2964 lines). Audio. Needs a miniaudio + dr_wav/flac/mp3 +
+   stb_vorbis + jar shim. **No pixel oracle** — validate decode paths via a
+   **PCM-diff harness** (decode a known buffer C vs Zig, compare samples);
+   device/mixing is a loose check.
+
+**Proven patterns to reuse** (see committed code): per-TU swap via
+`ported_modules` (build.zig); third-party "impl shim" in `src/c/<m>_*_impl.c`
+(faithful to the module's IMPLEMENTATION preamble, omitting `*_STATIC` so symbols
+are linkable; `rl_sizeof_*` helpers for opaque structs); numeric-diff harness
+(camgrid/mathgrid + a `*diff.sh` + a `*test` build step) for non-pixel modules;
+**always `use_llvm = true`** on Zig objects (self-hosted backend bug); gate every
+swap on `zig build test` (pixel) or `zig build <m>test` (numeric).
 
 ## Status snapshot (2026-06-28)
 
@@ -30,10 +54,10 @@ PCM diff, no pixels).
 |---|---|
 | 0 — foundation + oracle | **DONE** ✅ (`zig build test` green, 4/4 scenes byte-identical) |
 | 1 — raymath | **DONE** ✅ (`zig build mathtest` bit-exact, 146 fns / 79,800 values) |
-| 2 — rlgl | not started |
+| 2 — rlgl | not started (header-only; the GL layer) |
 | 3 — rshapes/rtextures/rtext | **ALL THREE DONE** ✅ (pixel gate 10/10) |
-| 4 — rcore + glfw platform | not started |
-| 5 — rmodels/raudio | not started |
+| 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
+| 5 — rmodels/raudio | not started (3D + audio; need shims + 3D/PCM harnesses) |
 
 Modules ported to Zig: **5 / 10** (raymath, rshapes, rtext, rtextures, rcamera) (+1 platform backend). `ported_modules` in
 [build.zig](build.zig) is empty → 100% C baseline; the gate is trivially green.
