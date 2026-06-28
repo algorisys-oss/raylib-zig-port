@@ -56,6 +56,13 @@ const c_defines = [_][]const u8{
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
 
+/// rlgl.h (header-only GL abstraction) is ported to src/rlgl.zig. When true, the
+/// swapped build compiles C with -DRAYLIB_ZIG_NO_RLGL_IMPL (so rcore.c stops
+/// instantiating rlgl + glad), links src/c/glad_impl.c (the GLAD loader) and the
+/// rlgl.zig object instead. The oracle build stays all-C. Flip on once rlgl.zig
+/// passes the pixel gate.
+const rlgl_ported = false;
+
 fn isPorted(name: []const u8) bool {
     for (ported_modules) |m| if (std.mem.eql(u8, m, name)) return true;
     return false;
@@ -78,8 +85,14 @@ fn raylibLib(
     // (no addLibraryPath here — this is a static archive; system libs are linked
     //  on the final executable in linkExe.)
 
+    // C compile flags: when rlgl is ported, the swapped build adds
+    // -DRAYLIB_ZIG_NO_RLGL_IMPL so rcore.c stops instantiating rlgl + glad
+    // (provided by src/rlgl.zig + src/c/glad_impl.c instead). Oracle stays all-C.
+    const rlgl_flags = c_defines ++ [_][]const u8{"-DRAYLIB_ZIG_NO_RLGL_IMPL"};
+    const c_flags: []const []const u8 = if (swap and rlgl_ported) &rlgl_flags else &c_defines;
+
     // GLFW is always C (vendored third-party windowing — never ported).
-    mod.addCSourceFile(.{ .file = b.path("vendor/raylib/src/rglfw.c"), .flags = &c_defines });
+    mod.addCSourceFile(.{ .file = b.path("vendor/raylib/src/rglfw.c"), .flags = c_flags });
 
     for (raylib_tus) |tu| {
         if (swap and isPorted(tu)) {
@@ -94,8 +107,20 @@ fn raylibLib(
             obj.use_llvm = true; // self-hosted x86 backend miscompiles by-value float code
             mod.addObject(obj);
         } else {
-            mod.addCSourceFile(.{ .file = b.path(b.fmt("vendor/raylib/src/{s}", .{tu})), .flags = &c_defines });
+            mod.addCSourceFile(.{ .file = b.path(b.fmt("vendor/raylib/src/{s}", .{tu})), .flags = c_flags });
         }
+    }
+
+    // rlgl swap: GLAD loader (C shim) + the rlgl.zig object, in the swapped build.
+    if (swap and rlgl_ported) {
+        mod.addCSourceFile(.{ .file = b.path("src/c/glad_impl.c"), .flags = c_flags });
+        const rlgl_obj = b.addObject(.{ .name = "rlgl", .root_module = b.createModule(.{
+            .root_source_file = b.path("src/rlgl.zig"),
+            .target = target,
+            .optimize = optimize,
+        }) });
+        rlgl_obj.use_llvm = true;
+        mod.addObject(rlgl_obj);
     }
 
     // Third-party single-file-lib instantiation shims. A ported module's `.c`
@@ -104,10 +129,10 @@ fn raylibLib(
     // them via `extern`. Only added in the swapped build, and only for ported
     // modules. (See docs/architecture.md, not-migrated.md.)
     if (swap and isPorted("rtext.c")) {
-        mod.addCSourceFile(.{ .file = b.path("src/c/rtext_stb_impl.c"), .flags = &c_defines });
+        mod.addCSourceFile(.{ .file = b.path("src/c/rtext_stb_impl.c"), .flags = c_flags });
     }
     if (swap and isPorted("rtextures.c")) {
-        mod.addCSourceFile(.{ .file = b.path("src/c/rtextures_stb_impl.c"), .flags = &c_defines });
+        mod.addCSourceFile(.{ .file = b.path("src/c/rtextures_stb_impl.c"), .flags = c_flags });
     }
 
     // NOTE: system libs (X11/GL/…) are linked on the final executable, not here —
