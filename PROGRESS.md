@@ -6,22 +6,22 @@ for cost.
 
 ## Resume point
 
-**Phase 0 COMPLETE — the foundation + differential oracle are green.** Next:
-Phase 1, port `raymath.h` → `src/raymath.zig` (header-only; force out-of-line
-symbols), gated by a ULP-exact numeric diff. Then `rlgl`, then breadth.
+**Phase 1 raymath COMPLETE — bit-exact.** `src/raymath.zig` (146 functions)
+matches C raymath byte-for-byte over 79,800 values (`zig build mathtest` green).
+Next: Phase 2, `rlgl.h` → `src/rlgl.zig`, gated by the framebuffer pixel diff.
 
 ## Status snapshot (2026-06-28)
 
 | Phase | State |
 |---|---|
 | 0 — foundation + oracle | **DONE** ✅ (`zig build test` green, 4/4 scenes byte-identical) |
-| 1 — raymath | not started |
+| 1 — raymath | **DONE** ✅ (`zig build mathtest` bit-exact, 146 fns / 79,800 values) |
 | 2 — rlgl | not started |
 | 3 — rshapes/rtextures/rtext | not started |
 | 4 — rcore + glfw platform | not started |
 | 5 — rmodels/raudio | not started |
 
-Modules ported to Zig: **0 / 10** (+1 platform backend). `ported_modules` in
+Modules ported to Zig: **1 / 10** (raymath) (+1 platform backend). `ported_modules` in
 [build.zig](build.zig) is empty → 100% C baseline; the gate is trivially green.
 
 Examples passing (the 218-example acceptance suite): not yet wired (needs the
@@ -80,9 +80,15 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
   each other (no machine-specific golden PNGs to maintain). llvmpipe output is
   machine/driver-specific, so committed pixel goldens would not be portable; the
   C-vs-Zig live diff sidesteps that entirely.
+- **Zig self-hosted x86 backend miscompiles by-value-struct float code**
+  (`InvalidInstruction: no encoding for mov xmm0 xmm` on raymath's `*MoveTowards`).
+  Workaround: build Zig objects with the **LLVM backend** (`use_llvm = true` in
+  build.zig / `-fllvm`). Applied to the raymath object + math harness; apply to
+  every future Zig module object.
 - **System paths are hardcoded** to `/usr/include` + `/usr/lib/x86_64-linux-gnu`
   in build.zig (this machine's layout). Parameterize if the build moves hosts.
 
 ## Milestone tags
 
-- `phase0-oracle-ready` — foundation + differential oracle green (this commit).
+- `phase0-oracle-ready` — foundation + differential oracle green.
+- `phase1-raymath` — raymath.zig bit-exact with C (146 fns / 79,800 values).

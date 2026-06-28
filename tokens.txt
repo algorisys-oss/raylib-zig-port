@@ -42,14 +42,18 @@
     prompt: Add a README.md.
     note:   Wrote README.md (status/goal/quality-bar/oracle/scope/layout).
 
-[2026-06-28] 12:09:23-(in progress)  in=21266  cr=307542  rd=15426119  out=134513  ->  TOTAL=15889440  (cum=25962234)
-    elapsed: ~15m+ (ongoing autonomous run). prompt: Away 8h — questions, then
+[2026-06-28] 12:09:23-(in progress)  in=56073  cr=507581  rd=36886701  out=282307  ->  TOTAL=37732662  (cum=47805456)
+    elapsed: ~30m+ (ongoing autonomous run). prompt: Away 8h — questions, then
             run the migration uninterrupted.
-    note:   Resolved 3 decisions (oracle-first / llvmpipe tolerance / local+tags).
-            PHASE 0 COMPLETE: vendored raylib src; wrote build.zig (+ .zon) with
-            the C<->Zig swap list; proved zig builds unmodified raylib C install-
-            free (X11/GL33, vendored GLFW); proved llvmpipe is a byte-exact
-            deterministic oracle; built the C-vs-Zig framebuffer-diff gate
-            (`zig build test` = 4/4 scenes byte-identical). Wrote PROGRESS.md.
-            Tagged phase0-oracle-ready. In-progress turn — figures through the
-            last recorded step.
+    note:   Resolved 3 decisions (oracle-first / llvmpipe / local+tags).
+            PHASE 0: vendored raylib src; build.zig (+.zon) with C<->Zig swap;
+            proved zig builds raylib C install-free; proved llvmpipe byte-exact
+            oracle; C-vs-Zig framebuffer gate (`zig build test` 4/4). Tagged
+            phase0-oracle-ready. Wrote docs/ (testing/architecture/workflow/
+            not-migrated). PHASE 1: spawned a drafting sub-agent -> src/raymath.zig
+            (146 fns, idiomatic Zig, extern libm for bit-exactness); built the
+            bit-exact numeric-diff harness (mathgrid.c/.zig + mathdiff.sh,
+            `zig build mathtest`). Result: 79,800 values byte-identical C==Zig.
+            Found 2 gotchas: Zig self-hosted x86 backend miscompiles by-value
+            float (use -fllvm); harness must pass true-f64 literals. Tagging
+            phase1-raymath. In-progress turn — figures through last recorded step.

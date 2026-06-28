@@ -158,4 +158,48 @@ pub fn build(b: *std.Build) void {
     diff.addArtifactArg(runner_zig);
     const test_step = b.step("test", "C-vs-Zig framebuffer diff under llvmpipe (the migration gate)");
     test_step.dependOn(&diff.step);
+
+    // `zig build mathtest` — raymath bit-exact numeric gate. Builds the C oracle
+    // (raymath.h inline, strict IEEE) and the Zig harness (linked against the
+    // raymath.zig exports), runs both over the same input stream, diffs raw float
+    // bits. Only meaningful once src/raymath.zig exists (Phase 1); the default
+    // `zig build` never touches this step.
+    {
+        const raymath_obj = b.addObject(.{
+            .name = "raymath",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/raymath.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true, // raymath calls libm (sinf/cosf/...) for bit-exactness
+            }),
+        });
+        // Zig 0.17-dev's self-hosted x86 backend miscompiles some by-value-struct
+        // float code (InvalidInstruction on *MoveTowards); use the LLVM backend.
+        raymath_obj.use_llvm = true;
+
+        const zig_harness_mod = b.createModule(.{
+            .root_source_file = b.path("test/mathgrid.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        zig_harness_mod.addObject(raymath_obj);
+        const zig_harness = b.addExecutable(.{ .name = "mathgrid_zig", .root_module = zig_harness_mod });
+        zig_harness.use_llvm = true;
+
+        const c_oracle_mod = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
+        c_oracle_mod.addIncludePath(b.path("vendor/raylib/src"));
+        c_oracle_mod.addCSourceFile(.{
+            .file = b.path("test/mathgrid.c"),
+            .flags = &.{ "-DRAYMATH_STATIC_INLINE", "-ffp-contract=off", "-std=c99" },
+        });
+        c_oracle_mod.linkSystemLibrary("m", .{ .use_pkg_config = .no });
+        const c_oracle = b.addExecutable(.{ .name = "mathgrid_c", .root_module = c_oracle_mod });
+
+        const mathdiff = b.addSystemCommand(&.{"tools/mathdiff.sh"});
+        mathdiff.addArtifactArg(c_oracle);
+        mathdiff.addArtifactArg(zig_harness);
+        b.step("mathtest", "raymath bit-exact numeric diff (C vs Zig)").dependOn(&mathdiff.step);
+    }
 }
