@@ -149,6 +149,45 @@ static void scene_color_ops(void) {
     }
 }
 
+// rmodels coverage (3D). Fixed camera + fixed mesh params = deterministic.
+static Camera3D cam3d(void) {
+    Camera3D c = {0};
+    c.position = (Vector3){6.0f, 5.0f, 6.0f};
+    c.target = (Vector3){0.0f, 0.5f, 0.0f};
+    c.up = (Vector3){0.0f, 1.0f, 0.0f};
+    c.fovy = 45.0f;
+    c.projection = CAMERA_PERSPECTIVE;
+    return c;
+}
+static void scene_3d_shapes(void) {
+    ClearBackground((Color){20, 24, 34, 255});
+    BeginMode3D(cam3d());
+    DrawCube((Vector3){-2, 0.5f, 0}, 1.5f, 1.0f, 1.5f, RED);
+    DrawCubeWires((Vector3){-2, 0.5f, 0}, 1.5f, 1.0f, 1.5f, MAROON);
+    DrawSphere((Vector3){0, 0.8f, 0}, 0.8f, BLUE);
+    DrawSphereWires((Vector3){0, 0.8f, 0}, 0.85f, 8, 12, DARKBLUE);
+    DrawCube((Vector3){2, 0.6f, 0}, 1.0f, 1.2f, 1.0f, Fade(GREEN, 0.7f));
+    DrawPlane((Vector3){0, 0, 0}, (Vector2){8, 8}, (Color){50, 55, 65, 255});
+    DrawGrid(10, 1.0f);
+    EndMode3D();
+}
+static void scene_3d_mesh(void) {
+    ClearBackground((Color){18, 18, 28, 255});
+    Mesh cube = GenMeshCube(1.4f, 1.4f, 1.4f);
+    Mesh sphere = GenMeshSphere(0.9f, 12, 16);
+    Mesh torus = GenMeshTorus(0.35f, 1.0f, 12, 18);
+    Model mcube = LoadModelFromMesh(cube);
+    Model msphere = LoadModelFromMesh(sphere);
+    Model mtorus = LoadModelFromMesh(torus);
+    BeginMode3D(cam3d());
+    DrawModel(mcube, (Vector3){-2.5f, 0.7f, 0}, 1.0f, ORANGE);
+    DrawModelEx(msphere, (Vector3){0, 0.9f, 0}, (Vector3){0, 1, 0}, 30.0f, (Vector3){1, 1, 1}, SKYBLUE);
+    DrawModelEx(mtorus, (Vector3){2.5f, 0.8f, 0}, (Vector3){1, 0, 0}, 45.0f, (Vector3){1, 1, 1}, GOLD);
+    DrawGrid(10, 1.0f);
+    EndMode3D();
+    // models kept alive until EndDrawing (batch flush) — short-lived runner.
+}
+
 static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"shapes_basic", scene_shapes_basic},
     {"shapes_gradient", scene_shapes_gradient},
@@ -160,6 +199,8 @@ static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"image_gen", scene_image_gen},
     {"image_ops", scene_image_ops},
     {"color_ops", scene_color_ops},
+    {"3d_shapes", scene_3d_shapes},
+    {"3d_mesh", scene_3d_mesh},
 };
 static const int N_SCENES = (int)(sizeof(SCENES) / sizeof(SCENES[0]));
 
