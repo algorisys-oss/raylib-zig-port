@@ -27,9 +27,13 @@
     note:   Initialized repo on main; .gitignore (Zig artifacts + generated
             layout + diff scratch); commit 193d7d4 (6 files).
 
-[2026-06-28] 11:59:47-(in progress)  in=10  cr=2972  rd=436708  out=2057  ->  TOTAL=441747  (cum=3596689)
+[2026-06-28] 11:59:47-(in progress)  in=1050  cr=21577  rd=2477037  out=17589  ->  TOTAL=2517253  (cum=5672195)
     prompt: Update CLAUDE.md — record time/tokens at every pause/stop, not just
             session end.
-    note:   Added the "Record at EVERY pause / stop" rule to CLAUDE.md's token
-            section; logged this pause per that rule. In-progress turn — figures
-            through the last recorded step; capture the tail next pause.
+    folded: also record the 100% port goal (+ real exceptions); also the Zig
+            code should be clean/idiomatic; "as if written by Andrew Kelley,
+            design like Raysan".
+    note:   Added the "Record at EVERY pause / stop" rule + the 100%-port goal +
+            the idiomatic-Zig/API-design quality bar to CLAUDE.md and plan.md;
+            updated project memory. In-progress turn — figures through the last
+            recorded step; capture the tail next pause.

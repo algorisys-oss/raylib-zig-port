@@ -9,6 +9,28 @@ implementation of the raylib game/graphics library that is behaviorally
 compatible with upstream raylib — same public C ABI (`raylib.h`), same on-screen
 output — so existing raylib programs link and render identically.
 
+**Goal: 100% port.** Every line of *raylib-authored* C becomes Zig — all 6 `.c`
+modules, all 4 header-only modules, and the platform backends. "Done" means no
+raylib-authored C remains in the build. The **real, intended exceptions** (things
+we deliberately do **not** port — same spirit as sqlite-zig keeping the
+Lemon-generated `parse.c` as C):
+
+1. **Bundled third-party libraries in `src/external/`** (stb_*, miniaudio, dr_*,
+   cgltf, par_shapes, m3d, qoi/qoa, glad, rlsw, jar_*, GLFW/RGFW). These are not
+   raylib — they are vendored upstream single-file libs. We **link** them as C.
+   Porting them is a separate, out-of-scope effort.
+2. **Platform backends and GL backends we don't target yet** — `_sdl`, `_rgfw`,
+   `_win32`, `drm`, `web`, `android`, and the OPENGL_11/21/43/ES2/ES3 paths. These
+   are *portable in principle*; they're deferred, not excluded. 100% for the
+   pinned Linux/GLFW + OpenGL 3.3 target is the first milestone; other targets
+   extend it later.
+
+So: **100% of raylib's own code → Zig, with `external/` deliberately left as
+linked C.** A "pure-Zig raylib" means exactly that, and any module that turns out
+*not* to be cleanly portable must be recorded as an explicit, justified exception
+in `docs/not-migrated.md` (create it when porting starts, like sqlite-zig's) —
+never dropped silently.
+
 This directory (`/home/rajesh/lab/ai-port/raylib-zig`) currently holds only
 planning docs. Implementation has not started; see [plan.md](plan.md) for the
 staged approach.
@@ -171,10 +193,38 @@ before claiming a module done.
 
 - raylib is **zlib/libpng licensed** (not public domain). Preserve the upstream
   license/attribution header when copying structure from a file; do not relicense.
-- Match idiomatic Zig (error unions, `std.mem.Allocator`, slices over raw
-  ptr+len, `comptime` for `#define`/`#ifdef` config) rather than transliterating
-  C — *except* at ABI boundaries that must stay C-compatible (the public
-  `raylib.h` surface, `CoreData`/`rlglData` layout, by-value struct args).
+- **The bar: Zig as if written by Andrew Kelley, design as if by Raysan.**
+  Two standards held at once:
+  - **Code idiom — Andrew Kelley's Zig** (Zig's creator): the implementation
+    should look like it belongs in the Zig standard library — minimal, explicit,
+    no hidden control flow, no hidden allocations, communicate intent, handle
+    every error, no clever tricks. If a Zig core-team reviewer would frown at it,
+    rewrite it. This is the ceiling for *how* the code is written.
+  - **Design / API — Raysan's raylib** (Ramón Santamaría, raylib's creator):
+    preserve raylib's design ethos — simple, consistent, beginner-friendly,
+    self-explanatory function names (`InitWindow`, `BeginDrawing`, `DrawTextureEx`),
+    values over handles, sane defaults, no required boilerplate, "no dependencies"
+    feel. The public surface stays the raylib people know and love. Do **not**
+    redesign the API while porting; a separate idiomatic-Zig API layer (Phase 6)
+    may come later, but the C-ABI surface keeps Raysan's shape exactly.
+- **Write clean, idiomatic Zig — this is a hard requirement, not a nice-to-have.**
+  The output must read like Zig a Zig programmer would write, **not** a C program
+  transliterated into Zig syntax. That means: error unions / `error{...}` instead
+  of sentinel returns and out-params; `std.mem.Allocator` instead of raw
+  malloc/free; slices (`[]T`, `[]const u8`) instead of ptr+len pairs; `comptime`
+  and `const` config instead of `#define`/`#ifdef`; tagged `union(enum)` and real
+  `enum`s instead of int constants; `defer`/`errdefer` for cleanup instead of
+  `goto cleanup`; `for`/`while` with captures instead of index bookkeeping;
+  `std.math`/`std.mem`/`std.fmt` instead of hand-rolled C helpers. Run `zig fmt`;
+  keep functions small; name things in Zig style (`camelCase` fns, `TitleCase`
+  types). **The one allowed concession is at ABI boundaries** that must stay
+  C-compatible — the public `raylib.h` surface, `CoreData`/`rlglData` layout, the
+  exported `RLAPI`/`RMAPI` symbols, and by-value struct args. There, use
+  `extern struct`/`export`/exact C types as needed, and isolate that ugliness to
+  a thin boundary layer so the *internals* stay idiomatic. Idiomatic Zig and a
+  byte-exact ABI are not in tension when the C-shaped parts are confined to the
+  edge. A clean diff vs C does **not** justify ugly code — correctness is gated by
+  the pixel/numeric diff, readability by this rule; both must hold.
 - Keep [plan.md](plan.md) and `PROGRESS.md` (create when porting starts) updated
   as the living source of truth. Check off steps as they land; record deviations.
 

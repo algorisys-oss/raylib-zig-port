@@ -10,6 +10,12 @@ Update checkboxes and notes as work lands.
   modules + 1 platform backend), ~408k source tokens. The ~13 MB of bundled
   third-party `src/external/` libs are **linked, not ported**. See
   [token-count.md](token-count.md).
+- **Goal: 100% port** of all raylib-authored code to Zig (no raylib `.c` left in
+  the build). **Real exceptions** (deliberately kept as linked C, not failures):
+  (1) the bundled third-party libs in `src/external/` — not raylib; (2) platform/
+  GL backends outside the pinned Linux/GLFW + OpenGL 3.3 target — deferred, not
+  excluded. Any raylib module that proves un-portable must be logged as an
+  explicit, justified exception in `docs/not-migrated.md`, never dropped silently.
 - **Definition of done for any step:** the software-renderer **pixel/numeric
   diff against pure-C raylib is clean** (see Validation below). raylib has no
   test suite — this is the whole safety net.
@@ -38,6 +44,12 @@ Update checkboxes and notes as work lands.
    scope (the raylib analog of not hand-porting SQLite's generated `parse.c`).
 6. **Idiomatic Zig inside, C-compatible outside.** Rewrite internals with Zig
    idioms; expose C-ABI shims where C still calls in.
+7. **The quality bar: Zig as if written by Andrew Kelley, design as if by
+   Raysan.** Code idiom held to Zig-stdlib standards (minimal, explicit, no hidden
+   control flow/allocations, every error handled); the public API keeps raylib's
+   simple, consistent, beginner-friendly design unchanged. Confine C-shaped ABI
+   code to a thin boundary layer so internals stay clean. `zig fmt` is mandatory.
+   See [CLAUDE.md](CLAUDE.md) Conventions for the full statement.
 
 ---
 
