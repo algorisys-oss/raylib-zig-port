@@ -236,6 +236,12 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "C-vs-Zig framebuffer diff under llvmpipe (the migration gate)");
     test_step.dependOn(&diff.step);
 
+    // `zig build datacheck` — validate the Zig rcore data functions (CRC32/SHA/
+    // Base64/Compress) against published vectors (the pixel gate misses these).
+    const datacheck = linkExe(b, target, optimize, lib, "datacheck", "test/datacheck.c");
+    const datacheck_run = b.addRunArtifact(datacheck);
+    b.step("datacheck", "Validate rcore data functions vs known vectors").dependOn(&datacheck_run.step);
+
     // `zig build mathtest` — raymath bit-exact numeric gate. Builds the C oracle
     // (raymath.h inline, strict IEEE) and the Zig harness (linked against the
     // raymath.zig exports), runs both over the same input stream, diffs raw float
