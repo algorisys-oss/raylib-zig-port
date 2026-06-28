@@ -96,6 +96,15 @@ fn raylibLib(
         }
     }
 
+    // Third-party single-file-lib instantiation shims. A ported module's `.c`
+    // used to instantiate stb/qoi/etc. IMPLEMENTATIONS; when ported, those move
+    // to a C shim (src/c/<m>_*_impl.c) compiled here so the Zig port can call
+    // them via `extern`. Only added in the swapped build, and only for ported
+    // modules. (See docs/architecture.md, not-migrated.md.)
+    if (swap and isPorted("rtext.c")) {
+        mod.addCSourceFile(.{ .file = b.path("src/c/rtext_stb_impl.c"), .flags = &c_defines });
+    }
+
     // NOTE: system libs (X11/GL/…) are linked on the final executable, not here —
     // archiving .so paths into a static lib is wrong and pollutes the archive.
     return b.addLibrary(.{ .name = name, .linkage = .static, .root_module = mod });
