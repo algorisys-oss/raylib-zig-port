@@ -35,7 +35,7 @@ PCM diff, no pixels).
 | 4 — rcore + glfw platform | not started |
 | 5 — rmodels/raudio | not started |
 
-Modules ported to Zig: **4 / 10** (raymath, rshapes, rtext, rtextures) (+1 platform backend). `ported_modules` in
+Modules ported to Zig: **5 / 10** (raymath, rshapes, rtext, rtextures, rcamera) (+1 platform backend). `ported_modules` in
 [build.zig](build.zig) is empty → 100% C baseline; the gate is trivially green.
 
 Examples passing (the 218-example acceptance suite): not yet wired (needs the
@@ -109,3 +109,4 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 - `rshapes-ported` — first rendering module; Zig rshapes pixel-identical to C.
 - `rtext-ported` — rtext.zig (61 fns, va_list TextFormat, stb shim) pixel-identical to C.
 - `rtextures-ported` — rtextures.zig (120 fns, pixel-format/color/raster + stb shim) pixel-identical to C (10/10).
+- `rcamera-ported` — rcamera.zig (12 fns, imports Zig raymath) bit-exact vs C (7,500 values).
