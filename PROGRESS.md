@@ -6,7 +6,15 @@ for cost.
 
 ## Resume point
 
-**rshapes + rtext DONE (pixel byte-exact).** Next module: **rtextures** —
+**rshapes + rtext DONE. rtextures IN PROGRESS** — drafting agent running;
+its stb shim (src/c/rtextures_stb_impl.c) + build wiring + 3 coverage scenes
+(image_gen/image_ops/color_ops, 10/10 all-C green) are READY & committed. To
+integrate when the draft lands: add `"rtextures.c"` to `ported_modules`,
+`zig build`, `zig build test` (image_*/color_ops scenes gate it). Watch pixel-
+format conversions (ImageFormat/GetPixelColor) and the stb externs. (Older note
+on rtextures below.)
+
+**rtextures details** —
 needs its own stb shim (stb_image + stb_image_write + stb_image_resize2 +
 stb_perlin + qoi, with RL_MALLOC, STBI_NO_* config from rtextures.c lines
 ~70-280) and procedural-image scenes (GenImage*/Image*/LoadTextureFromImage/
