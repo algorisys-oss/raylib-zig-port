@@ -4,7 +4,15 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
-## Resume point — 5/10 modules ported & validated; main gate 10/10 green
+## Future capstone (user request 2026-06-28)
+
+Once rcore (window+input) + rlgl are ported (so a real interactive game can run),
+create `examples/` and **recreate the Angry Birds game in Zig/raylib-zig** —
+reference: `/home/rajesh/lab/csharp/csharp-raylib-angrybirds` (C# + raylib, ~6
+.cs files, physics slingshot game). Proves the ported library is usable, not just
+gate-passing. See memory `angrybirds-demo-task`.
+
+## Resume point — 6/10 modules ported & validated; main gate 10/10 green
 
 **DONE (all green, tagged):** raymath (bit-exact), rcamera (bit-exact),
 rshapes + rtext + rtextures (pixel byte-exact). That's the entire **math + 2D
