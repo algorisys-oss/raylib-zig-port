@@ -32,7 +32,9 @@ const raylib_tus = [_][]const u8{
 /// src/<name>.zig exporting the same C-ABI symbols. The C file is then excluded
 /// and the Zig object linked in its place. (raymath.h / rlgl.h are header-only —
 /// not TUs — and are swapped via a different mechanism; see plan.md Phase 1/2.)
-const ported_modules = [_][]const u8{};
+const ported_modules = [_][]const u8{
+    "rshapes.c", // -> src/rshapes.zig (2D shapes/collision; calls rlgl via extern)
+};
 
 /// Compile defines pinning the Linux/GLFW/GL3.3 configuration. Proven to build
 /// and render headlessly under both the GPU and llvmpipe.

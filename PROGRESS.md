@@ -6,9 +6,11 @@ for cost.
 
 ## Resume point
 
-**Phase 1 raymath COMPLETE — bit-exact.** `src/raymath.zig` (146 functions)
-matches C raymath byte-for-byte over 79,800 values (`zig build mathtest` green).
-Next: Phase 2, `rlgl.h` → `src/rlgl.zig`, gated by the framebuffer pixel diff.
+**rshapes COMPLETE — first rendering module, byte-exact.** `src/rshapes.zig`
+(71 functions) renders byte-identical to C rshapes across the 6-scene battery
+(`zig build test` green); the rendering C↔Zig swap is proven live (deliberate
+break fails the gate). Next: parallelize rtextures + rtext drafting, then
+rcore+glfw, rmodels, raudio.
 
 ## Status snapshot (2026-06-28)
 
@@ -17,15 +19,15 @@ Next: Phase 2, `rlgl.h` → `src/rlgl.zig`, gated by the framebuffer pixel diff.
 | 0 — foundation + oracle | **DONE** ✅ (`zig build test` green, 4/4 scenes byte-identical) |
 | 1 — raymath | **DONE** ✅ (`zig build mathtest` bit-exact, 146 fns / 79,800 values) |
 | 2 — rlgl | not started |
-| 3 — rshapes/rtextures/rtext | not started |
+| 3 — rshapes | **rshapes DONE** ✅ (pixel gate 6/6); rtextures/rtext next |
 | 4 — rcore + glfw platform | not started |
 | 5 — rmodels/raudio | not started |
 
-Modules ported to Zig: **1 / 10** (raymath) (+1 platform backend). `ported_modules` in
+Modules ported to Zig: **2 / 10** (raymath, rshapes) (+1 platform backend). `ported_modules` in
 [build.zig](build.zig) is empty → 100% C baseline; the gate is trivially green.
 
 Examples passing (the 218-example acceptance suite): not yet wired (needs the
-modules a given example uses to be ported first). Scene battery: 4 scenes.
+modules a given example uses to be ported first). Scene battery: 6 scenes (shapes_basic/gradient, blend_rotation, text, shapes_poly, splines).
 
 ## What Phase 0 established (proven, not assumed)
 
@@ -92,3 +94,4 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 
 - `phase0-oracle-ready` — foundation + differential oracle green.
 - `phase1-raymath` — raymath.zig bit-exact with C (146 fns / 79,800 values).
+- `rshapes-ported` — first rendering module; Zig rshapes pixel-identical to C (6/6).
