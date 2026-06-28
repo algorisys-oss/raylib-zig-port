@@ -73,6 +73,11 @@ Validate (the bar, not optional):
 Every entry is a real failure class. Verify each before claiming a module done.
 The raylib-specific ones, then the ones inherited from sqlite-zig:
 
+- **Macro constant TYPE (float vs double).** `PI`/`DEG2RAD` etc. are often
+  `...f` (float) in one config and double in another (e.g. raylib's `PI` is
+  float in non-standalone mode, double only under `*_STANDALONE`). A wrong type
+  changes a whole expression's promotion → 1-ULP diffs. Confirm the macro's type
+  in the ACTIVE config; `atan2f(...)*(180.0f/PI)` is all-f32 when PI is float.
 - **Float op-order & libm.** Preserve FP grouping from the C exactly (not
   associative); disable contraction; call the **same libm** (`sinf`/`cosf`/…) via
   `extern`, not `std.math` (last-ULP differences fail the bit-exact gate).

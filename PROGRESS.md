@@ -12,11 +12,7 @@ drawing + text/fonts + image/texture + camera** layer in Zig (~12.4k lines).
 
 **Remaining 5 modules, in suggested order (each harder than the last):**
 
-1. **rgestures.h** (557 lines, header-only, out-of-line via rcore's
-   `RGESTURES_IMPLEMENTATION`). Gesture recognizer with internal state
-   (`GESTURES` global). Easiest remaining: pure-ish, validate with a
-   state/behavior numeric harness (feed a deterministic touch-event sequence,
-   diff the detected gesture + state). Pattern = camgrid (numeric diff).
+1. **rgestures.h** — ✅ DONE (`rgestures-ported`, bit-exact via gesttest).
 2. **rlgl.h** (5442 lines, header-only, the GL abstraction; owns `static rlglData
    RLGL`). Big. Currently the C rlgl provides all the `rl*` symbols the ported
    modules call — so porting it swaps the engine under them. Validate via the
@@ -59,7 +55,7 @@ swap on `zig build test` (pixel) or `zig build <m>test` (numeric).
 | 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
 | 5 — rmodels/raudio | not started (3D + audio; need shims + 3D/PCM harnesses) |
 
-Modules ported to Zig: **5 / 10** (raymath, rshapes, rtext, rtextures, rcamera).
+Modules ported to Zig: **6 / 10** (raymath, rshapes, rtext, rtextures, rcamera, rgestures).
 `ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c}
 (the rendering modules swapped into the lib + their stb shims); raymath & rcamera
 are header-only, validated bit-exact standalone but not yet swapped into the
@@ -139,3 +135,4 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 - `rtext-ported` — rtext.zig (61 fns, va_list TextFormat, stb shim) pixel-identical to C.
 - `rtextures-ported` — rtextures.zig (120 fns, pixel-format/color/raster + stb shim) pixel-identical to C (10/10).
 - `rcamera-ported` — rcamera.zig (12 fns, imports Zig raymath) bit-exact vs C (7,500 values).
+- `rgestures-ported` — rgestures.zig (10 fns, controlled-clock harness) bit-exact vs C (3,200 values).

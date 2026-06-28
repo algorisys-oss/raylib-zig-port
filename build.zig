@@ -257,4 +257,41 @@ pub fn build(b: *std.Build) void {
         camdiff.addArtifactArg(zexe);
         b.step("camtest", "rcamera bit-exact numeric diff (C vs Zig)").dependOn(&camdiff.step);
     }
+
+    // `zig build gesttest` — rgestures bit-exact numeric diff. Both builds use a
+    // harness-controlled GetTime() clock so the time-dependent gesture logic is
+    // deterministic.
+    {
+        const rg_obj = b.addObject(.{ .name = "rgestures", .root_module = b.createModule(.{
+            .root_source_file = b.path("src/rgestures.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }) });
+        rg_obj.use_llvm = true;
+
+        const zmod = b.createModule(.{
+            .root_source_file = b.path("test/gestgrid.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        zmod.addObject(rg_obj);
+        const zexe = b.addExecutable(.{ .name = "gestgrid_zig", .root_module = zmod });
+        zexe.use_llvm = true;
+
+        const cmod = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
+        cmod.addIncludePath(b.path("vendor/raylib/src"));
+        cmod.addCSourceFile(.{
+            .file = b.path("test/gestgrid.c"),
+            .flags = &.{ "-DPLATFORM_DESKTOP_GLFW", "-DGRAPHICS_API_OPENGL_33", "-ffp-contract=off", "-std=c99", "-w" },
+        });
+        cmod.linkSystemLibrary("m", .{ .use_pkg_config = .no });
+        const cexe = b.addExecutable(.{ .name = "gestgrid_c", .root_module = cmod });
+
+        const gestdiff = b.addSystemCommand(&.{"tools/gestdiff.sh"});
+        gestdiff.addArtifactArg(cexe);
+        gestdiff.addArtifactArg(zexe);
+        b.step("gesttest", "rgestures bit-exact numeric diff (C vs Zig)").dependOn(&gestdiff.step);
+    }
 }
