@@ -12,45 +12,32 @@ reference: `/home/rajesh/lab/csharp/csharp-raylib-angrybirds` (C# + raylib, ~6
 .cs files, physics slingshot game). Proves the ported library is usable, not just
 gate-passing. See memory `angrybirds-demo-task`.
 
-## Resume point — 6/10 modules ported & validated; main gate 10/10 green
+## Resume point — 7/10 modules; the ENTIRE 2D pipeline is Zig; gate 10/10
 
-**DONE (all green, tagged):** raymath (bit-exact), rcamera (bit-exact),
-rshapes + rtext + rtextures (pixel byte-exact). That's the entire **math + 2D
-drawing + text/fonts + image/texture + camera** layer in Zig (~12.4k lines).
+**DONE (all green, tagged):** raymath, rcamera, rgestures (bit-exact); rshapes,
+rtext, rtextures, **rlgl** (pixel byte-exact). With rlgl ported, the whole 2D
+render stack — GL abstraction + batch renderer + shapes + text + image/texture —
+is Zig. rlgl swap: rcore.c compiled with `-DRAYLIB_ZIG_NO_RLGL_IMPL` (guarded
+patch), GLAD via src/c/glad_impl.c, GL reached through `glad_gl*` fn-pointers
+(src/gl33.zig). `rlgl_ported = true` in build.zig.
 
-**Remaining 5 modules, in suggested order (each harder than the last):**
+**Remaining 3 modules:**
+1. **rcore.c** (4629) + `platforms/rcore_desktop_glfw.c` (~2700) — 234 fns,
+   window/input/timing/data/file. `CoreData CORE` is NOT cross-module (only
+   rcore+platform touch it) → model it PRIVATE, no offset tooling. Port rcore.c
+   together with the platform it #includes; GLFW via extern (75 glfw* calls).
+   Gate: the pixel battery covers the draw-mode fns (BeginDrawing/Mode2D/3D/
+   Scissor/Blend/etc.); add numeric/byte harnesses for the data fns (CRC32/MD5/
+   SHA/Base64/Compress) and string diffs for the file-path fns. When rcore is
+   ported it also stops instantiating raymath/rgestures/rcamera — swap in the
+   already-ported Zig versions (or C-shim what's not wanted).
+2. **rmodels.c** (7334) — 3D; own third-party shim (cgltf/par_shapes/m3d/tinyobj/
+   vox); add 3D scenes (BeginMode3D + DrawCube/Model/Mesh). Depends on rlgl(✅)+
+   raymath(✅)+rtextures(✅).
+3. **raudio.c** (2964) — audio; miniaudio/dr_*/stb_vorbis/jar shim; validate
+   decode via PCM diff (device/mixing = loose).
 
-1. **rgestures.h** — ✅ DONE (`rgestures-ported`, bit-exact via gesttest).
-2. **rlgl.h** (5442 lines, header-only, the GL abstraction; owns `static rlglData
-   RLGL`). Big. Currently the C rlgl provides all the `rl*` symbols the ported
-   modules call — so porting it swaps the engine under them. Validate via the
-   existing pixel gate (rlgl drives every draw). Mirror `RLGL` state; keep the GL
-   calls (glad) as extern C. Highest-leverage but central-risk; do carefully.
-3. **rcore.c** (4629 lines) + `platforms/rcore_desktop_glfw.c` (~2700). The
-   window/input/timing core; owns the global `CoreData CORE` read across modules.
-   **Build `tools/offsets.c` → `src/c_layout.zig` FIRST** (copy sqlite-zig's
-   `gen_layout.sh` pattern) and mirror `CoreData` with comptime `@offsetOf`/
-   `@sizeOf` asserts. **Decision needed:** rcore.c `#include`s the platform `.c`
-   (one TU) — either port both together into rcore.zig (calling GLFW via extern),
-   or split the platform into its own C TU first. GLFW stays linked C. Everything
-   depends on rcore, so the gate fully covers it.
-4. **rmodels.c** (7334 lines). 3D meshes/models/materials. Needs its own
-   third-party shim (cgltf + par_shapes + m3d + tinyobj + vox_loader, same
-   pattern as the rtext/rtextures shims) AND new **3D scenes** (BeginMode3D +
-   DrawCube/DrawModel/DrawMesh) since the battery is 2D. Depends on rlgl + raymath
-   + rtextures (all portable/ported).
-5. **raudio.c** (2964 lines). Audio. Needs a miniaudio + dr_wav/flac/mp3 +
-   stb_vorbis + jar shim. **No pixel oracle** — validate decode paths via a
-   **PCM-diff harness** (decode a known buffer C vs Zig, compare samples);
-   device/mixing is a loose check.
-
-**Proven patterns to reuse** (see committed code): per-TU swap via
-`ported_modules` (build.zig); third-party "impl shim" in `src/c/<m>_*_impl.c`
-(faithful to the module's IMPLEMENTATION preamble, omitting `*_STATIC` so symbols
-are linkable; `rl_sizeof_*` helpers for opaque structs); numeric-diff harness
-(camgrid/mathgrid + a `*diff.sh` + a `*test` build step) for non-pixel modules;
-**always `use_llvm = true`** on Zig objects (self-hosted backend bug); gate every
-swap on `zig build test` (pixel) or `zig build <m>test` (numeric).
+Then the **Angry Birds capstone** in examples/ (see below).
 
 ## Status snapshot (2026-06-28)
 
@@ -63,7 +50,7 @@ swap on `zig build test` (pixel) or `zig build <m>test` (numeric).
 | 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
 | 5 — rmodels/raudio | not started (3D + audio; need shims + 3D/PCM harnesses) |
 
-Modules ported to Zig: **6 / 10** (raymath, rshapes, rtext, rtextures, rcamera, rgestures).
+Modules ported to Zig: **7 / 10** (raymath, rcamera, rgestures, rshapes, rtext, rtextures, rlgl).
 `ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c}
 (the rendering modules swapped into the lib + their stb shims); raymath & rcamera
 are header-only, validated bit-exact standalone but not yet swapped into the
@@ -144,3 +131,4 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 - `rtextures-ported` — rtextures.zig (120 fns, pixel-format/color/raster + stb shim) pixel-identical to C (10/10).
 - `rcamera-ported` — rcamera.zig (12 fns, imports Zig raymath) bit-exact vs C (7,500 values).
 - `rgestures-ported` — rgestures.zig (10 fns, controlled-clock harness) bit-exact vs C (3,200 values).
+- `rlgl-ported` — rlgl.zig (163 fns + gl33.zig GL bindings) pixel byte-exact vs C (10/10); the whole 2D pipeline is now Zig.

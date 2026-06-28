@@ -61,7 +61,7 @@ const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "G
 /// instantiating rlgl + glad), links src/c/glad_impl.c (the GLAD loader) and the
 /// rlgl.zig object instead. The oracle build stays all-C. Flip on once rlgl.zig
 /// passes the pixel gate.
-const rlgl_ported = false;
+const rlgl_ported = true;
 
 fn isPorted(name: []const u8) bool {
     for (ported_modules) |m| if (std.mem.eql(u8, m, name)) return true;
@@ -88,7 +88,12 @@ fn raylibLib(
     // C compile flags: when rlgl is ported, the swapped build adds
     // -DRAYLIB_ZIG_NO_RLGL_IMPL so rcore.c stops instantiating rlgl + glad
     // (provided by src/rlgl.zig + src/c/glad_impl.c instead). Oracle stays all-C.
-    const rlgl_flags = c_defines ++ [_][]const u8{"-DRAYLIB_ZIG_NO_RLGL_IMPL"};
+    const rlgl_flags = c_defines ++ [_][]const u8{
+        "-DRAYLIB_ZIG_NO_RLGL_IMPL",
+        // RL_DEFAULT_SHADER_* name constants live in rlgl.h's (now-disabled)
+        // IMPLEMENTATION block; rcore.c/rmodels.c still use them.
+        "-includesrc/c/rlgl_impl_defs.h",
+    };
     const c_flags: []const []const u8 = if (swap and rlgl_ported) &rlgl_flags else &c_defines;
 
     // GLFW is always C (vendored third-party windowing — never ported).
