@@ -6,15 +6,16 @@ for cost.
 
 ## Resume point
 
-**rshapes + rtext DONE. rtextures IN PROGRESS** — drafting agent running;
-its stb shim (src/c/rtextures_stb_impl.c) + build wiring + 3 coverage scenes
-(image_gen/image_ops/color_ops, 10/10 all-C green) are READY & committed. To
-integrate when the draft lands: add `"rtextures.c"` to `ported_modules`,
-`zig build`, `zig build test` (image_*/color_ops scenes gate it). Watch pixel-
-format conversions (ImageFormat/GetPixelColor) and the stb externs. (Older note
-on rtextures below.)
+**rshapes + rtext + rtextures DONE (pixel byte-exact).** Next module: **rcore**
+(window/input/timing + the global `CoreData CORE`) with the `platforms/
+rcore_desktop_glfw.c` backend. rcore needs CoreData mirrored as an extern struct
+with comptime offset asserts vs C ground truth — build tools/offsets.c →
+src/c_layout.zig FIRST (copy sqlite-zig's gen_layout pattern). glfw stays linked
+C. Then rmodels (cgltf/par_shapes/m3d shim), raudio (miniaudio/dr_* shim; PCM
+diff, no pixels). rlgl.h/rcamera.h/rgestures.h are header-only (out-of-line via
+rcore's RLGL_IMPLEMENTATION) — port after their callers.
 
-**rtextures details** —
+**older rtextures detail** —
 needs its own stb shim (stb_image + stb_image_write + stb_image_resize2 +
 stb_perlin + qoi, with RL_MALLOC, STBI_NO_* config from rtextures.c lines
 ~70-280) and procedural-image scenes (GenImage*/Image*/LoadTextureFromImage/
@@ -30,15 +31,15 @@ PCM diff, no pixels).
 | 0 — foundation + oracle | **DONE** ✅ (`zig build test` green, 4/4 scenes byte-identical) |
 | 1 — raymath | **DONE** ✅ (`zig build mathtest` bit-exact, 146 fns / 79,800 values) |
 | 2 — rlgl | not started |
-| 3 — rshapes/rtextures/rtext | **rshapes + rtext DONE** ✅ (pixel gate 7/7); rtextures next |
+| 3 — rshapes/rtextures/rtext | **ALL THREE DONE** ✅ (pixel gate 10/10) |
 | 4 — rcore + glfw platform | not started |
 | 5 — rmodels/raudio | not started |
 
-Modules ported to Zig: **3 / 10** (raymath, rshapes, rtext) (+1 platform backend). `ported_modules` in
+Modules ported to Zig: **4 / 10** (raymath, rshapes, rtext, rtextures) (+1 platform backend). `ported_modules` in
 [build.zig](build.zig) is empty → 100% C baseline; the gate is trivially green.
 
 Examples passing (the 218-example acceptance suite): not yet wired (needs the
-modules a given example uses to be ported first). Scene battery: 7 scenes (+ text_format: TextFormat/va_list, DrawTextPro, MeasureText).
+modules a given example uses to be ported first). Scene battery: 10 scenes (+ image_gen, image_ops, color_ops for rtextures).
 
 ## What Phase 0 established (proven, not assumed)
 
@@ -106,4 +107,5 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 - `phase0-oracle-ready` — foundation + differential oracle green.
 - `phase1-raymath` — raymath.zig bit-exact with C (146 fns / 79,800 values).
 - `rshapes-ported` — first rendering module; Zig rshapes pixel-identical to C.
-- `rtext-ported` — rtext.zig (61 fns, va_list TextFormat, stb shim) pixel-identical to C (7/7).
+- `rtext-ported` — rtext.zig (61 fns, va_list TextFormat, stb shim) pixel-identical to C.
+- `rtextures-ported` — rtextures.zig (120 fns, pixel-format/color/raster + stb shim) pixel-identical to C (10/10).
