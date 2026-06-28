@@ -63,11 +63,35 @@ static void scene_text(void) {
     DrawTextEx(GetFontDefault(), "scaled spacing", (Vector2){40, 240}, 28, 4.0f, SKYBLUE);
 }
 
+static void scene_shapes_poly(void) {
+    ClearBackground(RAYWHITE);
+    DrawPoly((Vector2){120, 110}, 6, 70, 18.0f, ORANGE);
+    DrawPolyLines((Vector2){120, 110}, 6, 80, 18.0f, MAROON);
+    DrawEllipse(330, 110, 90, 50, Fade(GREEN, 0.7f));
+    DrawEllipseLines(330, 110, 90, 50, DARKGREEN);
+    DrawCircleSector((Vector2){520, 110}, 70, 30, 250, 24, Fade(BLUE, 0.6f));
+    DrawRing((Vector2){160, 270}, 40, 75, 0, 300, 28, Fade(PURPLE, 0.7f));
+    DrawRingLines((Vector2){160, 270}, 40, 75, 0, 300, 28, DARKPURPLE);
+    DrawTriangleFan((Vector2[]){{360, 230}, {420, 240}, {440, 300}, {380, 330}, {340, 290}}, 5, Fade(RED, 0.5f));
+}
+static void scene_splines(void) {
+    ClearBackground((Color){245, 245, 245, 255});
+    Vector2 pts[] = {{40, 60}, {160, 200}, {300, 60}, {440, 200}, {580, 80}};
+    DrawSplineLinear(pts, 5, 6.0f, Fade(MAROON, 0.6f));
+    DrawSplineBasis(pts, 5, 4.0f, BLUE);
+    DrawSplineCatmullRom(pts, 5, 4.0f, GREEN);
+    DrawSplineBezierCubic((Vector2[]){{40, 300}, {120, 200}, {240, 360}, {360, 300}}, 4, 5.0f, DARKBLUE);
+    DrawLineBezier((Vector2){40, 340}, (Vector2){600, 320}, 3.0f, ORANGE);
+    DrawLineDashed((Vector2){40, 350}, (Vector2){600, 350}, 12, 8, GRAY);
+}
+
 static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"shapes_basic", scene_shapes_basic},
     {"shapes_gradient", scene_shapes_gradient},
     {"blend_rotation", scene_blend_rotation},
     {"text", scene_text},
+    {"shapes_poly", scene_shapes_poly},
+    {"splines", scene_splines},
 };
 static const int N_SCENES = (int)(sizeof(SCENES) / sizeof(SCENES[0]));
 

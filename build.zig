@@ -86,7 +86,9 @@ fn raylibLib(
                 .optimize = optimize,
             });
             obj_mod.addImport("config", cfg_mod);
-            mod.addObject(b.addObject(.{ .name = stem, .root_module = obj_mod }));
+            const obj = b.addObject(.{ .name = stem, .root_module = obj_mod });
+            obj.use_llvm = true; // self-hosted x86 backend miscompiles by-value float code
+            mod.addObject(obj);
         } else {
             mod.addCSourceFile(.{ .file = b.path(b.fmt("vendor/raylib/src/{s}", .{tu})), .flags = &c_defines });
         }
