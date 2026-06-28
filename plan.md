@@ -17,8 +17,16 @@ Update checkboxes and notes as work lands.
   excluded. Any raylib module that proves un-portable must be logged as an
   explicit, justified exception in `docs/not-migrated.md`, never dropped silently.
 - **Definition of done for any step:** the software-renderer **pixel/numeric
-  diff against pure-C raylib is clean** (see Validation below). raylib has no
-  test suite — this is the whole safety net.
+  diff against pure-C raylib is clean** (see Validation below). raylib ships no
+  assertion/unit test suite — this is the whole safety net.
+- **Final acceptance: pass all the original raylib "test cases."** raylib's de
+  facto test suite *is* its **218 example programs** (`examples/`: 49 core, 40
+  shapes, 35 shaders, 32 textures, 30 models, 16 text, 10 audio) — that is what
+  upstream CI builds and what exercises the public API. The port is accepted only
+  when **every** example (a) **builds and links** unmodified against the Zig
+  library, and (b) **renders/behaves identically** to pure-C raylib (software-
+  renderer pixel diff + golden-PNG match; audio examples diffed on decoded PCM).
+  No example may be skipped silently; any that can't pass is logged with reason.
 - **Playbook:** copied from the completed sibling migration
   `/home/rajesh/lab/ai-port/sqlite-zig` (per-TU swap, C-ABI boundaries,
   ground-truth offset asserts, parallel drafting + serial verification).
@@ -114,9 +122,16 @@ Stand this up in Phase 0; it is the entire safety net. Cheapest first:
    GL). For a fixed set of drawing workloads, render with pure-C raylib and with
    Zig modules swapped in; read back the framebuffer; diff **byte-for-byte**.
    This is `make devtest` for this project. Every port must keep it clean.
-3. **Example golden PNGs.** Drive `examples/*.c` (they exercise the public API)
-   through the software renderer, `TakeScreenshot` to PNG, diff against goldens
-   captured from pure-C raylib. Broadens coverage to real programs.
+3. **Example golden PNGs (the acceptance suite — all 218).** raylib has no
+   assertion tests, so its **examples are the test cases.** Drive each
+   `examples/*.c` (they exercise the public API) through the software renderer,
+   `TakeScreenshot` to PNG, and diff against a golden captured from pure-C raylib.
+   Build this corpus up incrementally as modules land (an example only runs once
+   its modules are ported), but the bar for "100% done" is **all 218 green** —
+   every example builds, links, and pixel-matches. Track the pass count as a
+   first-class progress metric in PROGRESS.md (e.g. "172/218 examples green").
+   Animated/interactive examples: drive a fixed frame count with scripted input
+   and a pinned clock so the screenshot is deterministic.
 4. **Real-GPU spot check.** Periodically run a few examples on GLFW + OpenGL 3.3.
    GPU output isn't bit-deterministic → human/loose check, not the gate; catches
    bugs the software path masks.

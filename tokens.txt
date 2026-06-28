@@ -27,13 +27,14 @@
     note:   Initialized repo on main; .gitignore (Zig artifacts + generated
             layout + diff scratch); commit 193d7d4 (6 files).
 
-[2026-06-28] 11:59:47-(in progress)  in=1050  cr=21577  rd=2477037  out=17589  ->  TOTAL=2517253  (cum=5672195)
+[2026-06-28] 11:59:47-(in progress)  in=1527  cr=38492  rd=4712689  out=29733  ->  TOTAL=4782441  (cum=7937383)
     prompt: Update CLAUDE.md — record time/tokens at every pause/stop, not just
             session end.
-    folded: also record the 100% port goal (+ real exceptions); also the Zig
-            code should be clean/idiomatic; "as if written by Andrew Kelley,
-            design like Raysan".
-    note:   Added the "Record at EVERY pause / stop" rule + the 100%-port goal +
-            the idiomatic-Zig/API-design quality bar to CLAUDE.md and plan.md;
-            updated project memory. In-progress turn — figures through the last
-            recorded step; capture the tail next pause.
+    folded: record the 100% port goal (+ real exceptions); Zig code should be
+            clean/idiomatic; "as if written by Andrew Kelley, design like
+            Raysan"; must pass all original raylib test cases.
+    note:   Added to CLAUDE.md + plan.md: the "Record at EVERY pause/stop" rule;
+            the 100%-port goal; the idiomatic-Zig/Raysan-design quality bar; and
+            the acceptance gate = all 218 examples pass (build + pixel/PCM diff),
+            since raylib ships no assertion suite. Updated project memory.
+            In-progress turn — figures through the last recorded step.

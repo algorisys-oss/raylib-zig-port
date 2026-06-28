@@ -109,9 +109,12 @@ with the Lemon-generated `parse.c` still C.
 ## ⚠️ The central difference from sqlite-zig: there is no test-suite oracle
 
 SQLite shipped millions of TCL assertions; "the test suite is the spec" made the
-port safe. **raylib has no comprehensive automated test suite.** Its validation
-surface is **218 visual example programs** (`examples/`) a human eyeballs. We
-cannot eyeball every commit. So we manufacture an oracle:
+port safe. **raylib has no comprehensive automated test suite** — no unit tests,
+no assertion harness; upstream CI merely *builds* the examples. Its de facto test
+suite *is* its **218 example programs** (`examples/`), normally eyeballed by a
+human. We cannot eyeball every commit, and the user's bar is explicit: **the port
+must pass all the original raylib test cases — i.e. all 218 examples.** So we
+manufacture an automatable oracle that turns "the examples" into a hard gate:
 
 1. **Software-renderer pixel diff (primary gate).** raylib bundles
    `external/rlsw.h`, a software OpenGL 1.1 rasterizer (`GRAPHICS_API_OPENGL_11`
@@ -122,9 +125,14 @@ cannot eyeball every commit. So we manufacture an oracle:
    This is our `make devtest`. Stand it up in Phase 0 before porting anything.
 2. **Numeric differential for `raymath`.** Pure math functions: diff Zig vs C
    outputs over a large input grid to ULP tolerance. No rendering needed.
-3. **Examples as functional tests.** Drive the `examples/*.c` programs (which
-   call the public API) through the software renderer, screenshot to PNG via
-   `TakeScreenshot`, and diff against a golden PNG captured from pure-C raylib.
+3. **Examples as the acceptance suite (all 218 — these ARE raylib's test cases).**
+   Drive every `examples/*.c` program (which calls the public API) through the
+   software renderer, screenshot to PNG via `TakeScreenshot`, and diff against a
+   golden PNG captured from pure-C raylib. An example "passes" when it builds,
+   links against the Zig library, and pixel-matches. **100% done = all 218 pass**
+   (build + diff); audio examples diff on decoded PCM instead of pixels. Track the
+   pass count in PROGRESS.md. No example skipped silently — log any that can't
+   pass, with the reason, in `docs/not-migrated.md`.
 4. **Real-GPU spot check.** Periodically run a few examples on the real GLFW +
    OpenGL 3.3 desktop backend to confirm the software-renderer path didn't mask
    a GPU-state bug. GPU output is not bit-deterministic, so this is a human/loose
