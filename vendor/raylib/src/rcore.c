@@ -116,7 +116,13 @@
 #if defined(PLATFORM_MEMORY) || defined(PLATFORM_WEB)
     #define SW_GL_FRAMEBUFFER_COPY_BGRA false
 #endif
-#define RLGL_IMPLEMENTATION
+// raylib-zig patch: guard the rlgl (and its bundled glad) IMPLEMENTATION so it
+// can be disabled when rlgl is ported to Zig (src/rlgl.zig). When
+// RAYLIB_ZIG_NO_RLGL_IMPL is defined, rcore.c uses rlgl.h DECLARATIONS only and
+// the rl*/glad symbols come from src/rlgl.zig + src/c/glad_impl.c. See vendor/README.md.
+#if !defined(RAYLIB_ZIG_NO_RLGL_IMPL)
+    #define RLGL_IMPLEMENTATION
+#endif
 #include "rlgl.h"                   // OpenGL abstraction layer to OpenGL 1.1, 3.3+ or ES2
 
 #define RAYMATH_IMPLEMENTATION
