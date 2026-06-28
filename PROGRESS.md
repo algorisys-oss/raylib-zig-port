@@ -12,33 +12,52 @@ reference: `/home/rajesh/lab/csharp/csharp-raylib-angrybirds` (C# + raylib, ~6
 .cs files, physics slingshot game). Proves the ported library is usable, not just
 gate-passing. See memory `angrybirds-demo-task`.
 
-## Resume point — 8/10 modules; whole engine Zig except rmodels+raudio; gate 10/10
+## Resume point — 8/10 modules; engine Zig except rmodels+raudio (paused 2026-06-28)
 
-**DONE (all green, tagged):** raymath, rcamera, rgestures (bit-exact); rshapes,
-rtext, rtextures, rlgl, **rcore** (pixel byte-exact). With rcore + the GLFW
-platform ported, the entire raylib engine — window/input/timing, GL abstraction,
-2D drawing, text, image/texture, math/camera/gestures — is **Zig**. Only the C
-TUs **rmodels.c** (3D) and **raudio.c** (audio) remain. rcore brought
-raymath/rcamera/rgestures into the real build (rcamera.zig bundles raymath's
-exports; rgestures.zig standalone; sinfl/sdefl/rprand via src/c/rcore_impl.c).
-`rcore_ported = true` in build.zig.
+**DONE (all green, tagged, committed):** raymath, rcamera, rgestures (bit-exact);
+rshapes, rtext, rtextures, rlgl, rcore (pixel byte-exact). The whole raylib engine
+— window/input/timing (rcore + GLFW platform), GL abstraction (rlgl), 2D drawing
+(rshapes), text (rtext), image/texture (rtextures), math/camera/gestures — is Zig.
+Main gate **12/12** (incl. two 3D scenes); rcore data fns validated (`zig build
+datacheck`). Last green commit: `Pre-wire rmodels shim`. Only **rmodels.c** (3D)
+and **raudio.c** (audio) remain.
 
-**Remaining 2 modules:**
-1. **rmodels.c** (7334) — 3D meshes/models. Needs a third-party shim (tinyobj/
-   cgltf/cgltf_write/vox/m3d/par_shapes, config-driven like rtextures) AND the
-   loaders traverse cgltf/m3d/tinyobj STRUCTS (must mirror those — bigger ABI
-   surface than stb). Add 3D scenes (BeginMode3D + a Camera3D + GenMeshCube/
-   Sphere + DrawMesh/DrawModel/DrawCube/DrawGrid) to gate the rendering path;
-   the file loaders are ported-but-lightly-validated (no model files in scenes).
-   Depends on rlgl(✅)+raymath(✅)+rtextures(✅).
-2. **raudio.c** (2964) — audio. miniaudio + dr_wav/flac/mp3 + stb_vorbis + jar
-   shim. No pixel oracle — validate decode via a PCM-diff harness; device/mixing
-   is a loose check.
+### IN PROGRESS — rmodels (resume here first)
+A drafting agent was porting rmodels.c when we paused. **`src/rmodels.zig` exists
+on disk but is an UNVALIDATED agent draft** (was mid-write: ~21/71 exports when
+last checked; it may have completed in the background — re-check). It is UNTRACKED
+(not committed). To resume:
+1. Check `src/rmodels.zig`: `grep -c 'export fn'` should be ~71. If far fewer or
+   it doesn't `zig fmt`/`zig build-obj -fllvm` cleanly, the draft is incomplete —
+   **re-spawn the rmodels agent** (the prompt is in the git history / this file's
+   git log; shim + 3D scenes are ready).
+2. If complete: `zig fmt --check src/rmodels.zig`; `zig build-obj src/rmodels.zig
+   -O Debug -lc -fllvm` (cgltf/rl/raymath/rtextures/rcore externs = U is fine).
+3. Integrate: add `"rmodels.c"` to `ported_modules` in build.zig (the
+   `rmodels_impl.c` shim is already pre-wired to compile then).
+4. `zig build && zig build test` → expect 12/12 (the 3d_shapes/3d_mesh scenes
+   gate the rendering; glTF/OBJ/M3D loaders are ported-but-not-scene-tested).
+   Debug rendering diffs with the PNG viewer. Commit + tag `rmodels-ported`.
 
-Then the **Angry Birds capstone** in examples/.
+### THEN — raudio (the last module)
+Audio. Build `src/c/raudio_impl.c` shim replicating raudio.c's preamble
+(config.h-driven; formats enabled: WAV/OGG/MP3/QOA/XM/MOD; FLAC OFF):
+- miniaudio: `MA_MALLOC/MA_FREE`, `MA_NO_JACK`, `MA_NO_WAV/FLAC/MP3`,
+  `MA_NO_RESOURCE_MANAGER/NODE_GRAPH/ENGINE/GENERATION`, `MA_COINIT_VALUE 2`,
+  `MINIAUDIO_IMPLEMENTATION` + `#include "external/miniaudio.h"` (HUGE).
+- `DR_WAV_IMPLEMENTATION`+dr_wav.h; `#include "external/stb_vorbis.c"`;
+  `DR_MP3_IMPLEMENTATION`+dr_mp3.h; `QOA_MALLOC/FREE`+`QOA_IMPLEMENTATION`+qoa.h +
+  `#include "external/qoaplay.c"`; `JAR_XM_IMPLEMENTATION`+jar_xm.h;
+  `JAR_MOD_IMPLEMENTATION`+jar_mod.h. (dr_flac OFF.)
+- raudio.c owns the AudioBuffer/device callback/mixing — needs an audio device
+  for playback (may be absent headless → InitAudioDevice handles gracefully).
+  Validate the DECODE path with a **PCM-diff harness**: build a known WAV/QOA in
+  memory, `LoadWaveFromMemory` C-vs-Zig (or vs known samples), compare PCM bytes.
+  Device/mixing = loose check. Then integrate (add `"raudio.c"` to
+  ported_modules + shim) + tag `raudio-ported` = **100%**.
 
-Pending extra validation for rcore: a data-function check (CRC32/MD5/SHA/Base64/
-Compress) against known vectors — the pixel gate covers window/context/draw only.
+### THEN — the Angry Birds capstone (examples/)
+See the "Future capstone" note below + memory `angrybirds-demo-task`.
 
 ## Status snapshot (2026-06-28)
 
@@ -51,7 +70,7 @@ Compress) against known vectors — the pixel gate covers window/context/draw on
 | 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
 | 5 — rmodels/raudio | not started (3D + audio; need shims + 3D/PCM harnesses) |
 
-Modules ported to Zig: **8 / 10** (raymath, rcamera, rgestures, rshapes, rtext, rtextures, rlgl, rcore). Only rmodels + raudio remain.
+Modules ported to Zig: **8 / 10** (raymath, rcamera, rgestures, rshapes, rtext, rtextures, rlgl, rcore). Only **rmodels** (3D, draft in progress) + **raudio** (audio) remain.
 `ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c}
 (the rendering modules swapped into the lib + their stb shims); raymath & rcamera
 are header-only, validated bit-exact standalone but not yet swapped into the

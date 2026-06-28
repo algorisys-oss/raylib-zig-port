@@ -83,3 +83,14 @@
 # (src/gl33.zig). rcore (biggest port: rcore.c + GLFW platform, 220 fns) now
 # drafting; its sinfl/sdefl/rprand shim is ready. Re-run token_usage.py for
 # precise per-turn figures.
+
+# --- PAUSE: end of 2026-06-28 session (~322201469 cum) -------------------------
+# Status: 8/10 modules ported & validated. Whole raylib engine is Zig except
+# rmodels (3D) + raudio (audio). Tags: phase0-oracle-ready, phase1-raymath,
+# rcamera/rgestures/rshapes/rtext/rtextures/rlgl/rcore-ported. Main gate 12/12
+# (incl. 3D scenes); rcore data fns pass datacheck. ~33 commits.
+# Resume: rmodels.zig is an UNVALIDATED agent draft (untracked, was mid-write
+#   ~21/71 exports — may have finished in background; re-check, validate or
+#   re-spawn) -> integrate (add rmodels.c to ported_modules; shim pre-wired) ->
+#   gate -> tag. Then raudio (shim config noted in PROGRESS.md) -> 100%. Then
+#   the Angry Birds capstone in examples/. See PROGRESS.md "Resume point".
