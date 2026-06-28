@@ -63,6 +63,14 @@ const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "G
 /// passes the pixel gate.
 const rlgl_ported = true;
 
+/// rcore.c (+ the GLFW platform it #includes) is ported to src/rcore.zig. When
+/// true, the swapped build excludes rcore.c, compiles src/rcore.zig, links the
+/// sinfl/sdefl/rprand shim (src/c/rcore_impl.c), and links src/rcamera.zig +
+/// src/rgestures.zig (rcore.c was the out-of-line instantiation point for
+/// raymath/rcamera/rgestures; rcamera.zig also bundles raymath's exports via its
+/// import, so no separate raymath object — that would duplicate). GLFW stays C.
+const rcore_ported = true;
+
 fn isPorted(name: []const u8) bool {
     for (ported_modules) |m| if (std.mem.eql(u8, m, name)) return true;
     return false;
@@ -100,7 +108,8 @@ fn raylibLib(
     mod.addCSourceFile(.{ .file = b.path("vendor/raylib/src/rglfw.c"), .flags = c_flags });
 
     for (raylib_tus) |tu| {
-        if (swap and isPorted(tu)) {
+        const tu_ported = isPorted(tu) or (rcore_ported and std.mem.eql(u8, tu, "rcore.c"));
+        if (swap and tu_ported) {
             const stem = tu[0 .. tu.len - 2];
             const obj_mod = b.createModule(.{
                 .root_source_file = b.path(b.fmt("src/{s}.zig", .{stem})),
@@ -113,6 +122,26 @@ fn raylibLib(
             mod.addObject(obj);
         } else {
             mod.addCSourceFile(.{ .file = b.path(b.fmt("vendor/raylib/src/{s}", .{tu})), .flags = c_flags });
+        }
+    }
+
+    // rcore swap: rcore.zig (compiled above) replaces rcore.c + the GLFW platform.
+    // rcore.c was the out-of-line instantiation point for raymath/rgestures/
+    // rcamera and the sinfl/sdefl/rprand libs — provide those now. rcamera.zig
+    // bundles raymath's exports via its import (so it covers both); rgestures.zig
+    // is standalone. GLFW (rglfw.c) is already compiled above.
+    if (swap and rcore_ported) {
+        mod.addCSourceFile(.{ .file = b.path("src/c/rcore_impl.c"), .flags = c_flags });
+        for ([_][]const u8{ "rcamera", "rgestures" }) |stem| {
+            const m = b.createModule(.{
+                .root_source_file = b.path(b.fmt("src/{s}.zig", .{stem})),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            });
+            const o = b.addObject(.{ .name = stem, .root_module = m });
+            o.use_llvm = true;
+            mod.addObject(o);
         }
     }
 
