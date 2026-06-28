@@ -57,3 +57,12 @@
             Found 2 gotchas: Zig self-hosted x86 backend miscompiles by-value
             float (use -fllvm); harness must pass true-f64 literals. Tagging
             phase1-raymath. In-progress turn — figures through last recorded step.
+
+# --- autonomous-run checkpoint (2026-06-28, ~76.1M cum) ---------------------
+# The 8h-away run continued across re-invocations (background drafting agents
+# notify on completion; each notification is a new "turn" in token_usage.py).
+# Milestones: PHASE 0 oracle (tag phase0-oracle-ready); PHASE 1 raymath
+# bit-exact (tag phase1-raymath, 146 fns/79,800 values); rshapes pixel-exact
+# (tag rshapes-ported, 71 fns/6 scenes); rtext stb-extraction infra committed;
+# rtext.zig drafting in progress. Re-run `python3 tools/token_usage.py` next
+# pause for precise per-turn figures; session cumulative ~76.1M at this point.

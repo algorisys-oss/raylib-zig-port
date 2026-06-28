@@ -6,11 +6,15 @@ for cost.
 
 ## Resume point
 
-**rshapes COMPLETE — first rendering module, byte-exact.** `src/rshapes.zig`
-(71 functions) renders byte-identical to C rshapes across the 6-scene battery
-(`zig build test` green); the rendering C↔Zig swap is proven live (deliberate
-break fails the gate). Next: parallelize rtextures + rtext drafting, then
-rcore+glfw, rmodels, raudio.
+**rshapes DONE (pixel byte-exact). rtext IN PROGRESS** — a drafting agent is
+porting rtext.c → src/rtext.zig; the third-party shim (src/c/rtext_stb_impl.c,
+stb_rect_pack + stb_truetype, sizeof helpers for opaque structs) and build.zig
+wiring are READY and committed. To integrate when the draft lands: add
+`"rtext.c"` to `ported_modules` in build.zig, `zig build`, then `zig build test`
+(the `text` scene gates rtext). Watch the va_list `TextFormat` path and the
+opaque stbtt/stbrp struct handling. After rtext: rtextures (needs its own
+stb shim: stb_image/write/resize2/perlin + qoi), then rcore+glfw (needs
+CoreData offset tooling), rmodels, raudio.
 
 ## Status snapshot (2026-06-28)
 
