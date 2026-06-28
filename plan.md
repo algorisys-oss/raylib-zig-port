@@ -61,17 +61,39 @@ Update checkboxes and notes as work lands.
 
 ---
 
-## CURRENT STATUS (2026-06-28) — planning only, no code yet
+## CURRENT STATUS (2026-06-28) — Phase 0 COMPLETE; foundation + oracle green
 
-Scaffolding docs created: `CLAUDE.md`, `plan.md`, `token-count.md`, `tokens.txt`,
-`tools/token_usage.py`. Phase 0 not started. **PROGRESS.md** (authoritative live
-status + resume guide) will be created when porting begins, as in sqlite-zig.
+The Zig build of unmodified raylib C is up, the llvmpipe differential oracle is
+proven byte-exact, and the C-vs-Zig swap+diff gate (`zig build test`) is green
+(4/4 scenes). 0/10 modules ported (baseline). **See [PROGRESS.md](PROGRESS.md)**
+for the authoritative live status and resume point. Next: Phase 1 (raymath).
 
 ---
 
-## Decisions to resolve BEFORE committing to a build shape (flag to user)
+## Decisions — RESOLVED 2026-06-28 (user, before the autonomous run)
 
-These shape everything; resolve in Phase 0. Recommendations given.
+- **Run priority:** *oracle-first, then breadth.* Lock down the pixel/numeric-diff
+  harness + raymath/rlgl byte-exact before porting widely.
+- **rlsw fallback:** rlsw byte-exact where it works; for GPU-only paths (shaders,
+  some blend modes — ~35 shader examples) render via **mesa llvmpipe software-GL
+  with a tight pixel tolerance**, marked tolerance-validated (not byte-exact).
+- **Git:** *local commits + annotated milestone tags* at each phase boundary
+  (no remote; work install-free — no passwordless sudo).
+- **Platform pin (decision #3):** PLATFORM_DESKTOP_GLFW (vendored GLFW) +
+  OPENGL_33 production; OPENGL_11 + rlsw headless test config.
+- **Build (decision #4):** fork raylib's official `build.zig`; add `ported_modules`
+  swap + the two-config split.
+- **Inline modules (decision #2):** raymath forced out-of-line early (a); rlgl
+  ported last-of-its-callers (c).
+- **Allocator (decision #5):** keep the C return-by-value-sentinel contract at the
+  ABI; Zig idioms only in private helpers.
+
+Environment confirmed: GPU+display present (`/dev/dri/card1`, `:0`), mesa
+llvmpipe available, vendored GLFW + rlsw compile from source, network up for zig
+pkg fetch, **no passwordless sudo** (work install-free). Original recommendations
+retained below for context.
+
+### Original options (for context)
 
 1. **Validation oracle — confirm the software-renderer approach.** Plan assumes
    `external/rlsw.h` (software OpenGL 1.1, `GRAPHICS_API_OPENGL_11` +

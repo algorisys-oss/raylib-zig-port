@@ -38,8 +38,18 @@
             the acceptance gate = all 218 examples pass (build + pixel/PCM diff),
             since raylib ships no assertion suite. Updated project memory.
 
-[2026-06-28] 12:05:07-(in progress)  in=12  cr=4755  rd=656655  out=10785  ->  TOTAL=672207  (cum=9152624)
+[2026-06-28] 12:05:07-12:05:57  in=12  cr=4755  rd=656655  out=10785  ->  TOTAL=672207  (cum=9152624)
     prompt: Add a README.md.
-    note:   Wrote README.md (status/goal/quality-bar/oracle/scope/layout),
-            honest about the planning-only state. In-progress turn — figures
-            through the last recorded step; capture the tail next pause.
+    note:   Wrote README.md (status/goal/quality-bar/oracle/scope/layout).
+
+[2026-06-28] 12:09:23-(in progress)  in=21266  cr=307542  rd=15426119  out=134513  ->  TOTAL=15889440  (cum=25962234)
+    elapsed: ~15m+ (ongoing autonomous run). prompt: Away 8h — questions, then
+            run the migration uninterrupted.
+    note:   Resolved 3 decisions (oracle-first / llvmpipe tolerance / local+tags).
+            PHASE 0 COMPLETE: vendored raylib src; wrote build.zig (+ .zon) with
+            the C<->Zig swap list; proved zig builds unmodified raylib C install-
+            free (X11/GL33, vendored GLFW); proved llvmpipe is a byte-exact
+            deterministic oracle; built the C-vs-Zig framebuffer-diff gate
+            (`zig build test` = 4/4 scenes byte-identical). Wrote PROGRESS.md.
+            Tagged phase0-oracle-ready. In-progress turn — figures through the
+            last recorded step.

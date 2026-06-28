@@ -1,0 +1,21 @@
+.{
+    .name = .raylib_zig,
+    .version = "0.0.0",
+    .minimum_zig_version = "0.17.0",
+
+    // Migration of raylib (C) to Zig. No external package dependencies: the
+    // raylib C sources (incl. vendored GLFW and third-party single-file libs)
+    // live under vendor/raylib/src and are compiled per-translation-unit.
+    .fingerprint = 0xc4cfa8c60aaaba01,
+
+    .dependencies = .{},
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "test",
+        "tools",
+        "vendor",
+    },
+}
