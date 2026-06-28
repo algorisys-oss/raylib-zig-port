@@ -16,10 +16,20 @@
 #
 # columns: start  end   input  cache_cr  cache_rd  output  ->  TOTAL  (cumulative)
 
-[2026-06-28] 11:41:01-(in progress)  in=16890  cr=235599  rd=1504193  out=59509  ->  TOTAL=1816191  (cum=1816191)
-    prompt: Review the sqlite C->Zig migration; create CLAUDE.md + plan to
-            migrate raylib to Zig; note constraints + token-usage maintenance.
+[2026-06-28] 11:41:01-11:47:03  in=17156  cr=247335  rd=2393502  out=65884  ->  TOTAL=2723877  (cum=2723877)
+    elapsed: ~6m. prompt: Review the sqlite C->Zig migration; create CLAUDE.md +
+            plan to migrate raylib to Zig; note constraints + token maintenance.
     note:   Planning/scaffolding only — created CLAUDE.md, plan.md,
-            token-count.md, tokens.txt, tools/token_usage.py. Figures are
-            through the last recorded step; re-run the script next session to
-            capture this turn's tail.
+            token-count.md, tokens.txt, tools/token_usage.py + project memory.
+
+[2026-06-28] 11:58:56-11:59:32  in=132  cr=4586  rd=424882  out=1465  ->  TOTAL=431065  (cum=3154942)
+    elapsed: ~1m. prompt: git init, add .gitignore and commit.
+    note:   Initialized repo on main; .gitignore (Zig artifacts + generated
+            layout + diff scratch); commit 193d7d4 (6 files).
+
+[2026-06-28] 11:59:47-(in progress)  in=10  cr=2972  rd=436708  out=2057  ->  TOTAL=441747  (cum=3596689)
+    prompt: Update CLAUDE.md — record time/tokens at every pause/stop, not just
+            session end.
+    note:   Added the "Record at EVERY pause / stop" rule to CLAUDE.md's token
+            section; logged this pause per that rule. In-progress turn — figures
+            through the last recorded step; capture the tail next pause.

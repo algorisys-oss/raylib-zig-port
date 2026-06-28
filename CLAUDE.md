@@ -193,11 +193,27 @@ python3 tools/token_usage.py --tsv    # machine-readable (for tokens.txt)
 The script reads the newest `*.jsonl` in
 `/home/rajesh/.claude/projects/-home-rajesh-lab-ai-port-raylib-zig/` — it is
 session-specific. A "turn" = one human prompt + all assistant work it triggered;
-`cache_read` dominates (context re-read each step). Refresh `tokens.txt` from the
-script's output at/near the **end of a session** (the transcript only records a
-turn's full cost once the turn completes, so the in-progress turn can't be
-self-counted — capture it next session). Follow-ups sent mid-turn fold into that
-turn; list them under it.
+`cache_read` dominates (context re-read each step). Follow-ups sent mid-turn fold
+into that turn; list them under it.
+
+### Record at EVERY pause / stop (required)
+
+Don't wait only for "end of session." **Any time you pause, hand back control, or
+are temporarily done and about to stop, take a measurement first:**
+
+1. **Time** — note the wall-clock start→end of the work since the last record
+   (and the elapsed duration). For a long autonomous run, also note turns elapsed.
+2. **Tokens** — run `python3 tools/token_usage.py` and append/refresh the
+   relevant rows in [tokens.txt](tokens.txt) (input + cache_cr + cache_rd + output
+   → TOTAL, plus the running cumulative).
+3. **What landed** — a one-line note of what was done in that span (which module,
+   what gate passed), so the log doubles as a progress trail.
+
+Caveat: the transcript only records a turn's **full** cost once that turn
+completes, so the **in-progress** turn (the one you're stopping in) can't be
+fully self-counted — record it as `(in progress)` with the figures through the
+last recorded step, and capture its tail at the next pause/session. Everything
+already-completed since the last record IS countable now — log it before you stop.
 
 [token-count.md](token-count.md) is the separate **scope-sizing** number (how big
 the porting job is: LOC/bytes of the raylib C we port), distinct from per-prompt
