@@ -59,8 +59,13 @@ swap on `zig build test` (pixel) or `zig build <m>test` (numeric).
 | 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
 | 5 — rmodels/raudio | not started (3D + audio; need shims + 3D/PCM harnesses) |
 
-Modules ported to Zig: **5 / 10** (raymath, rshapes, rtext, rtextures, rcamera) (+1 platform backend). `ported_modules` in
-[build.zig](build.zig) is empty → 100% C baseline; the gate is trivially green.
+Modules ported to Zig: **5 / 10** (raymath, rshapes, rtext, rtextures, rcamera).
+`ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c}
+(the rendering modules swapped into the lib + their stb shims); raymath & rcamera
+are header-only, validated bit-exact standalone but not yet swapped into the
+render path (they swap in when their callers — rshapes already uses none; rcore —
+are ported / via out-of-line instantiation). Gate: 10/10 pixel + bit-exact
+math/cam.
 
 Examples passing (the 218-example acceptance suite): not yet wired (needs the
 modules a given example uses to be ported first). Scene battery: 10 scenes (+ image_gen, image_ops, color_ops for rtextures).
