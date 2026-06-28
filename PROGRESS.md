@@ -22,22 +22,27 @@ Main gate **12/12** (incl. two 3D scenes); rcore data fns validated (`zig build
 datacheck`). Last green commit: `Pre-wire rmodels shim`. Only **rmodels.c** (3D)
 and **raudio.c** (audio) remain.
 
-### IN PROGRESS — rmodels (resume here first)
-A drafting agent was porting rmodels.c when we paused. **`src/rmodels.zig` exists
-on disk but is an UNVALIDATED agent draft** (was mid-write: ~21/71 exports when
-last checked; it may have completed in the background — re-check). It is UNTRACKED
-(not committed). To resume:
-1. Check `src/rmodels.zig`: `grep -c 'export fn'` should be ~71. If far fewer or
-   it doesn't `zig fmt`/`zig build-obj -fllvm` cleanly, the draft is incomplete —
-   **re-spawn the rmodels agent** (the prompt is in the git history / this file's
-   git log; shim + 3D scenes are ready).
-2. If complete: `zig fmt --check src/rmodels.zig`; `zig build-obj src/rmodels.zig
-   -O Debug -lc -fllvm` (cgltf/rl/raymath/rtextures/rcore externs = U is fine).
-3. Integrate: add `"rmodels.c"` to `ported_modules` in build.zig (the
-   `rmodels_impl.c` shim is already pre-wired to compile then).
-4. `zig build && zig build test` → expect 12/12 (the 3d_shapes/3d_mesh scenes
-   gate the rendering; glTF/OBJ/M3D loaders are ported-but-not-scene-tested).
-   Debug rendering diffs with the PNG viewer. Commit + tag `rmodels-ported`.
+### IN PROGRESS — rmodels (resume here first) — DRAFT DONE, 1 bug
+
+`src/rmodels.zig` is COMPLETE (6791 lines, 73 exports, fmt-clean, builds
+`-fllvm`) and COMMITTED, but NOT in `ported_modules` (so the build stays green
+with C rmodels — 12/12). When swapped in, the gate is **11/12**: all 2D scenes +
+the **3d_mesh** scene (GenMeshCube/Sphere/Torus + DrawModel/DrawModelEx + DrawGrid)
+are **byte-identical**; only **3d_shapes fails (1.3% of pixels)**.
+
+**The one bug: `DrawSphere`/`DrawSphereEx` solid fill does not render.** Evidence:
+the diff is exactly the sphere's bounding box (x[283..356] y[132..204]); C shows
+the solid blue sphere (0,121,241), Zig shows the plane behind it (50,55,65) — so
+the solid triangles aren't drawn (the wireframe `DrawSphereWires` IS fine, and
+`DrawCube` solid IS fine). Verified NOT the cause: RL_TRIANGLES=0x0004 constant,
+DEG2RAD=PI/180 (f32), the vertex math/order (line-for-line identical to C), Color
+ABI (DrawCube works). Suspect: a subtle issue specific to DrawSphereEx's
+immediate-mode triangle stream (winding/culling, batch, or the in-place `vertices`
+array update). TO DEBUG: make a throwaway scene with ONLY `DrawSphere` (isolate),
+compare to C; check rlEnableBackfaceCulling state + triangle winding; verify the
+self-referential `vertices[2] = .{ .x = cosslice*vertices[2].x - ... }` array
+update isn't mis-evaluating. Then re-add `"rmodels.c"` to `ported_modules`,
+`zig build test` → 12/12, commit + tag `rmodels-ported`.
 
 ### THEN — raudio (the last module)
 Audio. Build `src/c/raudio_impl.c` shim replicating raudio.c's preamble
