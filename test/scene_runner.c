@@ -100,6 +100,52 @@ static void scene_text_format(void) {
     DrawTextEx(fnt, TextFormat("upper:%s", "abc"), (Vector2){30, 300}, 26, 3.0f, ORANGE);
 }
 
+// rtextures coverage. Deterministic: SetRandomSeed pins the noise generators.
+static void scene_image_gen(void) {
+    ClearBackground(BLACK);
+    SetRandomSeed(20260628);
+    struct { Image img; int x, y; } cells[6];
+    cells[0].img = GenImageColor(120, 100, (Color){200, 60, 60, 255});
+    cells[1].img = GenImageChecked(120, 100, 8, 8, RAYWHITE, DARKGRAY);
+    cells[2].img = GenImageGradientLinear(120, 100, 45, RED, BLUE);
+    cells[3].img = GenImageGradientRadial(120, 100, 0.5f, GOLD, MAROON);
+    cells[4].img = GenImagePerlinNoise(120, 100, 0, 0, 4.0f);
+    cells[5].img = GenImageWhiteNoise(120, 100, 0.45f);
+    int xs[6] = {20, 160, 300, 20, 160, 300};
+    int ys[6] = {20, 20, 20, 140, 140, 140};
+    for (int i = 0; i < 6; i++) {
+        Texture2D t = LoadTextureFromImage(cells[i].img);
+        DrawTexture(t, xs[i], ys[i], WHITE);
+        UnloadTexture(t);
+        UnloadImage(cells[i].img);
+    }
+}
+static void scene_image_ops(void) {
+    ClearBackground((Color){20, 20, 30, 255});
+    Image img = GenImageColor(160, 160, (Color){40, 40, 60, 255});
+    ImageDrawRectangle(&img, 10, 10, 80, 60, RED);
+    ImageDrawCircle(&img, 110, 50, 35, GREEN);
+    ImageColorTint(&img, (Color){180, 220, 255, 255});
+    ImageColorInvert(&img);
+    Texture2D t1 = LoadTextureFromImage(img);
+    DrawTexture(t1, 30, 40, WHITE);
+    DrawTexturePro(t1, (Rectangle){0, 0, 160, 160}, (Rectangle){360, 60, 200, 200},
+                   (Vector2){0, 0}, 15.0f, WHITE);
+    UnloadTexture(t1);
+    UnloadImage(img);
+}
+static void scene_color_ops(void) {
+    ClearBackground(RAYWHITE);
+    Color base = (Color){200, 80, 40, 255};
+    for (int i = 0; i < 10; i++) {
+        DrawRectangle(20 + i * 60, 30, 56, 60, ColorBrightness(base, -0.5f + i * 0.1f));
+        DrawRectangle(20 + i * 60, 100, 56, 60, ColorContrast(base, -0.9f + i * 0.2f));
+        DrawRectangle(20 + i * 60, 170, 56, 60, ColorTint(WHITE, ColorFromHSV(i * 36.0f, 0.8f, 0.9f)));
+        DrawRectangle(20 + i * 60, 240, 56, 60, Fade(DARKBLUE, i / 9.0f));
+        DrawRectangle(20 + i * 60, 310, 56, 40, ColorAlphaBlend((Color){240, 240, 240, 255}, Fade(RED, i / 9.0f), WHITE));
+    }
+}
+
 static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"shapes_basic", scene_shapes_basic},
     {"shapes_gradient", scene_shapes_gradient},
@@ -108,6 +154,9 @@ static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"shapes_poly", scene_shapes_poly},
     {"splines", scene_splines},
     {"text_format", scene_text_format},
+    {"image_gen", scene_image_gen},
+    {"image_ops", scene_image_ops},
+    {"color_ops", scene_color_ops},
 };
 static const int N_SCENES = (int)(sizeof(SCENES) / sizeof(SCENES[0]));
 
