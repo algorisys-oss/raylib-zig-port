@@ -113,10 +113,13 @@ static void scene_image_gen(void) {
     cells[5].img = GenImageWhiteNoise(120, 100, 0.45f);
     int xs[6] = {20, 160, 300, 20, 160, 300};
     int ys[6] = {20, 20, 20, 140, 140, 140};
+    // NOTE: raylib BATCHES draws and flushes at EndDrawing. A texture must stay
+    // alive until then, so we do NOT UnloadTexture mid-frame (it would delete the
+    // GPU texture before the queued DrawTexture runs → blank). The short-lived
+    // runner process reclaims everything on exit; a small leak is fine here.
     for (int i = 0; i < 6; i++) {
         Texture2D t = LoadTextureFromImage(cells[i].img);
         DrawTexture(t, xs[i], ys[i], WHITE);
-        UnloadTexture(t);
         UnloadImage(cells[i].img);
     }
 }
@@ -131,7 +134,7 @@ static void scene_image_ops(void) {
     DrawTexture(t1, 30, 40, WHITE);
     DrawTexturePro(t1, (Rectangle){0, 0, 160, 160}, (Rectangle){360, 60, 200, 200},
                    (Vector2){0, 0}, 15.0f, WHITE);
-    UnloadTexture(t1);
+    // (texture kept alive until EndDrawing flushes the batch — see scene_image_gen)
     UnloadImage(img);
 }
 static void scene_color_ops(void) {

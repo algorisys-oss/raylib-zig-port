@@ -18,3 +18,4 @@ src/c_layout.zig
 /tmp-diff/
 *.actual.png
 *.diff.png
+/zig-out/frames/
