@@ -105,6 +105,9 @@ fn raylibLib(
     if (swap and isPorted("rtext.c")) {
         mod.addCSourceFile(.{ .file = b.path("src/c/rtext_stb_impl.c"), .flags = &c_defines });
     }
+    if (swap and isPorted("rtextures.c")) {
+        mod.addCSourceFile(.{ .file = b.path("src/c/rtextures_stb_impl.c"), .flags = &c_defines });
+    }
 
     // NOTE: system libs (X11/GL/…) are linked on the final executable, not here —
     // archiving .so paths into a static lib is wrong and pollutes the archive.
