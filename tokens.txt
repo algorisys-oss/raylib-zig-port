@@ -27,9 +27,9 @@
     note:   Initialized repo on main; .gitignore (Zig artifacts + generated
             layout + diff scratch); commit 193d7d4 (6 files).
 
-[2026-06-28] 11:59:47-(in progress)  in=1527  cr=38492  rd=4712689  out=29733  ->  TOTAL=4782441  (cum=7937383)
-    prompt: Update CLAUDE.md — record time/tokens at every pause/stop, not just
-            session end.
+[2026-06-28] 11:59:47-12:04:45  in=1781  cr=40567  rd=5250352  out=32775  ->  TOTAL=5325475  (cum=8480417)
+    elapsed: ~5m. prompt: Update CLAUDE.md — record time/tokens at every
+            pause/stop, not just session end.
     folded: record the 100% port goal (+ real exceptions); Zig code should be
             clean/idiomatic; "as if written by Andrew Kelley, design like
             Raysan"; must pass all original raylib test cases.
@@ -37,4 +37,9 @@
             the 100%-port goal; the idiomatic-Zig/Raysan-design quality bar; and
             the acceptance gate = all 218 examples pass (build + pixel/PCM diff),
             since raylib ships no assertion suite. Updated project memory.
-            In-progress turn — figures through the last recorded step.
+
+[2026-06-28] 12:05:07-(in progress)  in=12  cr=4755  rd=656655  out=10785  ->  TOTAL=672207  (cum=9152624)
+    prompt: Add a README.md.
+    note:   Wrote README.md (status/goal/quality-bar/oracle/scope/layout),
+            honest about the planning-only state. In-progress turn — figures
+            through the last recorded step; capture the tail next pause.
