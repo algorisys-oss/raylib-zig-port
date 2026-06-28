@@ -34,6 +34,7 @@ const raylib_tus = [_][]const u8{
 /// not TUs — and are swapped via a different mechanism; see plan.md Phase 1/2.)
 const ported_modules = [_][]const u8{
     "rshapes.c", // -> src/rshapes.zig (2D shapes/collision; calls rlgl via extern)
+    "rtext.c", // -> src/rtext.zig (fonts/text; stb via src/c/rtext_stb_impl.c shim)
 };
 
 /// Compile defines pinning the Linux/GLFW/GL3.3 configuration. Proven to build

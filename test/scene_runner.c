@@ -85,6 +85,21 @@ static void scene_splines(void) {
     DrawLineDashed((Vector2){40, 350}, (Vector2){600, 350}, 12, 8, GRAY);
 }
 
+static void scene_text_format(void) {
+    // Exercises rtext's riskiest paths: TextFormat (va_list ABI), DrawTextPro
+    // (rotation), MeasureText-based layout, and string utilities — all with the
+    // embedded default font (deterministic, no font file needed).
+    ClearBackground((Color){30, 30, 46, 255});
+    Font fnt = GetFontDefault();
+    DrawText(TextFormat("score: %d  x=%4.2f", 1234, 3.14159f), 30, 30, 24, GOLD);
+    DrawText(TextFormat("hex %08X  str=%s", 0xBEEF, "raylib"), 30, 70, 20, LIME);
+    const char *msg = "MEASURED+CENTERED";
+    int w = MeasureText(msg, 28);
+    DrawText(msg, (640 - w) / 2, 120, 28, SKYBLUE);
+    DrawTextPro(fnt, "rotated text", (Vector2){320, 240}, (Vector2){0, 0}, 35.0f, 30, 2.0f, PINK);
+    DrawTextEx(fnt, TextFormat("upper:%s", "abc"), (Vector2){30, 300}, 26, 3.0f, ORANGE);
+}
+
 static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"shapes_basic", scene_shapes_basic},
     {"shapes_gradient", scene_shapes_gradient},
@@ -92,6 +107,7 @@ static struct { const char *name; SceneFn fn; } SCENES[] = {
     {"text", scene_text},
     {"shapes_poly", scene_shapes_poly},
     {"splines", scene_splines},
+    {"text_format", scene_text_format},
 };
 static const int N_SCENES = (int)(sizeof(SCENES) / sizeof(SCENES[0]));
 
