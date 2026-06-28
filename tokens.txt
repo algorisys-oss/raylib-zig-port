@@ -74,3 +74,12 @@
 # lines). Main pixel gate 10/10; mathtest + camtest bit-exact. 16 commits,
 # 6 tags. Remaining: rgestures, rlgl, rcore(+glfw), rmodels, raudio (see
 # PROGRESS.md resume guide). Session cumulative ~138917768 tokens at this point.
+
+# --- checkpoint: 7/10 modules, 2D pipeline 100% Zig (2026-06-28) -------------
+# Added since last note: rgestures (bit-exact, tag rgestures-ported) and rlgl
+# (pixel-exact, tag rlgl-ported) — the GL abstraction + batch renderer. The
+# entire 2D stack (rlgl+rshapes+rtext+rtextures) is now Zig; gate 10/10. rlgl
+# swap via a guarded rcore.c patch + glad C shim + glad_gl* fn-pointer bindings
+# (src/gl33.zig). rcore (biggest port: rcore.c + GLFW platform, 220 fns) now
+# drafting; its sinfl/sdefl/rprand shim is ready. Re-run token_usage.py for
+# precise per-turn figures.
