@@ -1,0 +1,25 @@
+# tokens.txt — ACTUAL per-prompt token usage (raylib-zig)
+#
+# REAL figures from the Claude Code session transcript (API `usage` per
+# assistant step), NOT estimates. Regenerate with:
+#   python3 tools/token_usage.py          (table)
+#   python3 tools/token_usage.py --tsv     (machine-readable)
+#
+# A "turn" = one human prompt + ALL assistant work it triggered (every tool
+# round-trip), up to the next prompt. TOTAL = input + cache_creation +
+# cache_read + output. cache_read dominates (context re-read each step).
+# Follow-ups sent mid-turn are queued into that turn, so their cost folds in.
+# The currently-running turn isn't fully recorded until it ends.
+#
+# This is the per-prompt LLM-usage log. Separate from token-count.md, which
+# sizes the porting JOB (LOC/tokens of the raylib C source we port).
+#
+# columns: start  end   input  cache_cr  cache_rd  output  ->  TOTAL  (cumulative)
+
+[2026-06-28] 11:41:01-(in progress)  in=16890  cr=235599  rd=1504193  out=59509  ->  TOTAL=1816191  (cum=1816191)
+    prompt: Review the sqlite C->Zig migration; create CLAUDE.md + plan to
+            migrate raylib to Zig; note constraints + token-usage maintenance.
+    note:   Planning/scaffolding only — created CLAUDE.md, plan.md,
+            token-count.md, tokens.txt, tools/token_usage.py. Figures are
+            through the last recorded step; re-run the script next session to
+            capture this turn's tail.
