@@ -396,10 +396,11 @@ const SHADER_LOC_COLOR_DIFFUSE: usize = 12;
 const SHADER_LOC_MAP_DIFFUSE: usize = 15;
 const SHADER_LOC_MAP_SPECULAR: usize = 16;
 const SHADER_LOC_MAP_NORMAL: usize = 17;
-const SHADER_LOC_MATRIX_BONETRANSFORMS: usize = 29;
-const SHADER_LOC_VERTEX_BONEIDS: usize = 27;
-const SHADER_LOC_VERTEX_BONEWEIGHTS: usize = 28;
-const SHADER_LOC_VERTEX_INSTANCETRANSFORM: usize = 30;
+// raylib.h ShaderLocationIndex: ..., MAP_BRDF = 25, then:
+const SHADER_LOC_VERTEX_BONEIDS: usize = 26;
+const SHADER_LOC_VERTEX_BONEWEIGHTS: usize = 27;
+const SHADER_LOC_MATRIX_BONETRANSFORMS: usize = 28;
+const SHADER_LOC_VERTEX_INSTANCETRANSFORM: usize = 29;
 
 // Default shader attribute/uniform names (null-terminated)
 const RL_DEFAULT_SHADER_ATTRIB_NAME_POSITION = "vertexPosition";

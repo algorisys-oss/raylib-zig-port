@@ -60,6 +60,12 @@ const c_defines = [_][]const u8{
     // The scene battery missed it (its transforms had zero off-diagonals);
     // mathgrid's oracle already used this flag for raymath bit-exactness.
     "-ffp-contract=off",
+    // Vendored single-file parsers (m3d.h, vox_loader.h) do misaligned u32
+    // reads on packed file data — benign on x86, but zig cc's default UBSan
+    // traps them (models_loading_m3d/_vox). Disable ONLY the alignment check;
+    // the rest of UBSan stays on for the swapped build's C (it caught the
+    // raudio NaN bug). The oracle disables UBSan entirely (see oracle_flags).
+    "-fno-sanitize=alignment",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };

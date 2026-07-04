@@ -6433,7 +6433,7 @@ fn LoadM3D(fileName: [*c]const u8) Model {
             i += 1;
             l += 1;
         }) {
-            if (mi != @as(c_int, @intCast(m3d.*.face[@intCast(i)].materialid))) {
+            if (mi != @as(c_int, @bitCast(m3d.*.face[@intCast(i)].materialid))) {
                 if (k + 1 >= model.meshCount) {
                     model.meshCount += 1;
 
@@ -6449,12 +6449,12 @@ fn LoadM3D(fileName: [*c]const u8) Model {
                 }
 
                 k += 1;
-                mi = @intCast(m3d.*.face[@intCast(i)].materialid);
+                mi = @bitCast(m3d.*.face[@intCast(i)].materialid);
 
                 j = i;
                 l = 0;
                 vcolor = 0;
-                while ((j < @as(c_int, @intCast(m3d.*.numface))) and (mi == @as(c_int, @intCast(m3d.*.face[@intCast(j)].materialid)))) : ({
+                while ((j < @as(c_int, @intCast(m3d.*.numface))) and (mi == @as(c_int, @bitCast(m3d.*.face[@intCast(j)].materialid)))) : ({
                     j += 1;
                     l += 1;
                 }) {
@@ -6541,11 +6541,13 @@ fn LoadM3D(fileName: [*c]const u8) Model {
                     if ((skinid != M3D_UNDEF) and (skinid < m3d.*.numskin)) {
                         var jj: c_int = 0;
                         while (jj < 4) : (jj += 1) {
-                            model.meshes[uk].boneIndices[ul * 12 + @as(usize, @intCast(n)) * 4 + @as(usize, @intCast(jj))] = @intCast(m3d.*.skin[skinid].boneid[@intCast(jj)]);
+                            // C truncates: unused slots of the 4-bone skin hold
+                            // M3D_UNDEF (0xFFFFFFFF) -> 255 in the u8 bone array.
+                            model.meshes[uk].boneIndices[ul * 12 + @as(usize, @intCast(n)) * 4 + @as(usize, @intCast(jj))] = @truncate(m3d.*.skin[skinid].boneid[@intCast(jj)]);
                             model.meshes[uk].boneWeights[ul * 12 + @as(usize, @intCast(n)) * 4 + @as(usize, @intCast(jj))] = m3d.*.skin[skinid].weight[@intCast(jj)];
                         }
                     } else {
-                        model.meshes[uk].boneIndices[ul * 12 + @as(usize, @intCast(n)) * 4] = @intCast(m3d.*.numbone);
+                        model.meshes[uk].boneIndices[ul * 12 + @as(usize, @intCast(n)) * 4] = @truncate(m3d.*.numbone);
                         model.meshes[uk].boneWeights[ul * 12 + @as(usize, @intCast(n)) * 4] = 1.0;
                     }
                 }
