@@ -172,6 +172,9 @@ fn raylibLib(
     if (swap and isPorted("rmodels.c")) {
         mod.addCSourceFile(.{ .file = b.path("src/c/rmodels_impl.c"), .flags = c_flags });
     }
+    if (swap and isPorted("raudio.c")) {
+        mod.addCSourceFile(.{ .file = b.path("src/c/raudio_impl.c"), .flags = c_flags });
+    }
 
     // NOTE: system libs (X11/GL/…) are linked on the final executable, not here —
     // archiving .so paths into a static lib is wrong and pollutes the archive.
@@ -245,6 +248,16 @@ pub fn build(b: *std.Build) void {
     const datacheck = linkExe(b, target, optimize, lib, "datacheck", "test/datacheck.c");
     const datacheck_run = b.addRunArtifact(datacheck);
     b.step("datacheck", "Validate rcore data functions vs known vectors").dependOn(&datacheck_run.step);
+
+    // `zig build audiocheck` — the raudio differential gate. Decodes the audio
+    // asset battery (WAV/OGG/MP3/QOA + wave ops + export + music metadata)
+    // through both libraries and byte-diffs the reports (PCM hashes included).
+    const audiocheck_zig = linkExe(b, target, optimize, lib, "audiocheck_zig", "test/audiocheck.c");
+    const audiocheck_c = linkExe(b, target, optimize, oracle, "audiocheck_oracle", "test/audiocheck.c");
+    const audiodiff = b.addSystemCommand(&.{"tools/audiodiff.sh"});
+    audiodiff.addArtifactArg(audiocheck_c);
+    audiodiff.addArtifactArg(audiocheck_zig);
+    b.step("audiocheck", "C-vs-Zig audio decode diff (the raudio gate)").dependOn(&audiodiff.step);
 
     // `zig build mathtest` — raymath bit-exact numeric gate. Builds the C oracle
     // (raymath.h inline, strict IEEE) and the Zig harness (linked against the
