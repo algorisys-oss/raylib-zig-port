@@ -55,15 +55,30 @@ rtextures GetPixelColor eager @alignCast; MeasureTextEx fractional-spacing
 truncation) and 2 oracle-build issues (-ffp-contract=off needed everywhere;
 UBSan off for the oracle only). Post-mortems → CLAUDE.md gotchas.
 
-### NEXT — extend exdiff to the remaining categories (~81 examples)
-- **models/** (~40): 3D — should mostly work with the existing shim (orbital
-  cameras frozen); some need resources (glTF, obj, vox...).
-- **shaders/** (~30): GLSL 330 under llvmpipe — check shader determinism.
-- **audio/** (~10): no pixels — needs a PCM-capture angle (or metadata-only).
-- **others/** (~8): raw GL/embedded — case by case; exclusions likely.
-Add each category to test/examples.list, triage failures the same way (the
-process is proven), log unautomatable ones with reasons. **218-example bar =
-this suite complete.**
+### Batch 2 DONE (2026-07-04 afternoon): models 30/30, shaders 35/35
+
+Two more port bugs found and fixed (commit `a5e0ee6`):
+- **rcore.zig ShaderLocationIndex off-by-one** (BONEIDS/BONEWEIGHTS/
+  BONETRANSFORMS/INSTANCETRANSFORM at 27/28/29/30, raylib.h says 26/27/28/29):
+  LoadShader wrote auto-bound attrib locs at wrong indices → GPU instancing
+  rendered nothing, skinned-bone attribs misfiled. A full mechanical audit of
+  every mirrored constant in src/*.zig vs the C headers is now clean.
+- **rmodels.zig LoadM3D casts**: bone ids need @truncate (M3D_UNDEF→255 as C
+  truncates); materialid comparisons need @bitCast (C compares in unsigned
+  domain). Plus `-fno-sanitize=alignment` for vendored parsers' misaligned
+  reads (m3d.h, vox_loader.h — benign x86 UB the oracle build ignores).
+
+### IN PROGRESS — final full sweep (all 214 listed examples incl. audio/others)
+Audio (11) and others (3) categories are getting first coverage. Expected:
+auto-playing music UIs may need exclusion (playback progress is device-thread
+real time); rlgl_standalone bypasses InitWindow/WindowShouldClose so the shim
+can't frame-bound it. Record the final passed/excluded tally here.
+
+**Ledger (verified against the tree):** this raylib version ships **217**
+example programs (the "218 examples" figure counted examples_template.c;
+core_loading_thread.c no longer exists upstream). test/examples.list =
+**214 automated + 3 excluded with reasons** = all 217 accounted for, none
+skipped silently.
 
 ### THEN — cleanups (non-blocking)
 - ReleaseFast static-archive LLD failure (workaround candidates noted in

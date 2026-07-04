@@ -214,6 +214,16 @@ before claiming a module done.
   with float `spacing` is an int*float FLOAT multiply (the cast is a no-op) —
   translating it as an int truncation of `spacing` silently zeroes the term for
   fractional spacings. Rule: replicate WHERE C casts, not just what it casts to.
+- **Hand-mirrored enum constants drift — audit them mechanically.** (Found by
+  the examples gate: rcore.zig's ShaderLocationIndex mirror had the last four
+  entries shifted +1 vs raylib.h; LoadShader wrote auto-bound attrib locations
+  at the wrong indices while rmodels read the right ones — ALL GPU instancing
+  silently rendered nothing.) Every module keeps private copies of raylib.h
+  enums; two modules can each look plausible and still disagree. After any
+  module lands, run the constant audit (parse raylib.h/rlgl.h enums+defines,
+  diff against every `const NAME = N` in src/*.zig — script pattern in git
+  history at commit a5e0ee6). Beware false positives from commented-out
+  `//#define` lines in config.h.
 - **FMA contraction is real, and the scene battery can miss it.** Confirmed:
   clang fuses `a*b + c` (rlVertex3f's transform multiply) while Zig never
   contracts — visible only when the transform has non-zero off-diagonals

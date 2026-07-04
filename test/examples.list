@@ -1,7 +1,6 @@
 # examples.list — the examples acceptance suite (first batch: 2D categories).
 # Format: <category>/<file.c> [frames]; '#' comments. See tools/exdiff.sh.
 # Excluded (cannot be made deterministic by the shim — see PROGRESS.md):
-#   core/core_loading_thread.c    real pthread + wall-clock timing
 #   core/core_custom_frame_control.c  hand-rolled busy-wait loop on GetTime
 core/core_2d_camera.c
 core/core_2d_camera_mouse_zoom.c
