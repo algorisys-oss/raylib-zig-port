@@ -226,6 +226,24 @@ pub fn build(b: *std.Build) void {
     demo_run.addArg("zig-out/frames");
     b.step("demo", "Run the headless scene_runner demo (dumps to zig-out/frames)").dependOn(&demo_run.step);
 
+    // `zig build angrybirds` — Angry Birds capstone demo (Zig game over the C ABI).
+    {
+        const ab_mod = b.createModule(.{
+            .root_source_file = b.path("examples/angrybirds/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        ab_mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+        ab_mod.linkLibrary(lib);
+        for (sys_libs) |l| ab_mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
+        const ab = b.addExecutable(.{ .name = "angrybirds", .root_module = ab_mod });
+        ab.use_llvm = true; // self-hosted x86 backend miscompiles by-value float code
+        b.installArtifact(ab);
+        const ab_run = b.addRunArtifact(ab);
+        b.step("angrybirds", "Run the Angry Birds slingshot demo").dependOn(&ab_run.step);
+    }
+
     // Two scene runners — identical source, one per library.
     const runner_zig = linkExe(b, target, optimize, lib, "scene_runner_zig", "test/scene_runner.c");
     const runner_c = linkExe(b, target, optimize, oracle, "scene_runner_oracle", "test/scene_runner.c");
