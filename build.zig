@@ -36,9 +36,7 @@ const ported_modules = [_][]const u8{
     "rshapes.c", // -> src/rshapes.zig (2D shapes/collision; calls rlgl via extern)
     "rtext.c", // -> src/rtext.zig (fonts/text; stb via src/c/rtext_stb_impl.c shim)
     "rtextures.c", // -> src/rtextures.zig (image/texture; stb via src/c/rtextures_stb_impl.c shim)
-    // "rmodels.c", // -> src/rmodels.zig DRAFTED but not yet integrated: 2D + 3d_mesh
-    //   (DrawModel/GenMesh) byte-exact, but DrawSphere/DrawSphereEx solid fill does
-    //   not render (3d_shapes scene, 1.3% diff). Re-enable + fix, then gate. See PROGRESS.
+    "rmodels.c", // -> src/rmodels.zig (3D models/meshes; third-party via shim, see rmodels swap below)
 };
 
 /// Compile defines pinning the Linux/GLFW/GL3.3 configuration. Proven to build

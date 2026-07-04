@@ -693,8 +693,12 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
         while (j < slices) : (j += 1) {
             vertices[0] = vertices[2]; // Rotate around y axis to set up vertices for next face
             vertices[1] = vertices[3];
-            vertices[2] = .{ .x = cosslice * vertices[2].x - sinslice * vertices[2].z, .y = vertices[2].y, .z = sinslice * vertices[2].x + cosslice * vertices[2].z };
-            vertices[3] = .{ .x = cosslice * vertices[3].x - sinslice * vertices[3].z, .y = vertices[3].y, .z = sinslice * vertices[3].x + cosslice * vertices[3].z };
+            // Snapshot before rebuilding: `vertices[n] = .{ ... }` writes fields in
+            // place (result location), so the .z init would read the new .x.
+            const v2 = vertices[2];
+            const v3 = vertices[3];
+            vertices[2] = .{ .x = cosslice * v2.x - sinslice * v2.z, .y = v2.y, .z = sinslice * v2.x + cosslice * v2.z };
+            vertices[3] = .{ .x = cosslice * v3.x - sinslice * v3.z, .y = v3.y, .z = sinslice * v3.x + cosslice * v3.z };
 
             rlNormal3f(vertices[0].x, vertices[0].y, vertices[0].z);
             rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
@@ -712,7 +716,8 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
         }
 
         vertices[2] = vertices[3]; // Rotate around z axis to set up starting vertices for next ring
-        vertices[3] = .{ .x = cosring * vertices[3].x + sinring * vertices[3].y, .y = -sinring * vertices[3].x + cosring * vertices[3].y, .z = vertices[3].z };
+        const v3ring = vertices[3];
+        vertices[3] = .{ .x = cosring * v3ring.x + sinring * v3ring.y, .y = -sinring * v3ring.x + cosring * v3ring.y, .z = v3ring.z };
     }
     rlEnd();
     rlPopMatrix();
