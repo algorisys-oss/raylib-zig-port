@@ -27,7 +27,7 @@ core/core_highdpi_testbed.c
 core/core_input_actions.c
 core/core_input_gamepad.c
 core/core_input_gestures.c
-core/core_input_gestures_testbed.c
+#   core/core_input_gestures_testbed.c  self-nondeterministic even with frozen clock (C oracle too); protractor angle text varies run-to-run
 core/core_input_keys.c
 core/core_input_mouse.c
 core/core_input_mouse_wheel.c
@@ -48,7 +48,7 @@ core/core_viewport_scaling.c
 core/core_vr_simulator.c
 core/core_window_flags.c
 core/core_window_letterbox.c
-core/core_window_should_close.c
+#   core/core_window_should_close.c  requires interactive Y/N key input to exit; times out headless (both builds)
 core/core_window_web.c
 core/core_world_screen.c
 shapes/shapes_ball_physics.c

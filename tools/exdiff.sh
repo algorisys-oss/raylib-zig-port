@@ -38,6 +38,12 @@ trap 'rm -rf "$TMP"' EXIT
 zig cc -c tools/exdiff/driver.c -o "$TMP/driver.o" -I"$RAYLIB_SRC" -std=c99 \
   || { echo "driver compile failed"; exit 3; }
 
+# Clock freezer (see fakeclock.c): preloaded into every run so library-internal
+# real-time paths (orbital cameras, gestures, wall-clock faces) are static and
+# identical across the two runs.
+zig cc -shared -fPIC tools/exdiff/fakeclock.c -o "$TMP/libfakeclock.so" \
+  || { echo "fakeclock compile failed"; exit 3; }
+
 pass=0; fail=0; broken=0; total=0
 failures=()
 
@@ -56,8 +62,9 @@ while read -r entry frames; do
   fi
 
   # Compile the example once (lib-independent object), link twice.
+  # gnu99, not c99: upstream builds examples in GNU mode (e.g. strnlen).
   if ! zig cc -c "$src" -o "$TMP/$name.o" -include tools/exdiff/shim.h \
-        -I"$RAYLIB_SRC" -std=c99 2> "$TMP/$name.cc.log"; then
+        -I"$RAYLIB_SRC" -std=gnu99 2> "$TMP/$name.cc.log"; then
     broken=$((broken+1)); failures+=("$name (compile)")
     printf "  CFAIL %s\n" "$name"; continue
   fi
@@ -73,11 +80,13 @@ while read -r entry frames; do
   fi
 
   for side in c zig; do
-    run="$TMP/run_$side"; rm -rf "$run"; mkdir -p "$run"
+    # Same cwd path for both sides: examples may render the path on screen.
+    run="$TMP/run"; rm -rf "$run"; mkdir -p "$run"
     [ -d "$EXAMPLES/$category/resources" ] && ln -s "$EXAMPLES/$category/resources" "$run/resources"
     # EXDIFF_SHOT is a bare name: TakeScreenshot prepends the cwd-at-InitWindow
     # base path, so absolute paths would be mangled.
     ( cd "$run" && EXDIFF_FRAMES="$frames" EXDIFF_SHOT="shot.png" \
+        LD_PRELOAD="$TMP/libfakeclock.so" \
         timeout 120 "$TMP/${name}_$side" > "$TMP/$name.$side.out" 2>&1 )
     echo $? > "$TMP/$name.$side.rc"
     [ -f "$run/shot.png" ] && mv "$run/shot.png" "$TMP/$name.$side.png"
