@@ -40,17 +40,30 @@ whose sample spec miniaudio can't map. Run with
 (the analog sink) for full 43-check coverage. Decode/wave/export checks (27) are
 device-independent.
 
-### NEXT — the examples acceptance suite (the remaining "done" criterion)
-CLAUDE.md's bar: **all 218 upstream examples pass** (build + link against the
-Zig library + pixel/PCM-match vs the C oracle). The scene battery + audiocheck
-prove the modules; the examples suite proves the whole surface. Plan: a runner
-that builds each `examples/**/*.c` against both libs, drives N deterministic
-frames headless under llvmpipe (inject input where examples need it — many are
-static render loops), screenshots both, byte-diffs. Start with the ~40
-core/shapes/text/textures examples (no input, no assets beyond resources/),
-expand category by category; log unautomatable ones (interactive-only,
-GPU-timing-dependent) in docs/not-migrated.md with reasons. Track pass count
-here.
+### The examples acceptance suite — first batch DONE (2026-07-04): 135/135
+
+The exdiff gate exists (tools/exdiff.sh + tools/exdiff/{shim.h,driver.c,
+fakeclock.c} + test/examples.list): compiles UNMODIFIED upstream examples with
+a determinism shim (frame-counter clock, fixed seed, hidden window,
+frame-bounded loop + final-frame screenshot) and an LD_PRELOAD clock freezer
+(library-internal real-time paths), links each against both libraries, runs
+headless under llvmpipe, byte-diffs the PNGs. **All 135 core/shapes/text/
+textures examples pass byte-identical** (2 excluded with reasons in the list).
+
+The gate caught and we fixed: 3 real port bugs (rtext null-glyph atlas panic;
+rtextures GetPixelColor eager @alignCast; MeasureTextEx fractional-spacing
+truncation) and 2 oracle-build issues (-ffp-contract=off needed everywhere;
+UBSan off for the oracle only). Post-mortems → CLAUDE.md gotchas.
+
+### NEXT — extend exdiff to the remaining categories (~81 examples)
+- **models/** (~40): 3D — should mostly work with the existing shim (orbital
+  cameras frozen); some need resources (glTF, obj, vox...).
+- **shaders/** (~30): GLSL 330 under llvmpipe — check shader determinism.
+- **audio/** (~10): no pixels — needs a PCM-capture angle (or metadata-only).
+- **others/** (~8): raw GL/embedded — case by case; exclusions likely.
+Add each category to test/examples.list, triage failures the same way (the
+process is proven), log unautomatable ones with reasons. **218-example bar =
+this suite complete.**
 
 ### THEN — cleanups (non-blocking)
 - ReleaseFast static-archive LLD failure (workaround candidates noted in
@@ -76,9 +89,11 @@ rmodels.c, raudio.c}; rlgl + rcore swap via their own flags
 the rcore swap. Gates: 12/12 pixel + 43/43 audio + bit-exact math/cam/gestures +
 datacheck.
 
-Examples passing (the 218-example acceptance suite): **not yet wired — this is
-the next milestone** (see Resume point). Scene battery: 12 scenes; audiocheck
-battery: 43 checks.
+Examples passing (the 218-example acceptance suite): **135/135 of the first
+batch** (all core/shapes/text/textures examples; 2 excluded with reasons in
+test/examples.list, 3 upstream categories remain — models/shaders/audio/others,
+~81 examples). Run: `tools/exdiff.sh <oracle.a> <zig.a>`. Scene battery: 12
+scenes; audiocheck battery: 43 checks.
 
 ## What Phase 0 established (proven, not assumed)
 

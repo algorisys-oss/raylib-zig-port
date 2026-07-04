@@ -5,58 +5,51 @@
 
 ## 1. State right now
 
-- 🏁 **100% of raylib-authored code is Zig — all 10 modules ported and gated.**
-  Last commit: `raudio ported: 10/10 modules` (tag `raudio-ported`); repo clean
-  except this docs pass. Remaining C in the swapped build = bundled third-party
-  only (rglfw.c, src/c/ shims), per charter.
-- Gates, all green and re-runnable: `zig build test` (pixel, 12/12),
-  `zig build audiocheck` (43/43), `zig build datacheck`, `zig build mathtest`/
-  camera/gestures grids. Capstone: `zig build angrybirds` (headless selftest via
-  `ANGRYBIRDS_SELFTEST=1`).
-- Tags: phase0-oracle-ready, phase1-raymath, r{camera,gestures,shapes,text,
-  textures,lgl,core,models,audio}-ported.
+- 🏁 **100% of raylib-authored code is Zig — all 10 modules ported, gated,
+  tagged** (`rmodels-ported`, `raudio-ported`). Remaining C in the swapped
+  build = bundled third-party only (rglfw.c + src/c/ shims), per charter.
+- **Examples acceptance suite: first batch 135/135 byte-identical** — every
+  core/shapes/text/textures upstream example, unmodified, C-vs-Zig pixel diff
+  (2 excluded with reasons in test/examples.list). Run:
+  `zig build && tools/exdiff.sh <oracle.a> zig-out/lib/libraylib.a [filter]`
+  (oracle .a path: `find .zig-cache -name libraylib_oracle.a -newer build.zig`).
+- Other gates all green: `zig build test` 12/12, `zig build audiocheck` 43/43,
+  datacheck, mathtest/camgrid/gestgrid. Capstone: `zig build angrybirds`
+  (docs: examples/angrybirds/README.md).
+- Repo clean, pushed to origin (github.com/algorisys-oss/raylib-zig-port).
 
-## 2. What this run did (2026-07-04, ~55 min + 2 background agents)
+## 2. What this run did (2026-07-04, ~2.5 h + 3 background agents/sweeps)
 
-- Fixed rmodels' DrawSphereEx (result-location aliasing), integrated → 12/12 →
-  tag `rmodels-ported`.
-- Built the raudio differential gate (test/audiocheck.c + tools/audiodiff.sh,
-  43 checks: PCM hashes for WAV/OGG/MP3/QOA, wave ops, exports, music
-  metadata+seek, stream state).
-- Agent-drafted src/raudio.zig (2287 lines, 78 exports) + src/c/raudio_impl.c
-  (miniaudio/decoder shim); fixed the gate-caught callback-before-cache bug
-  (device data callback fires during ma_device_start, before the draft cached
-  format/channels → memset(0 bytes) → NaN audio). All gates green → tag
-  `raudio-ported`.
-- Agent-built the Angry Birds capstone (examples/angrybirds/, 759 lines,
-  selftest + screenshot verified).
-- CLAUDE.md: added this handoff.md convention (user request) + 2 new gotchas
-  (result-location aliasing; callback-before-cache). tokens.txt updated.
+- rmodels: fixed DrawSphereEx result-location aliasing → 12/12 → tagged.
+- raudio: agent-drafted (2287 lines, 78 exports + shim), fixed the
+  callback-before-cache device-start bug the audiocheck gate caught → 43/43 →
+  tagged. audiocheck harness built this session (43 checks, PCM hashes).
+- Angry Birds capstone shipped (examples/angrybirds/, selftest verified).
+- Examples gate (exdiff) built and first batch landed 135/135 after fixing
+  3 real port bugs (rtext null-glyph atlas panic, rtextures GetPixelColor
+  eager @alignCast, rtext MeasureTextEx fractional-spacing truncation) and
+  2 oracle-build issues (-ffp-contract=off everywhere; UBSan off for the
+  oracle lib only). All post-mortems recorded as CLAUDE.md gotchas.
+- README refreshed (was "planning only"); angrybirds run docs added.
 
 ## 3. Next step on resume
 
-**Wire the 218-example acceptance suite** — the last "done" criterion in
-CLAUDE.md. First action: build a runner that compiles upstream
-`examples/core/*.c` against BOTH libs and pixel-diffs N deterministic frames
-under llvmpipe (pattern: tools/scenediff.sh). Start with the static no-input
-examples (~40), expand per category; log unautomatable ones in
-docs/not-migrated.md. Details in PROGRESS.md "Resume point".
+**Extend exdiff to the remaining upstream example categories** (~81 examples):
+add `models/`, `shaders/`, `audio/`, `others/` to test/examples.list, sweep,
+triage failures by root cause (process proven — see PROGRESS.md "NEXT"
+section for per-category expectations). 218-example bar = suite complete.
 
-Then (non-blocking): ReleaseFast archive failure workaround; Phase-6 idiomatic
-Zig API layer.
+Then (non-blocking): ReleaseFast archive workaround; Phase-6 idiomatic API.
 
 ## 4. Open issues / gotchas hit this run
 
-- **Audio device flake on this machine:** when the desktop's default sink is an
-  HDMI output, miniaudio can't map its sample spec and `InitAudioDevice` fails
-  in BOTH builds → audiocheck's device section (16/43 checks) is skipped with a
-  loud WARNING. Fix: prefix with
+- **Audio device flake:** if audiocheck warns the device section was skipped,
+  the desktop default sink is HDMI (spec miniaudio can't map). Prefix with
   `PULSE_SINK=alsa_output.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp__sink`.
-  Decode checks are device-independent.
-- raudio.zig keeps upstream C quirks verbatim (discarded log callback, ExportWave
-  result shadowing, ≥32MB jar_mod leak) — intentional, byte-exactness first;
-  documented in src comments.
-- `[_]u8{0} ** N` is rejected by zig 0.17.0-dev.644 in some positions; use
-  `: [N]T = @splat(0)`.
-- Zig object files MUST use `use_llvm = true` (self-hosted x86 backend
-  miscompiles by-value float code) — already applied everywhere in build.zig.
+- exdiff examples run with an LD_PRELOAD clock freezer (tools/exdiff/
+  fakeclock.c) — library-internal time is frozen; example-side time comes from
+  the shim's fixed 60 Hz clock. Don't "fix" one by removing the other.
+- The C oracle now builds WITHOUT UBSan and with -ffp-contract=off — both
+  deliberate (see build.zig comments); don't revert while diffing.
+- `zig build test/audiocheck` rebuild both libs; after build.zig changes the
+  oracle .a path in .zig-cache changes — locate with `-newer build.zig`.

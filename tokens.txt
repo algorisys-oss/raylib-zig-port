@@ -104,3 +104,15 @@
 # angrybirds capstone ~103.8k (token figures as reported by the Agent tool).
 # Wall clock this session ~55 min. What landed: rmodels-ported, raudio-ported,
 # angrybirds capstone, audiocheck gate, handoff.md convention. 100% milestone.
+
+# --- refresh 12:09 (same 2026-07-04 session): turns 3-6 supersede the earlier
+# turn-3 (in progress) row; figures below are final per-turn from token_usage.py
+3	2026-07-04	11:02:39	11:19:58	5108	145327	25539317	115120	25804872	42225066	raudio landed: callback-before-cache fix, all gates green, tag raudio-ported = 100%; docs; handoff
+4	2026-07-04	11:33:14	12:02:20	3936	272192	58935170	198209	59409507	101634573	examples gate: exdiff harness, sweep 122/137, root-caused+fixed 3 port bugs + 2 oracle issues (fp-contract, UBSan)
+5	2026-07-04	12:06:18	12:08:00	815	14613	5741147	9309	5765884	107400457	angrybirds run docs + README status refresh (user request)
+6	2026-07-04	12:08:35	12:09:33+	740	5569	2544093	9547	2559949	109960406	(in progress at record) final sweep 135/135; PROGRESS/handoff/tokens; commit+push
+# Session total ~110.0M (incl. cache reads); wall clock 10:20-12:10 IST (~1h50m).
+# Landed: rmodels-ported, raudio-ported (100% modules), angrybirds capstone,
+# audiocheck gate (43), exdiff examples gate (first batch 135/135), 3 port-bug
+# fixes, docs/handoff/README. Background agents: raudio draft ~268.8k out,
+# angrybirds ~103.8k out.
