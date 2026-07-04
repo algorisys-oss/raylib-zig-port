@@ -54,6 +54,12 @@ const c_defines = [_][]const u8{
     "-DSUPPORT_MODULE_RAUDIO=1",
     "-std=c99",
     "-w", // vendored third-party C is noisy; we don't own its warnings
+    // Strict IEEE: no FMA contraction. Zig never contracts, and clang's default
+    // fuses a*b+c in e.g. rlVertex3f's transform multiply — found as sub-pixel
+    // glyph shifts in text_3d_drawing (3D text under a rotated matrix stack).
+    // The scene battery missed it (its transforms had zero off-diagonals);
+    // mathgrid's oracle already used this flag for raymath bit-exactness.
+    "-ffp-contract=off",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
@@ -104,7 +110,13 @@ fn raylibLib(
         // IMPLEMENTATION block; rcore.c/rmodels.c still use them.
         "-includesrc/c/rlgl_impl_defs.h",
     };
-    const c_flags: []const []const u8 = if (swap and rlgl_ported) &rlgl_flags else &c_defines;
+    // The oracle compiles WITHOUT UBSan: its job is producing upstream C's
+    // practical reference output, and zig cc's default trap aborts on upstream's
+    // own benign-in-practice UB (e.g. rtextures.c ImageKernelConvolution's
+    // out-of-range float->uchar, hit by textures_image_kernel). The swapped
+    // build keeps UBSan on its remaining C — it has caught real port bugs.
+    const oracle_flags = c_defines ++ [_][]const u8{"-fno-sanitize=undefined"};
+    const c_flags: []const []const u8 = if (swap and rlgl_ported) &rlgl_flags else &oracle_flags;
 
     // GLFW is always C (vendored third-party windowing — never ported).
     mod.addCSourceFile(.{ .file = b.path("vendor/raylib/src/rglfw.c"), .flags = c_flags });

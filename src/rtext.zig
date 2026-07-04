@@ -743,12 +743,13 @@ export fn LoadFontData(fileData: [*c]const u8, dataSize: c_int, fontSize: c_int,
                     }
 
                     if (type_ == FONT_BITMAP) {
-                        // Aliased bitmap (black & white) font generation, avoiding anti-aliasing
-                        const data8: [*]u8 = @ptrCast(glyphs[uk].image.data);
+                        // Aliased bitmap (black & white) font generation, avoiding anti-aliasing.
+                        // A dataless space glyph has cpWidth*cpHeight == 0 — loop never runs.
+                        const data8: ?[*]u8 = @ptrCast(glyphs[uk].image.data);
                         var p: c_int = 0;
                         while (p < cpWidth * cpHeight) : (p += 1) {
                             const up: usize = @intCast(p);
-                            if (data8[up] < FONT_BITMAP_ALPHA_THRESHOLD) data8[up] = 0 else data8[up] = 255;
+                            if (data8.?[up] < FONT_BITMAP_ALPHA_THRESHOLD) data8.?[up] = 0 else data8.?[up] = 255;
                         }
                     }
 
@@ -851,9 +852,12 @@ export fn GenImageFontAtlas(glyphs: [*c]const GlyphInfo, glyphRecs: [*c][*c]Rect
                 }
             }
 
-            // Copy pixel data from glyph image to atlas
+            // Copy pixel data from glyph image to atlas. Missing glyphs have a
+            // null image with zero width/height — the loops never run, so the
+            // pointer is only unwrapped when there is data (C casts the NULL
+            // freely and likewise never dereferences it).
             const atlasData: [*]u8 = @ptrCast(atlas.data);
-            const glyphData: [*]const u8 = @ptrCast(glyphs[u].image.data);
+            const glyphData: ?[*]const u8 = @ptrCast(glyphs[u].image.data);
             var yy: c_int = 0;
             while (yy < glyphs[u].image.height) : (yy += 1) {
                 var xx: c_int = 0;
@@ -864,7 +868,7 @@ export fn GenImageFontAtlas(glyphs: [*c]const GlyphInfo, glyphRecs: [*c][*c]Rect
                     // Security: check both lower and upper bounds
                     if ((destX >= 0) and (destX < atlas.width) and (destY >= 0) and (destY < atlas.height)) {
                         atlasData[@intCast(destY * atlas.width + destX)] =
-                            glyphData[@intCast(yy * glyphs[u].image.width + xx)];
+                            glyphData.?[@intCast(yy * glyphs[u].image.width + xx)];
                     }
                 }
             }
@@ -910,8 +914,10 @@ export fn GenImageFontAtlas(glyphs: [*c]const GlyphInfo, glyphRecs: [*c][*c]Rect
             recs[u].height = @floatFromInt(glyphs[u].image.height);
 
             if (rects[u].was_packed != 0) {
-                // Copy pixel data from fc.data to atlas
-                const glyphData: [*]const u8 = @ptrCast(glyphs[u].image.data);
+                // Copy pixel data from fc.data to atlas. Missing glyphs have a
+                // null image with zero width/height — loops never run, pointer
+                // only unwrapped when there is data (C casts the NULL freely).
+                const glyphData: ?[*]const u8 = @ptrCast(glyphs[u].image.data);
                 var yy: c_int = 0;
                 while (yy < glyphs[u].image.height) : (yy += 1) {
                     var xx: c_int = 0;
@@ -921,7 +927,7 @@ export fn GenImageFontAtlas(glyphs: [*c]const GlyphInfo, glyphRecs: [*c][*c]Rect
 
                         if (destX >= 0 and destX < atlas.width and destY >= 0 and destY < atlas.height) {
                             atlasData[@intCast(destY * atlas.width + destX)] =
-                                glyphData[@intCast(yy * glyphs[u].image.width + xx)];
+                                glyphData.?[@intCast(yy * glyphs[u].image.width + xx)];
                         }
                     }
                 }
@@ -1164,7 +1170,7 @@ export fn DrawTextEx(font_in: Font, text: [*c]const u8, position: Vector2, fontS
             }
 
             const u: usize = @intCast(index);
-            if (font.glyphs[u].advanceX == 0) textOffsetX += (@as(f32, @floatFromInt(@as(c_int, @intFromFloat(font.recs[u].width)))) * scaleFactor + spacing) else textOffsetX += (@as(f32, @floatFromInt(font.glyphs[u].advanceX)) * scaleFactor + spacing);
+            if (font.glyphs[u].advanceX == 0) textOffsetX += (font.recs[u].width * scaleFactor + spacing) else textOffsetX += (@as(f32, @floatFromInt(font.glyphs[u].advanceX)) * scaleFactor + spacing);
         }
 
         i += codepointByteCount; // Move text bytes counter to next codepoint
@@ -1233,7 +1239,7 @@ export fn DrawTextCodepoints(font: Font, codepoints: [*c]const c_int, codepointC
             }
 
             const u: usize = @intCast(index);
-            if (font.glyphs[u].advanceX == 0) textOffsetX += (@as(f32, @floatFromInt(@as(c_int, @intFromFloat(font.recs[u].width)))) * scaleFactor + spacing) else textOffsetX += (@as(f32, @floatFromInt(font.glyphs[u].advanceX)) * scaleFactor + spacing);
+            if (font.glyphs[u].advanceX == 0) textOffsetX += (font.recs[u].width * scaleFactor + spacing) else textOffsetX += (@as(f32, @floatFromInt(font.glyphs[u].advanceX)) * scaleFactor + spacing);
         }
     }
 }
@@ -1306,7 +1312,10 @@ export fn MeasureTextEx(font: Font, text: [*c]const u8, fontSize: f32, spacing: 
 
     if (tempTextWidth < textWidth) tempTextWidth = textWidth;
 
-    textSize.x = tempTextWidth * scaleFactor + @as(f32, @floatFromInt((tempByteCounter - 1) * @as(c_int, @intFromFloat(spacing))));
+    // C: `(float)((tempByteCounter - 1)*spacing)` — int*float promotes to a
+    // FLOAT multiply; the cast is a no-op. Truncating spacing to int would
+    // zero the whole term for fractional spacings.
+    textSize.x = tempTextWidth * scaleFactor + @as(f32, @floatFromInt(tempByteCounter - 1)) * spacing;
     textSize.y = textHeight;
 
     return textSize;
@@ -1355,7 +1364,8 @@ export fn MeasureTextCodepoints(font: Font, codepoints: [*c]const c_int, length:
 
     if (tempTextWidth < textWidth) tempTextWidth = textWidth;
 
-    textSize.x = tempTextWidth * scaleFactor + @as(f32, @floatFromInt((tempGlyphCounter - 1) * @as(c_int, @intFromFloat(spacing))));
+    // Same as MeasureTextEx: C multiplies int*float in FLOAT, cast is a no-op.
+    textSize.x = tempTextWidth * scaleFactor + @as(f32, @floatFromInt(tempGlyphCounter - 1)) * spacing;
     textSize.y = textHeight;
 
     return textSize;

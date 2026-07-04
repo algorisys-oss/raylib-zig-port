@@ -4734,68 +4734,79 @@ export fn GetColor(hexValue: c_uint) callconv(.c) Color {
 export fn GetPixelColor(srcPtr: ?*const anyopaque, format: c_int) callconv(.c) Color {
     var color: Color = std.mem.zeroes(Color);
 
+    // The wider views are computed lazily inside the arms that use them: for
+    // 1-byte formats srcPtr is often odd-aligned (a byte offset into the image),
+    // and an eager @alignCast would trap. C casts per-case for the same reason.
     const s8: [*]const u8 = @ptrCast(srcPtr);
-    const s16: [*]const u16 = @ptrCast(@alignCast(srcPtr));
-    const s32: [*]const f32 = @ptrCast(@alignCast(srcPtr));
+    const S = struct {
+        inline fn u16s(p: ?*const anyopaque) [*]const u16 {
+            return @ptrCast(@alignCast(p));
+        }
+        inline fn f32s(p: ?*const anyopaque) [*]const f32 {
+            return @ptrCast(@alignCast(p));
+        }
+    };
+    const s16 = S.u16s;
+    const s32 = S.f32s;
 
     switch (format) {
         PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => color = .{ .r = s8[0], .g = s8[0], .b = s8[0], .a = 255 },
         PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => color = .{ .r = s8[0], .g = s8[0], .b = s8[0], .a = s8[1] },
         PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-            color.r = iuc(@divTrunc(@as(c_int, (s16[0] >> 11)) * 255, 31));
-            color.g = iuc(@divTrunc(@as(c_int, ((s16[0] >> 5) & 0b0000000000111111)) * 255, 63));
-            color.b = iuc(@divTrunc(@as(c_int, (s16[0] & 0b0000000000011111)) * 255, 31));
+            color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 11)) * 255, 31));
+            color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 5) & 0b0000000000111111)) * 255, 63));
+            color.b = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] & 0b0000000000011111)) * 255, 31));
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-            color.r = iuc(@divTrunc(@as(c_int, (s16[0] >> 11)) * 255, 31));
-            color.g = iuc(@divTrunc(@as(c_int, ((s16[0] >> 6) & 0b0000000000011111)) * 255, 31));
-            color.b = iuc(@divTrunc(@as(c_int, (s16[0] & 0b0000000000011111)) * 255, 31));
-            color.a = if ((s16[0] & 0b0000000000000001) != 0) 255 else 0;
+            color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 11)) * 255, 31));
+            color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 6) & 0b0000000000011111)) * 255, 31));
+            color.b = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] & 0b0000000000011111)) * 255, 31));
+            color.a = if ((s16(srcPtr)[0] & 0b0000000000000001) != 0) 255 else 0;
         },
         PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-            color.r = iuc(@divTrunc(@as(c_int, (s16[0] >> 12)) * 255, 15));
-            color.g = iuc(@divTrunc(@as(c_int, ((s16[0] >> 8) & 0b0000000000001111)) * 255, 15));
-            color.b = iuc(@divTrunc(@as(c_int, ((s16[0] >> 4) & 0b0000000000001111)) * 255, 15));
-            color.a = iuc(@divTrunc(@as(c_int, (s16[0] & 0b0000000000001111)) * 255, 15));
+            color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 12)) * 255, 15));
+            color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 8) & 0b0000000000001111)) * 255, 15));
+            color.b = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 4) & 0b0000000000001111)) * 255, 15));
+            color.a = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] & 0b0000000000001111)) * 255, 15));
         },
         PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => color = .{ .r = s8[0], .g = s8[1], .b = s8[2], .a = s8[3] },
         PIXELFORMAT_UNCOMPRESSED_R8G8B8 => color = .{ .r = s8[0], .g = s8[1], .b = s8[2], .a = 255 },
         PIXELFORMAT_UNCOMPRESSED_R32 => {
-            color.r = tuc(s32[0] * 255.0);
-            color.g = tuc(s32[0] * 255.0);
-            color.b = tuc(s32[0] * 255.0);
+            color.r = tuc(s32(srcPtr)[0] * 255.0);
+            color.g = tuc(s32(srcPtr)[0] * 255.0);
+            color.b = tuc(s32(srcPtr)[0] * 255.0);
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-            color.r = tuc(s32[0] * 255.0);
-            color.g = tuc(s32[1] * 255.0);
-            color.b = tuc(s32[2] * 255.0);
+            color.r = tuc(s32(srcPtr)[0] * 255.0);
+            color.g = tuc(s32(srcPtr)[1] * 255.0);
+            color.b = tuc(s32(srcPtr)[2] * 255.0);
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-            color.r = tuc(s32[0] * 255.0);
-            color.g = tuc(s32[1] * 255.0);
-            color.b = tuc(s32[2] * 255.0);
-            color.a = tuc(s32[3] * 255.0);
+            color.r = tuc(s32(srcPtr)[0] * 255.0);
+            color.g = tuc(s32(srcPtr)[1] * 255.0);
+            color.b = tuc(s32(srcPtr)[2] * 255.0);
+            color.a = tuc(s32(srcPtr)[3] * 255.0);
         },
         PIXELFORMAT_UNCOMPRESSED_R16 => {
-            color.r = tuc(HalfToFloat(s16[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16[0]) * 255.0);
-            color.b = tuc(HalfToFloat(s16[0]) * 255.0);
+            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.g = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.b = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-            color.r = tuc(HalfToFloat(s16[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16[1]) * 255.0);
-            color.b = tuc(HalfToFloat(s16[2]) * 255.0);
+            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.g = tuc(HalfToFloat(s16(srcPtr)[1]) * 255.0);
+            color.b = tuc(HalfToFloat(s16(srcPtr)[2]) * 255.0);
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-            color.r = tuc(HalfToFloat(s16[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16[1]) * 255.0);
-            color.b = tuc(HalfToFloat(s16[2]) * 255.0);
-            color.a = tuc(HalfToFloat(s16[3]) * 255.0);
+            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.g = tuc(HalfToFloat(s16(srcPtr)[1]) * 255.0);
+            color.b = tuc(HalfToFloat(s16(srcPtr)[2]) * 255.0);
+            color.a = tuc(HalfToFloat(s16(srcPtr)[3]) * 255.0);
         },
         else => {},
     }
