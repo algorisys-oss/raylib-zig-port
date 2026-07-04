@@ -204,6 +204,21 @@ before claiming a module done.
   Rule: cache every property a callback reads BEFORE the call that can first
   trigger the callback, and audit each cached-instead-of-live field for "who
   reads this, and can they run before it's set?"
+- **Casts C performs freely must stay lazy in Zig.** (Three finds from the
+  examples gate, 2026-07-04.) (a) C casts NULL to `unsigned char *` and never
+  dereferences it (zero-trip loops guard it) — a Zig `@ptrCast` to non-optional
+  `[*]u8` panics at the cast; use `?[*]u8` and unwrap inside the loop. (b) C
+  declares `u16*`/`f32*` views inside the switch arm that uses them — hoisting
+  them above the switch as eager `@alignCast` traps when the pointer is a
+  byte-offset into 1-byte-per-pixel data. (c) C's `(float)((count-1)*spacing)`
+  with float `spacing` is an int*float FLOAT multiply (the cast is a no-op) —
+  translating it as an int truncation of `spacing` silently zeroes the term for
+  fractional spacings. Rule: replicate WHERE C casts, not just what it casts to.
+- **FMA contraction is real, and the scene battery can miss it.** Confirmed:
+  clang fuses `a*b + c` (rlVertex3f's transform multiply) while Zig never
+  contracts — visible only when the transform has non-zero off-diagonals
+  (rotation), which the original scene battery never exercised. All C in this
+  repo now compiles `-ffp-contract=off` (build.zig c_defines); keep it.
 - **`Color` is 4×`u8` packed; `Vector*`/`Matrix` are `f32`.** Match field types
   and struct packing exactly; raylib passes these **by value** across the ABI
   (e.g. `DrawRectangle(..., Color)`), which is calling-convention-sensitive for
