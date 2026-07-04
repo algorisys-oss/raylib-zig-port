@@ -4,68 +4,81 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
-## Future capstone (user request 2026-06-28)
+## Capstone (user request 2026-06-28) — ✅ DONE 2026-07-04
 
-Once rcore (window+input) + rlgl are ported (so a real interactive game can run),
-create `examples/` and **recreate the Angry Birds game in Zig/raylib-zig** —
-reference: `/home/rajesh/lab/csharp/csharp-raylib-angrybirds` (C# + raylib, ~6
-.cs files, physics slingshot game). Proves the ported library is usable, not just
-gate-passing. See memory `angrybirds-demo-task`.
+`examples/angrybirds/` — the C# reference game
+(`/home/rajesh/lab/csharp/csharp-raylib-angrybirds`) recreated as idiomatic Zig
+over the ported library's C ABI. `zig build angrybirds` to play; headless
+scripted selftest (`ANGRYBIRDS_SELFTEST=1`) verifies it runs (screenshot
+checked). Proves the library is usable, not just gate-passing.
 
-## Resume point — 9/10 modules; engine Zig except raudio (2026-07-04)
+## Resume point — 🏁 100%: all 10 modules Zig (2026-07-04, tag `raudio-ported`)
 
-**DONE (all green, tagged, committed):** raymath, rcamera, rgestures (bit-exact);
-rshapes, rtext, rtextures, rlgl, rcore, **rmodels** (pixel byte-exact). Everything
-except audio is Zig. Main gate **12/12** (incl. two 3D scenes); `zig build
-datacheck` green. Last milestone: tag `rmodels-ported` (commit `f706029`).
+**Every raylib-authored module is now Zig.** raymath, rcamera, rgestures
+(bit-exact); rshapes, rtext, rtextures, rlgl, rcore, rmodels (pixel byte-exact);
+**raudio** (PCM byte-exact). The swapped build compiles NO raylib-authored C —
+remaining C is bundled third-party only (rglfw.c + the src/c/ instantiation
+shims), per the charter's allowed exceptions. Gates all green: pixel **12/12**,
+**audiocheck 43/43** (full coverage incl. device section), datacheck OK, and the
+**Angry Birds capstone** (examples/angrybirds/, `zig build angrybirds`) runs on
+the full-Zig library with a headless selftest.
 
-**rmodels post-mortem (2026-07-04):** the draft's one bug was Zig
-**result-location aliasing** in `DrawSphereEx` — `vertices[n] = .{ .x = ...,
-.z = f(vertices[n].x) }` writes fields in place (C's compound literal is a
-temporary), so `.z` read the freshly-written `.x`; the sphere collapsed to
-degenerate triangles and drew nothing. Fixed by snapshotting into a local first;
-whole file swept for the pattern (none elsewhere). Gotcha recorded in CLAUDE.md.
+**Module-draft post-mortems (2026-07-04)** — both gate-caught, both now CLAUDE.md
+gotchas to check in any future Zig work here:
+- rmodels: **result-location aliasing** in DrawSphereEx (`v = .{ .z =
+  f(v.x) }` reads the freshly-written `.x`; C's compound literal is a temporary).
+- raudio: **callback-before-cache** — `ma_device_start` can invoke the data
+  callback synchronously (pulse primes its stream), but the draft cached the
+  device format/channels only after start → first callback memset 0 bytes,
+  shipped uninitialized memory (NaN → UBSan abort). Cache device properties
+  before `ma_device_start`.
 
-### NEXT — raudio (the last module)
-Audio. Build `src/c/raudio_impl.c` shim replicating raudio.c's preamble
-(config.h-driven; formats enabled: WAV/OGG/MP3/QOA/XM/MOD; FLAC OFF):
-- miniaudio: `MA_MALLOC/MA_FREE`, `MA_NO_JACK`, `MA_NO_WAV/FLAC/MP3`,
-  `MA_NO_RESOURCE_MANAGER/NODE_GRAPH/ENGINE/GENERATION`, `MA_COINIT_VALUE 2`,
-  `MINIAUDIO_IMPLEMENTATION` + `#include "external/miniaudio.h"` (HUGE).
-- `DR_WAV_IMPLEMENTATION`+dr_wav.h; `#include "external/stb_vorbis.c"`;
-  `DR_MP3_IMPLEMENTATION`+dr_mp3.h; `QOA_MALLOC/FREE`+`QOA_IMPLEMENTATION`+qoa.h +
-  `#include "external/qoaplay.c"`; `JAR_XM_IMPLEMENTATION`+jar_xm.h;
-  `JAR_MOD_IMPLEMENTATION`+jar_mod.h. (dr_flac OFF.)
-- raudio.c owns the AudioBuffer/device callback/mixing — needs an audio device
-  for playback (may be absent headless → InitAudioDevice handles gracefully).
-  Validate the DECODE path with a **PCM-diff harness**: build a known WAV/QOA in
-  memory, `LoadWaveFromMemory` C-vs-Zig (or vs known samples), compare PCM bytes.
-  Device/mixing = loose check. Then integrate (add `"raudio.c"` to
-  ported_modules + shim) + tag `raudio-ported` = **100%**.
+**Environment note:** if `audiocheck` reports the device section skipped
+(`device: ready=0` + loud WARNING), the desktop default sink is an HDMI output
+whose sample spec miniaudio can't map. Run with
+`PULSE_SINK=alsa_output.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp__sink`
+(the analog sink) for full 43-check coverage. Decode/wave/export checks (27) are
+device-independent.
 
-### THEN — the Angry Birds capstone (examples/)
-See the "Future capstone" note below + memory `angrybirds-demo-task`.
+### NEXT — the examples acceptance suite (the remaining "done" criterion)
+CLAUDE.md's bar: **all 218 upstream examples pass** (build + link against the
+Zig library + pixel/PCM-match vs the C oracle). The scene battery + audiocheck
+prove the modules; the examples suite proves the whole surface. Plan: a runner
+that builds each `examples/**/*.c` against both libs, drives N deterministic
+frames headless under llvmpipe (inject input where examples need it — many are
+static render loops), screenshots both, byte-diffs. Start with the ~40
+core/shapes/text/textures examples (no input, no assets beyond resources/),
+expand category by category; log unautomatable ones (interactive-only,
+GPU-timing-dependent) in docs/not-migrated.md with reasons. Track pass count
+here.
 
-## Status snapshot (2026-06-28)
+### THEN — cleanups (non-blocking)
+- ReleaseFast static-archive LLD failure (workaround candidates noted in
+  "Known issues").
+- Idiomatic-Zig API layer (Phase 6, separate surface; C ABI stays frozen).
+
+## Status snapshot (2026-07-04)
 
 | Phase | State |
 |---|---|
-| 0 — foundation + oracle | **DONE** ✅ (`zig build test` green, 4/4 scenes byte-identical) |
+| 0 — foundation + oracle | **DONE** ✅ (`zig build test` green) |
 | 1 — raymath | **DONE** ✅ (`zig build mathtest` bit-exact, 146 fns / 79,800 values) |
-| 2 — rlgl | not started (header-only; the GL layer) |
-| 3 — rshapes/rtextures/rtext | **ALL THREE DONE** ✅ (pixel gate 10/10) |
-| 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
-| 5 — rmodels/raudio | rmodels **DONE** ✅ (gate 12/12, tag `rmodels-ported`); raudio remains |
+| 2 — rlgl | **DONE** ✅ (163 fns; pixel byte-exact) |
+| 3 — rshapes/rtextures/rtext | **ALL THREE DONE** ✅ |
+| 4 — rcamera/rgestures/rcore | **ALL DONE** ✅ (bit-exact / pixel byte-exact) |
+| 5 — rmodels/raudio | **BOTH DONE** ✅ (tags `rmodels-ported`, `raudio-ported`) |
+| capstone | **DONE** ✅ examples/angrybirds (`zig build angrybirds`, headless selftest) |
 
-Modules ported to Zig: **9 / 10** (raymath, rcamera, rgestures, rshapes, rtext,
-rtextures, rlgl, rcore, rmodels). Only **raudio** (audio) remains.
+Modules ported to Zig: **10 / 10** — 🏁 **100% of raylib-authored code**.
 `ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c,
-rmodels.c}; rlgl + rcore swap via their own flags (`rlgl_ported`/`rcore_ported`,
-both true); raymath/rcamera/rgestures link in via the rcore swap. Gate: 12/12
-pixel byte-exact + bit-exact math/cam/gestures + datacheck.
+rmodels.c, raudio.c}; rlgl + rcore swap via their own flags
+(`rlgl_ported`/`rcore_ported`, both true); raymath/rcamera/rgestures link in via
+the rcore swap. Gates: 12/12 pixel + 43/43 audio + bit-exact math/cam/gestures +
+datacheck.
 
-Examples passing (the 218-example acceptance suite): not yet wired (needs the
-modules a given example uses to be ported first). Scene battery: 10 scenes (+ image_gen, image_ops, color_ops for rtextures).
+Examples passing (the 218-example acceptance suite): **not yet wired — this is
+the next milestone** (see Resume point). Scene battery: 12 scenes; audiocheck
+battery: 43 checks.
 
 ## What Phase 0 established (proven, not assumed)
 
@@ -140,3 +153,4 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 - `rlgl-ported` — rlgl.zig (163 fns + gl33.zig) pixel byte-exact vs C (10/10); 2D pipeline Zig.
 - `rcore-ported` — rcore.zig (212 fns, rcore.c + GLFW platform, CoreData private) pixel byte-exact (10/10); whole engine Zig except rmodels+raudio.
 - `rmodels-ported` — rmodels.zig (73 fns, 6791 lines) pixel byte-exact (12/12 incl. 3d_shapes + 3d_mesh); fixed draft's DrawSphereEx result-location aliasing bug.
+- `raudio-ported` — raudio.zig (78 fns, 2287 lines + miniaudio/decoder shim) PCM byte-exact (audiocheck 43/43); fixed draft's callback-before-cache device-start bug. **100% — no raylib-authored C remains in the build.**

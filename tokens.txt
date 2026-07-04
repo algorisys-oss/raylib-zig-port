@@ -94,3 +94,13 @@
 #   re-spawn) -> integrate (add rmodels.c to ported_modules; shim pre-wired) ->
 #   gate -> tag. Then raudio (shim config noted in PROGRESS.md) -> 100%. Then
 #   the Angry Birds capstone in examples/. See PROGRESS.md "Resume point".
+
+# --- SESSION 2026-07-04: 100% — all 10 modules ported (10:20–~11:15 IST) ------
+# turn	date	start	end	input	cache_cr	cache_rd	output	total	cumulative	summary
+1	2026-07-04	10:20:53	10:39:49	30518	531785	12644652	171558	13378513	13378513	Let's continue: rmodels aliasing fix -> 12/12, tag rmodels-ported; CLAUDE.md handoff rule; audiocheck harness (43/43 baseline); raudio draft + angrybirds agents spawned
+2	2026-07-04	10:53:53	10:55:39	1338	446319	2585422	8602	3041681	16420194	angrybirds capstone landed: integrated, selftest+screenshot verified, committed
+3	2026-07-04	11:02:39	11:12:50+	3932	91872	14890606	65922	15052332	31472526	(in progress at record time) raudio landed: callback-before-cache fix, audiocheck 43/43 + all gates, tag raudio-ported = 100%; docs/handoff
+# Subagent costs (separate from turns above): raudio draft ~268.8k output-side,
+# angrybirds capstone ~103.8k (token figures as reported by the Agent tool).
+# Wall clock this session ~55 min. What landed: rmodels-ported, raudio-ported,
+# angrybirds capstone, audiocheck gate, handoff.md convention. 100% milestone.

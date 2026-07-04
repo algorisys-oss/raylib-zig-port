@@ -194,6 +194,16 @@ before claiming a module done.
   the earlier ones already overwrote. Any C assignment whose RHS literal reads
   the LHS must snapshot first (`const old = v[2];`) in Zig. Sweep every drafted
   module for `X = .{ ... X.field ... }` (single- AND multi-line) before gating.
+- **Callback-before-cache when wrapping C globals behind opaque pointers.**
+  (Found the hard way: raudio's device callback — NaN audio, UBSan abort.) When
+  a port caches C-struct properties (instead of reading them live through the
+  pointer like C does), any callback that can fire DURING setup reads the
+  not-yet-cached values. `ma_device_start` invokes the data callback
+  synchronously (pulse primes its stream); the callback sized its memset from
+  fields cached only after start → zero-byte memset → uninitialized output.
+  Rule: cache every property a callback reads BEFORE the call that can first
+  trigger the callback, and audit each cached-instead-of-live field for "who
+  reads this, and can they run before it's set?"
 - **`Color` is 4×`u8` packed; `Vector*`/`Matrix` are `f32`.** Match field types
   and struct packing exactly; raylib passes these **by value** across the ABI
   (e.g. `DrawRectangle(..., Color)`), which is calling-convention-sensitive for
