@@ -15,6 +15,8 @@ raylib-authored C remains in the build. The **real, intended exceptions** (thing
 we deliberately do **not** port — same spirit as sqlite-zig keeping the
 Lemon-generated `parse.c` as C):
 
+Validate agains: LOOP.md for essential checklist/processes
+
 1. **Bundled third-party libraries in `src/external/`** (stb_*, miniaudio, dr_*,
    cgltf, par_shapes, m3d, qoi/qoa, glad, rlsw, jar_*, GLFW/RGFW). These are not
    raylib — they are vendored upstream single-file libs. We **link** them as C.
@@ -184,6 +186,14 @@ before claiming a module done.
   object can't satisfy two configs at once. Pin ONE config first
   (PLATFORM_DESKTOP_GLFW + OPENGL_33 on Linux, default `config.h`); mirror the
   chosen flags as a Zig `comptime` `config` module.
+- **Result-location aliasing when translating C compound-literal assignment.**
+  (Found the hard way: rmodels' `DrawSphereEx` — sphere rendered as nothing.)
+  C's `v[2] = (Vector3){ f(v[2].x), v[2].y, g(v[2].x) }` evaluates the literal
+  into a temporary, then stores. Zig's `v[2] = .{ .x = ..., .z = ... }` uses
+  `v[2]` itself as the result location — later field initializers read fields
+  the earlier ones already overwrote. Any C assignment whose RHS literal reads
+  the LHS must snapshot first (`const old = v[2];`) in Zig. Sweep every drafted
+  module for `X = .{ ... X.field ... }` (single- AND multi-line) before gating.
 - **`Color` is 4×`u8` packed; `Vector*`/`Matrix` are `f32`.** Match field types
   and struct packing exactly; raylib passes these **by value** across the ABI
   (e.g. `DrawRectangle(..., Color)`), which is calling-convention-sensitive for
@@ -276,6 +286,26 @@ already-completed since the last record IS countable now — log it before you s
 [token-count.md](token-count.md) is the separate **scope-sizing** number (how big
 the porting job is: LOC/bytes of the raylib C we port), distinct from per-prompt
 LLM usage.
+
+## handoff.md (required after every run)
+
+At the end of **every run** — any pause, stop, or hand-back of control — write
+(overwrite, don't append) `handoff.md` at the repo root. It is the fresh-session
+bootstrap: a new agent should be able to read handoff.md alone and resume
+correctly. Keep it short and current; PROGRESS.md stays the long-lived history.
+Contents:
+
+1. **State right now** — last green commit/tag, gate result (e.g. `12/12`),
+   modules ported vs remaining, anything uncommitted.
+2. **What this run did** — the few bullets of what landed since the previous
+   handoff.
+3. **Next step** — the single first action to take on resume, then the ordered
+   short list after it.
+4. **Open issues / gotchas hit** — anything in-flight, half-debugged, or
+   surprising (also fold durable ones into the CLAUDE.md gotcha list).
+
+Do this **in addition to** the token/time record above — same trigger, both
+required.
 
 ## Build (this project)
 

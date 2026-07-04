@@ -12,39 +12,21 @@ reference: `/home/rajesh/lab/csharp/csharp-raylib-angrybirds` (C# + raylib, ~6
 .cs files, physics slingshot game). Proves the ported library is usable, not just
 gate-passing. See memory `angrybirds-demo-task`.
 
-## Resume point — 8/10 modules; engine Zig except rmodels+raudio (paused 2026-06-28)
+## Resume point — 9/10 modules; engine Zig except raudio (2026-07-04)
 
 **DONE (all green, tagged, committed):** raymath, rcamera, rgestures (bit-exact);
-rshapes, rtext, rtextures, rlgl, rcore (pixel byte-exact). The whole raylib engine
-— window/input/timing (rcore + GLFW platform), GL abstraction (rlgl), 2D drawing
-(rshapes), text (rtext), image/texture (rtextures), math/camera/gestures — is Zig.
-Main gate **12/12** (incl. two 3D scenes); rcore data fns validated (`zig build
-datacheck`). Last green commit: `Pre-wire rmodels shim`. Only **rmodels.c** (3D)
-and **raudio.c** (audio) remain.
+rshapes, rtext, rtextures, rlgl, rcore, **rmodels** (pixel byte-exact). Everything
+except audio is Zig. Main gate **12/12** (incl. two 3D scenes); `zig build
+datacheck` green. Last milestone: tag `rmodels-ported` (commit `f706029`).
 
-### IN PROGRESS — rmodels (resume here first) — DRAFT DONE, 1 bug
+**rmodels post-mortem (2026-07-04):** the draft's one bug was Zig
+**result-location aliasing** in `DrawSphereEx` — `vertices[n] = .{ .x = ...,
+.z = f(vertices[n].x) }` writes fields in place (C's compound literal is a
+temporary), so `.z` read the freshly-written `.x`; the sphere collapsed to
+degenerate triangles and drew nothing. Fixed by snapshotting into a local first;
+whole file swept for the pattern (none elsewhere). Gotcha recorded in CLAUDE.md.
 
-`src/rmodels.zig` is COMPLETE (6791 lines, 73 exports, fmt-clean, builds
-`-fllvm`) and COMMITTED, but NOT in `ported_modules` (so the build stays green
-with C rmodels — 12/12). When swapped in, the gate is **11/12**: all 2D scenes +
-the **3d_mesh** scene (GenMeshCube/Sphere/Torus + DrawModel/DrawModelEx + DrawGrid)
-are **byte-identical**; only **3d_shapes fails (1.3% of pixels)**.
-
-**The one bug: `DrawSphere`/`DrawSphereEx` solid fill does not render.** Evidence:
-the diff is exactly the sphere's bounding box (x[283..356] y[132..204]); C shows
-the solid blue sphere (0,121,241), Zig shows the plane behind it (50,55,65) — so
-the solid triangles aren't drawn (the wireframe `DrawSphereWires` IS fine, and
-`DrawCube` solid IS fine). Verified NOT the cause: RL_TRIANGLES=0x0004 constant,
-DEG2RAD=PI/180 (f32), the vertex math/order (line-for-line identical to C), Color
-ABI (DrawCube works). Suspect: a subtle issue specific to DrawSphereEx's
-immediate-mode triangle stream (winding/culling, batch, or the in-place `vertices`
-array update). TO DEBUG: make a throwaway scene with ONLY `DrawSphere` (isolate),
-compare to C; check rlEnableBackfaceCulling state + triangle winding; verify the
-self-referential `vertices[2] = .{ .x = cosslice*vertices[2].x - ... }` array
-update isn't mis-evaluating. Then re-add `"rmodels.c"` to `ported_modules`,
-`zig build test` → 12/12, commit + tag `rmodels-ported`.
-
-### THEN — raudio (the last module)
+### NEXT — raudio (the last module)
 Audio. Build `src/c/raudio_impl.c` shim replicating raudio.c's preamble
 (config.h-driven; formats enabled: WAV/OGG/MP3/QOA/XM/MOD; FLAC OFF):
 - miniaudio: `MA_MALLOC/MA_FREE`, `MA_NO_JACK`, `MA_NO_WAV/FLAC/MP3`,
@@ -73,15 +55,14 @@ See the "Future capstone" note below + memory `angrybirds-demo-task`.
 | 2 — rlgl | not started (header-only; the GL layer) |
 | 3 — rshapes/rtextures/rtext | **ALL THREE DONE** ✅ (pixel gate 10/10) |
 | 4 — rcamera | **DONE** ✅ (bit-exact); rgestures/rlgl/rcore remain |
-| 5 — rmodels/raudio | not started (3D + audio; need shims + 3D/PCM harnesses) |
+| 5 — rmodels/raudio | rmodels **DONE** ✅ (gate 12/12, tag `rmodels-ported`); raudio remains |
 
-Modules ported to Zig: **8 / 10** (raymath, rcamera, rgestures, rshapes, rtext, rtextures, rlgl, rcore). Only **rmodels** (3D, draft in progress) + **raudio** (audio) remain.
-`ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c}
-(the rendering modules swapped into the lib + their stb shims); raymath & rcamera
-are header-only, validated bit-exact standalone but not yet swapped into the
-render path (they swap in when their callers — rshapes already uses none; rcore —
-are ported / via out-of-line instantiation). Gate: 10/10 pixel + bit-exact
-math/cam.
+Modules ported to Zig: **9 / 10** (raymath, rcamera, rgestures, rshapes, rtext,
+rtextures, rlgl, rcore, rmodels). Only **raudio** (audio) remains.
+`ported_modules` in [build.zig](build.zig) = {rshapes.c, rtext.c, rtextures.c,
+rmodels.c}; rlgl + rcore swap via their own flags (`rlgl_ported`/`rcore_ported`,
+both true); raymath/rcamera/rgestures link in via the rcore swap. Gate: 12/12
+pixel byte-exact + bit-exact math/cam/gestures + datacheck.
 
 Examples passing (the 218-example acceptance suite): not yet wired (needs the
 modules a given example uses to be ported first). Scene battery: 10 scenes (+ image_gen, image_ops, color_ops for rtextures).
@@ -158,3 +139,4 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 - `rgestures-ported` — rgestures.zig (10 fns, controlled-clock harness) bit-exact vs C (3,200 values).
 - `rlgl-ported` — rlgl.zig (163 fns + gl33.zig) pixel byte-exact vs C (10/10); 2D pipeline Zig.
 - `rcore-ported` — rcore.zig (212 fns, rcore.c + GLFW platform, CoreData private) pixel byte-exact (10/10); whole engine Zig except rmodels+raudio.
+- `rmodels-ported` — rmodels.zig (73 fns, 6791 lines) pixel byte-exact (12/12 incl. 3d_shapes + 3d_mesh); fixed draft's DrawSphereEx result-location aliasing bug.
