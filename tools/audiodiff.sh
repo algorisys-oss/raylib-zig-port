@@ -25,6 +25,13 @@ echo "== decoding via zig (swapped) =="
 total=$(wc -l < "$TMP/c.report")
 if diff -u "$TMP/c.report" "$TMP/zig.report" > "$TMP/report.diff"; then
   echo "------------------------------------------------------------"
+  if grep -q "device: ready=0" "$TMP/c.report"; then
+    echo "WARNING: audio device init FAILED (both builds) — the device-dependent"
+    echo "         checks (sound load, music metadata/seek, stream state) were"
+    echo "         SKIPPED. Coverage is reduced; this is an environment issue"
+    echo "         (e.g. default sink is an HDMI output miniaudio can't map)."
+    echo "         Retry with PULSE_SINK=<analog-sink-node-name> for full coverage."
+  fi
   echo "OK  $total/$total audio checks byte-identical (C == Zig)"
   exit 0
 else
