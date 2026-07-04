@@ -10,10 +10,28 @@ proven playbook: per-translation-unit C→Zig swap, C-ABI-preserving boundaries,
 ground-truth struct-offset tooling, parallel drafting with serial verification,
 and per-prompt token logging.
 
-> **Status: planning only — no code yet.** This repository currently holds the
-> migration plan and conventions. Implementation has not started. See
-> [plan.md](plan.md) for the staged approach and [CLAUDE.md](CLAUDE.md) for the
-> working guidance. This README will grow build/run instructions as Phase 0 lands.
+> **Status (2026-07-04): all 10 raylib modules are ported — 100% of
+> raylib-authored C is Zig** for the pinned Linux/GLFW/OpenGL 3.3 target
+> (bundled third-party libs in `external/` stay linked C, by design). Gates:
+> 12/12 scene pixel-diff, 43/43 audio PCM-diff, bit-exact math/camera/gesture
+> grids, and the upstream-examples acceptance suite (first batch, 2D categories).
+> Live status: [PROGRESS.md](PROGRESS.md); resume notes: [handoff.md](handoff.md).
+
+## Build & run
+
+```bash
+zig build                  # build libraylib.a (Zig-swapped) + demo runners
+zig build test             # the migration gate: C-vs-Zig scene pixel diff (llvmpipe)
+zig build audiocheck       # the raudio gate: C-vs-Zig decode/PCM diff
+zig build datacheck        # rcore data functions vs known vectors
+zig build angrybirds       # play the Angry Birds capstone demo (X11 window)
+```
+
+The **Angry Birds demo** ([examples/angrybirds/](examples/angrybirds/)) is a
+complete slingshot game written in idiomatic Zig against the ported library —
+drag with the left mouse button and release to fire, `R` restarts, `SPACE`
+advances after a level clear. See its [README](examples/angrybirds/README.md)
+for the headless self-test mode.
 
 - **Porting:** raylib v6.1-dev (`/home/rajesh/opensource/graphics/raylib`, git
   `6.0-178`)
