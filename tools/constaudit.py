@@ -7,8 +7,9 @@ rcore's ShaderLocationIndex drifted +1 and silently broke GPU instancing).
 
 Parses every `typedef enum { ... }` / `enum { ... }` member (with implicit
 increments) and every numeric `#define NAME <int-expr>` in raylib's own
-top-level sources (vendor/raylib/src/*.h, *.c — not external/), then checks
-every `const NAME[: T] = <int|bool>;` in src/*.zig whose NAME the C side defines.
+top-level sources (vendor/raylib/src/*.h, *.c — not external/), plus string
+`#define NAME "..."`, then checks
+every `const NAME[: T] = <int|bool|"string">;` in src/*.zig whose NAME the C side defines.
 A Zig value passes when it equals ANY C definition of that name (headers
 define some names differently per #if branch). Commented-out lines
 (`//#define`) are ignored.
@@ -57,7 +58,8 @@ def parse_c(paths):
     for path in paths:
         text = strip_comments(path.read_text(errors="replace"))
         for m in re.finditer(r"^\s*#\s*define\s+([A-Z_][A-Z0-9_]*)\s+(.+)$", text, re.M):
-            value = c_int(m.group(2), defs)
+            string = re.fullmatch(r'\s*"((?:[^"\\]|\\.)*)"\s*', m.group(2))
+            value = string.group(1) if string else c_int(m.group(2), defs)
             if value is not None:
                 add(m.group(1), value)
         for body in re.findall(r"\benum\s*\w*\s*\{(.*?)\}", text, re.S):
@@ -81,8 +83,8 @@ def parse_c(paths):
 
 
 ZIG_CONST = re.compile(
-    r"^\s*(?:pub\s+)?const\s+([A-Z_][A-Z0-9_]*)\s*(?::\s*[\w.]+\s*)?=\s*"
-    r"(-?(?:0x[0-9a-fA-F_]+|\d[\d_]*)|true|false)\s*;", re.M)
+    r"^\s*(?:pub\s+)?const\s+([A-Z_][A-Z0-9_]*)\s*(?::[^=]+)?=\s*"
+    r"(-?(?:0x[0-9a-fA-F_]+|\d[\d_]*)|true|false|\"(?:[^\"\\\\]|\\\\.)*\")\s*;", re.M)
 
 
 def main():
@@ -97,7 +99,9 @@ def main():
                 continue
             checked += 1
             literal = m.group(2)
-            if literal in ("true", "false"):  # config.h flags mirrored as bool
+            if literal.startswith('"'):  # string #define (e.g. RAYLIB_VERSION)
+                value = literal[1:-1]
+            elif literal in ("true", "false"):  # config.h flags mirrored as bool
                 value = int(literal == "true")
             else:
                 value = int(literal.replace("_", ""), 0)
