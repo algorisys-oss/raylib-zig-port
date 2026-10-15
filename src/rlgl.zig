@@ -2883,6 +2883,8 @@ fn rlGetPixelDataSize(width: c_int, height: c_int, format: c_int) c_int {
     var dataSize: c_int = 0;
     var bpp: c_int = 0;
 
+    if (width <= 0 or height <= 0) return dataSize;
+
     switch (format) {
         RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => bpp = 8,
         RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA,
@@ -2905,23 +2907,17 @@ fn rlGetPixelDataSize(width: c_int, height: c_int, format: c_int) c_int {
         RL_PIXELFORMAT_COMPRESSED_PVRT_RGB,
         RL_PIXELFORMAT_COMPRESSED_PVRT_RGBA,
         => {
-            const blockWidth = @divTrunc(width + 3, 4);
-            const blockHeight = @divTrunc(height + 3, 4);
-            dataSize = blockWidth * blockHeight * 8;
+            dataSize = compressedDataSize(width, height, 8);
         },
         RL_PIXELFORMAT_COMPRESSED_DXT3_RGBA,
         RL_PIXELFORMAT_COMPRESSED_DXT5_RGBA,
         RL_PIXELFORMAT_COMPRESSED_ETC2_EAC_RGBA,
         RL_PIXELFORMAT_COMPRESSED_ASTC_4x4_RGBA,
         => {
-            const blockWidth = @divTrunc(width + 3, 4);
-            const blockHeight = @divTrunc(height + 3, 4);
-            dataSize = blockWidth * blockHeight * 16;
+            dataSize = compressedDataSize(width, height, 16);
         },
         RL_PIXELFORMAT_COMPRESSED_ASTC_8x8_RGBA => {
-            const blockWidth = @divTrunc(width + 3, 4);
-            const blockHeight = @divTrunc(height + 3, 4);
-            dataSize = blockWidth * blockHeight * 4;
+            dataSize = compressedDataSize(width, height, 4);
         },
         else => {},
     }
@@ -2929,11 +2925,22 @@ fn rlGetPixelDataSize(width: c_int, height: c_int, format: c_int) c_int {
     if ((format >= RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) and
         (format <= RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16A16))
     {
-        const bytesPerPixel = @as(f64, @floatFromInt(bpp)) / 8.0;
-        dataSize = @intFromFloat(bytesPerPixel * @as(f64, @floatFromInt(width)) * @as(f64, @floatFromInt(height)));
+        const dataSizeBytes = (@as(u64, @intCast(width)) * @as(u64, @intCast(height)) * @as(u64, @intCast(bpp))) >> 3; // Get size in bytes (dividing by 8)
+        if (dataSizeBytes < std.math.maxInt(c_int)) {
+            dataSize = @intCast(dataSizeBytes);
+        } else TraceLog(RL_LOG_WARNING, "Requested image size is larger than 2GB, it can not be allocated");
     }
 
     return dataSize;
+}
+
+/// Size in bytes of a block-compressed image (4x4 pixel blocks), or 0 when it
+/// does not fit in a c_int. Expects positive dimensions.
+fn compressedDataSize(width: c_int, height: c_int, bytesPerBlock: u64) c_int {
+    const blockWidth: u64 = @intCast(@divTrunc(width + 3, 4));
+    const blockHeight: u64 = @intCast(@divTrunc(height + 3, 4));
+    const dataSizeBytes = blockWidth * blockHeight * bytesPerBlock;
+    return if (dataSizeBytes < std.math.maxInt(c_int)) @intCast(dataSizeBytes) else 0;
 }
 
 // Auxiliar math functions

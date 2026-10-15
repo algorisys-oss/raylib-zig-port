@@ -2078,10 +2078,27 @@ export fn QuaternionFromVector3ToVector3(from: Vector3, to: Vector3) callconv(.c
     const cos2Theta = (from.x * to.x + from.y * to.y + from.z * to.z); // Vector3DotProduct(from, to)
     const cross = Vector3{ .x = from.y * to.z - from.z * to.y, .y = from.z * to.x - from.x * to.z, .z = from.x * to.y - from.y * to.x }; // Vector3CrossProduct(from, to)
 
+    const lengths = sqrtf(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z + cos2Theta * cos2Theta); // |from|*|to|
+
     result.x = cross.x;
     result.y = cross.y;
     result.z = cross.z;
-    result.w = sqrtf(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z + cos2Theta * cos2Theta) + cos2Theta;
+    result.w = lengths + cos2Theta;
+
+    // Opposite vectors: cross product is zero, rotate 180 degrees around any axis perpendicular to 'from'
+    if (lengths > 0.0 and result.w <= lengths * EPSILON) {
+        if (fabsf(from.x) > fabsf(from.z)) {
+            result.x = -from.y;
+            result.y = from.x;
+            result.z = 0.0;
+        } else {
+            result.x = 0.0;
+            result.y = -from.z;
+            result.z = from.y;
+        }
+
+        result.w = 0.0;
+    }
 
     // QuaternionNormalize(q);
     const q = result;
@@ -2378,9 +2395,9 @@ export fn MatrixDecompose(mat: Matrix, translation: *Vector3, rotation: *Quatern
 
     // Matrix Columns - Rotation will be extracted into here
     var matColumns = [3]Vector3{
-        .{ .x = mat.m0, .y = mat.m4, .z = mat.m8 },
-        .{ .x = mat.m1, .y = mat.m5, .z = mat.m9 },
-        .{ .x = mat.m2, .y = mat.m6, .z = mat.m10 },
+        .{ .x = mat.m0, .y = mat.m1, .z = mat.m2 },
+        .{ .x = mat.m4, .y = mat.m5, .z = mat.m6 },
+        .{ .x = mat.m8, .y = mat.m9, .z = mat.m10 },
     };
 
     // Shear Parameters XY, XZ, and YZ (extract and ignored)
@@ -2444,15 +2461,15 @@ export fn MatrixDecompose(mat: Matrix, translation: *Vector3, rotation: *Quatern
     // Extract Rotation
     const rotationMatrix = Matrix{
         .m0 = matColumns[0].x,
-        .m4 = matColumns[0].y,
-        .m8 = matColumns[0].z,
+        .m4 = matColumns[1].x,
+        .m8 = matColumns[2].x,
         .m12 = 0,
-        .m1 = matColumns[1].x,
+        .m1 = matColumns[0].y,
         .m5 = matColumns[1].y,
-        .m9 = matColumns[1].z,
+        .m9 = matColumns[2].y,
         .m13 = 0,
-        .m2 = matColumns[2].x,
-        .m6 = matColumns[2].y,
+        .m2 = matColumns[0].z,
+        .m6 = matColumns[1].z,
         .m10 = matColumns[2].z,
         .m14 = 0,
         .m3 = 0,

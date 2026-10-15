@@ -448,10 +448,11 @@ export fn InitAudioDevice() void {
 // Close the audio device for all contexts
 export fn CloseAudioDevice() void {
     if (AUDIO.system.isReady) {
-        rl_ma_mutex_destroy(AUDIO.system.lock);
-        AUDIO.system.lock = null;
+        // Stop the device first (joins the callback thread) before destroying the mutex it locks
         rl_ma_device_destroy(AUDIO.system.device);
         AUDIO.system.device = null;
+        rl_ma_mutex_destroy(AUDIO.system.lock);
+        AUDIO.system.lock = null;
         rl_ma_context_destroy(AUDIO.system.context);
         AUDIO.system.context = null;
 
@@ -721,7 +722,7 @@ export fn LoadWaveFromMemory(fileType: [*c]const u8, fileData: [*c]const u8, dat
             wave.sampleRate = sampleRate;
             wave.sampleSize = 16;
             wave.channels = channels;
-            wave.data = RL_MALLOC(@as(usize, wave.frameCount) * wave.channels * @sizeOf(c_short));
+            wave.data = RL_CALLOC(@as(usize, wave.frameCount) * wave.channels, @sizeOf(c_short));
 
             // NOTE: Forcing conversion to 16bit sample size on reading
             _ = drwav_read_pcm_frames_s16(wav, wave.frameCount, @ptrCast(@alignCast(wave.data)));
@@ -741,7 +742,7 @@ export fn LoadWaveFromMemory(fileType: [*c]const u8, fileData: [*c]const u8, dat
             wave.sampleSize = 16; // By default, ogg data is 16 bit per sample (short)
             wave.channels = @bitCast(channels);
             wave.frameCount = stb_vorbis_stream_length_in_samples(oggData); // NOTE: It returns frames!
-            wave.data = RL_MALLOC(@as(usize, wave.frameCount *% wave.channels) * @sizeOf(c_short));
+            wave.data = RL_CALLOC(wave.frameCount *% wave.channels, @sizeOf(c_short));
 
             // NOTE: Get the number of samples to process (be careful! asking for number of shorts, not bytes!)
             _ = stb_vorbis_get_samples_short_interleaved(oggData, channels, @ptrCast(@alignCast(wave.data)), @bitCast(wave.frameCount *% wave.channels));
@@ -844,7 +845,7 @@ export fn LoadSoundFromWave(wave: Wave) Sound {
 export fn LoadSoundAlias(source: Sound) Sound {
     var sound = std.mem.zeroes(Sound);
 
-    if (source.stream.buffer.?.data != null) {
+    if (source.stream.buffer != null and source.stream.buffer.?.data != null) {
         const audioBuffer = LoadAudioBuffer(AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, AUDIO.system.deviceSampleRate, 0, AUDIO_BUFFER_USAGE_STATIC);
 
         if (audioBuffer) |buffer| {
@@ -1075,7 +1076,7 @@ export fn WaveFormat(wave: [*c]Wave, sampleRate: c_int, sampleSize: c_int, chann
         return;
     }
 
-    const data = RL_MALLOC(@as(usize, frameCount *% @as(c_uint, @bitCast(channels)) *% @as(c_uint, @bitCast(@divTrunc(sampleSize, 8)))));
+    const data = RL_CALLOC(frameCount *% @as(c_uint, @bitCast(channels)) *% @as(c_uint, @bitCast(@divTrunc(sampleSize, 8))), 1);
 
     frameCount = @truncate(ma_convert_frames(data, frameCount, formatOut, @bitCast(channels), @bitCast(sampleRate), wave.*.data, frameCountIn, formatIn, wave.*.channels, wave.*.sampleRate));
     if (frameCount == 0) {
@@ -1475,7 +1476,10 @@ export fn UnloadMusicStream(music: Music) void {
 
     if (music.ctxData != null) {
         switch (music.ctxType) {
-            MUSIC_AUDIO_WAV => _ = drwav_uninit(@ptrCast(music.ctxData)),
+            MUSIC_AUDIO_WAV => {
+                _ = drwav_uninit(@ptrCast(music.ctxData));
+                RL_FREE(music.ctxData);
+            },
             MUSIC_AUDIO_OGG => stb_vorbis_close(@ptrCast(music.ctxData)),
             MUSIC_AUDIO_MP3 => {
                 drmp3_uninit(@ptrCast(music.ctxData));

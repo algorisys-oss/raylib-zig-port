@@ -79,6 +79,19 @@ int main(void) {
         pm(QuaternionToMatrix(Q1)); p4(QuaternionFromMatrix(MB)); p3(Vector3RotateByQuaternion(A3, Q1));
         p3(QuaternionToEuler(Q2));
 
+        // --- 6.2 additions: from->to rotation (incl. both opposite-vector
+        // branches), TRS compose/decompose round-trip ---
+        p4(QuaternionFromVector3ToVector3(A3, B3));
+        p4(QuaternionFromVector3ToVector3(A3, Vector3Negate(A3)));
+        p4(QuaternionFromVector3ToVector3((Vector3){ a, 0.0f, 0.0f }, (Vector3){ -a, 0.0f, 0.0f }));
+        p4(QuaternionFromVector3ToVector3((Vector3){ 0.0f, b, c }, (Vector3){ 0.0f, -b, -c }));
+        pm(MatrixCompose(A3, Q1, B3));
+        Vector3 T, S3; Quaternion R;
+        MatrixDecompose(MatrixMultiply(MatrixMultiply(MS, MB), MA), &T, &R, &S3);
+        p3(T); p4(R); p3(S3);
+        MatrixDecompose(MatrixCompose(A3, Q2, C3), &T, &R, &S3);
+        p3(T); p4(R); p3(S3);
+
         (void)A4; (void)B4;
         printf("\n");
     }

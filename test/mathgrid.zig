@@ -103,6 +103,9 @@ extern fn QuaternionNlerp(Quaternion, Quaternion, f32) Quaternion;
 extern fn QuaternionToMatrix(Quaternion) Matrix;
 extern fn QuaternionFromMatrix(Matrix) Quaternion;
 extern fn QuaternionToEuler(Quaternion) Vector3;
+extern fn QuaternionFromVector3ToVector3(Vector3, Vector3) Quaternion;
+extern fn MatrixCompose(Vector3, Quaternion, Vector3) Matrix;
+extern fn MatrixDecompose(Matrix, *Vector3, *Quaternion, *Vector3) void;
 
 var S: u32 = 0x12345678;
 fn nextf() f32 {
@@ -259,6 +262,25 @@ pub fn main() void {
         p4(QuaternionFromMatrix(MB));
         p3(Vector3RotateByQuaternion(A3, Q1));
         p3(QuaternionToEuler(Q2));
+
+        // 6.2 additions: from->to rotation (incl. both opposite-vector
+        // branches), TRS compose/decompose round-trip
+        p4(QuaternionFromVector3ToVector3(A3, B3));
+        p4(QuaternionFromVector3ToVector3(A3, Vector3Negate(A3)));
+        p4(QuaternionFromVector3ToVector3(.{ .x = a, .y = 0, .z = 0 }, .{ .x = -a, .y = 0, .z = 0 }));
+        p4(QuaternionFromVector3ToVector3(.{ .x = 0, .y = b, .z = c }, .{ .x = 0, .y = -b, .z = -c }));
+        pm(MatrixCompose(A3, Q1, B3));
+        var T: Vector3 = undefined;
+        var R: Quaternion = undefined;
+        var S3: Vector3 = undefined;
+        MatrixDecompose(MatrixMultiply(MatrixMultiply(MS, MB), MA), &T, &R, &S3);
+        p3(T);
+        p4(R);
+        p3(S3);
+        MatrixDecompose(MatrixCompose(A3, Q2, C3), &T, &R, &S3);
+        p3(T);
+        p4(R);
+        p3(S3);
 
         _ = A4;
         _ = B4;
