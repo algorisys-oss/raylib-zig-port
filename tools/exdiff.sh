@@ -23,7 +23,7 @@ ZIG_LIB="${2:?need zig lib}"
 FILTER="${3:-}"
 
 RAYLIB_SRC="vendor/raylib/src"
-EXAMPLES="/home/rajesh/opensource/graphics/raylib/examples"
+EXAMPLES="${RAYLIB_EXAMPLES:-/home/rajesh/opensource/graphics/raylib-6.2/examples}"
 LIST="test/examples.list"
 SYS_LIBS=(-lX11 -lXrandr -lXinerama -lXcursor -lXi -lGL -lm -lpthread -ldl -lrt)
 

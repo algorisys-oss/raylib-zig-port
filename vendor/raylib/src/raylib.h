@@ -1,6 +1,6 @@
 /**********************************************************************************************
 *
-*   raylib v6.1-dev - A simple and easy-to-use library to enjoy videogames programming (www.raylib.com)
+*   raylib v6.2 - A simple and easy-to-use library to enjoy videogames programming (www.raylib.com)
 *
 *   FEATURES:
 *       - NO external dependencies, all required libraries included with raylib
@@ -87,9 +87,9 @@
 #include <stdarg.h>     // Required for: va_list - Only used by TraceLogCallback
 
 #define RAYLIB_VERSION_MAJOR 6
-#define RAYLIB_VERSION_MINOR 1
+#define RAYLIB_VERSION_MINOR 2
 #define RAYLIB_VERSION_PATCH 0
-#define RAYLIB_VERSION  "6.1-dev"
+#define RAYLIB_VERSION  "6.2"
 
 // Function specifiers in case library is build/used as a shared library
 // NOTE: Microsoft specifiers to tell compiler that symbols are imported/exported from a .dll
@@ -336,7 +336,7 @@ typedef Camera3D Camera;    // Camera type fallback, defaults to Camera3D
 
 // Camera2D, defines position/orientation in 2d space
 typedef struct Camera2D {
-    Vector2 offset;         // Camera offset (screen space offset from window origin)
+    Vector2 offset;         // Camera offset (screen space offset from window origin, unscaled by DPI, real pixel size)
     Vector2 target;         // Camera target (world space target point that is mapped to screen space offset)
     float rotation;         // Camera rotation in degrees (pivots around target)
     float zoom;             // Camera zoom (scaling around target), must not be set to 0, set to 1.0f for no scale
@@ -409,7 +409,7 @@ typedef struct BoneInfo {
 
 // Skeleton, animation bones hierarchy
 typedef struct ModelSkeleton {
-    int boneCount;          // Number of bones
+    unsigned int boneCount; // Number of bones
     BoneInfo *bones;        // Bones information (skeleton)
     ModelAnimPose bindPose; // Bones base transformation (Transform[])
 } ModelSkeleton;
@@ -436,7 +436,7 @@ typedef struct Model {
 typedef struct ModelAnimation {
     char name[32];          // Animation name
 
-    int boneCount;          // Number of bones (per pose)
+    unsigned int boneCount; // Number of bones (per pose)
     int keyframeCount;      // Number of animation key frames
     ModelAnimPose *keyframePoses; // Animation sequence keyframe poses [keyframe][pose]
 } ModelAnimation;
@@ -1111,7 +1111,7 @@ RLAPI void UnloadRandomSequence(int *sequence);         // Unload random values 
 
 // Misc. functions
 RLAPI void TakeScreenshot(const char *fileName);                // Takes a screenshot of current screen (filename extension defines format)
-RLAPI void SetConfigFlags(unsigned int flags);                  // Set up init configuration flags (view FLAGS)
+RLAPI void SetConfigFlags(unsigned int flags);                  // Set init configuration flags (view FLAGS)
 RLAPI void OpenURL(const char *url);                            // Open URL with default system browser (if available)
 
 // Logging system
@@ -1149,18 +1149,21 @@ RLAPI int FileTextFindIndex(const char *fileName, const char *search); // Find t
 RLAPI bool FileExists(const char *fileName);                        // Check if file exists
 RLAPI bool DirectoryExists(const char *dirPath);                    // Check if directory path exists
 RLAPI bool IsFileExtension(const char *fileName, const char *ext);  // Check file extension (recommended include point: .png, .wav)
+RLAPI bool IsFileHidden(const char *filePath);                      // Check if file path (file or directory) is hidden by OS
 RLAPI int GetFileLength(const char *fileName);                      // Get file length in bytes (NOTE: GetFileSize() conflicts with windows.h)
 RLAPI long GetFileModTime(const char *fileName);                    // Get file modification time (last write time)
 RLAPI const char *GetFileExtension(const char *fileName);           // Get pointer to extension for a filename string (includes dot: '.png')
 RLAPI const char *GetFileName(const char *filePath);                // Get pointer to filename for a path string
 RLAPI const char *GetFileNameWithoutExt(const char *filePath);      // Get filename string without extension (uses static string)
-RLAPI const char *GetDirectoryPath(const char *filePath);           // Get full path for a given fileName with path (uses static string)
-RLAPI const char *GetPrevDirectoryPath(const char *dirPath);        // Get previous directory path for a given path (uses static string)
+RLAPI const char *GetDirectoryPath(const char *filePath);           // Get full path for a provided fileName with path (uses static string)
+RLAPI const char *GetPrevDirectoryPath(const char *dirPath);        // Get previous directory path for a provided path (uses static string)
 RLAPI const char *GetWorkingDirectory(void);                        // Get current working directory (uses static string)
 RLAPI const char *GetApplicationDirectory(void);                    // Get the directory of the running application (uses static string)
 RLAPI int MakeDirectory(const char *dirPath);                       // Create directories (including full path requested), returns 0 on success
 RLAPI int ChangeDirectory(const char *dirPath);                     // Change working directory, returns 0 on success
-RLAPI bool IsPathFile(const char *path);                            // Check if given path is a file or a directory
+RLAPI bool IsPathFile(const char *path);                            // Check if provided path points to a file
+RLAPI bool IsPathDirectory(const char *path);                       // Check if provided path points to a directory
+RLAPI bool IsPathAbsolute(const char *path);                        // Check if provided path is an absolute path
 RLAPI bool IsFileNameValid(const char *fileName);                   // Check if fileName is valid for the platform/OS
 RLAPI FilePathList LoadDirectoryFiles(const char *dirPath);         // Load directory filepaths, files and directories, no subdirs scan
 RLAPI FilePathList LoadDirectoryFilesEx(const char *basePath, const char *filter, bool scanSubdirs); // Load directory filepaths with extension filtering and subdir scan; some filters available: '*.*','FILES*','DIRS*'
@@ -1239,7 +1242,7 @@ RLAPI void SetMouseCursor(int cursor);                        // Set mouse curso
 RLAPI int GetTouchX(void);                                    // Get touch position X for touch point 0 (relative to screen size)
 RLAPI int GetTouchY(void);                                    // Get touch position Y for touch point 0 (relative to screen size)
 RLAPI Vector2 GetTouchPosition(int index);                    // Get touch position XY for a touch point index (relative to screen size)
-RLAPI int GetTouchPointId(int index);                         // Get touch point identifier for given index
+RLAPI int GetTouchPointId(int index);                         // Get touch point identifier for provided index
 RLAPI int GetTouchPointCount(void);                           // Get number of touch points
 
 //------------------------------------------------------------------------------------
@@ -1282,6 +1285,7 @@ RLAPI void DrawLineDashed(Vector2 startPos, Vector2 endPos, int dashSize, int sp
 RLAPI void DrawTriangle(Vector2 v1, Vector2 v2, Vector2 v3, Color color);                                // Draw a color-filled triangle, counter-clockwise vertex order
 RLAPI void DrawTriangleGradient(Vector2 v1, Vector2 v2, Vector2 v3, Color c1, Color c2, Color c3);       // Draw triangle with interpolated colors, counter-clockwise vertex/color order
 RLAPI void DrawTriangleLines(Vector2 v1, Vector2 v2, Vector2 v3, Color color);                           // Draw triangle outline, counter-clockwise vertex order
+RLAPI void DrawTriangleLinesEx(Vector2 v1, Vector2 v2, Vector2 v3, float thick, Color color);            // Draw triangle outline with line thickness, counter-clockwise vertex order
 RLAPI void DrawTriangleFan(const Vector2 *points, int pointCount, Color color);                          // Draw a triangle fan defined by points (first vertex is the center)
 RLAPI void DrawTriangleStrip(const Vector2 *points, int pointCount, Color color);                        // Draw a triangle strip defined by points
 RLAPI void DrawRectangle(int posX, int posY, int width, int height, Color color);                        // Draw a color-filled rectangle
@@ -1304,6 +1308,7 @@ RLAPI void DrawCircleV(Vector2 center, float radius, Color color);              
 RLAPI void DrawCircleGradient(Vector2 center, float radius, Color inner, Color outer);                   // Draw a gradient-filled circle
 RLAPI void DrawCircleSector(Vector2 center, float radius, float startAngle, float endAngle, int segments, Color color); // Draw a piece of a circle
 RLAPI void DrawCircleSectorLines(Vector2 center, float radius, float startAngle, float endAngle, int segments, Color color); // Draw circle sector outline
+RLAPI void DrawCircleSectorLinesEx(Vector2 center, float radius, float startAngle, float endAngle, int segments, float thick, Color color); // Draw circle sector outline with thickness
 RLAPI void DrawCircleLines(int centerX, int centerY, float radius, Color color);                         // Draw circle outline
 RLAPI void DrawCircleLinesV(Vector2 center, float radius, Color color);                                  // Draw circle outline (Vector version)
 RLAPI void DrawCircleLinesEx(Vector2 center, float radius, float thick, Color color);                    // Draw circle outline with line thickness
@@ -1311,8 +1316,10 @@ RLAPI void DrawEllipse(int centerX, int centerY, float radiusH, float radiusV, C
 RLAPI void DrawEllipseV(Vector2 center, float radiusH, float radiusV, Color color);                      // Draw ellipse (Vector version)
 RLAPI void DrawEllipseLines(int centerX, int centerY, float radiusH, float radiusV, Color color);        // Draw ellipse outline
 RLAPI void DrawEllipseLinesV(Vector2 center, float radiusH, float radiusV, Color color);                 // Draw ellipse outline (Vector version)
+RLAPI void DrawEllipseLinesEx(Vector2 center, float radiusH, float radiusV, float thick, Color color);   // Draw ellipse outline with line thickness
 RLAPI void DrawRing(Vector2 center, float innerRadius, float outerRadius, float startAngle, float endAngle, int segments, Color color); // Draw ring
 RLAPI void DrawRingLines(Vector2 center, float innerRadius, float outerRadius, float startAngle, float endAngle, int segments, Color color); // Draw ring outline
+RLAPI void DrawRingLinesEx(Vector2 center, float innerRadius, float outerRadius, float startAngle, float endAngle, int segments, float thick, Color color); // Draw ring outline with line thickness
 
 // Splines drawing functions
 RLAPI void DrawSplineLinear(const Vector2 *points, int pointCount, float thick, Color color);            // Draw spline: Linear, minimum 2 points
@@ -1326,7 +1333,7 @@ RLAPI void DrawSplineSegmentCatmullRom(Vector2 p1, Vector2 p2, Vector2 p3, Vecto
 RLAPI void DrawSplineSegmentBezierQuadratic(Vector2 p1, Vector2 c2, Vector2 p3, float thick, Color color); // Draw spline segment: Quadratic Bezier, 2 points, 1 control point
 RLAPI void DrawSplineSegmentBezierCubic(Vector2 p1, Vector2 c2, Vector2 c3, Vector2 p4, float thick, Color color); // Draw spline segment: Cubic Bezier, 2 points, 2 control points
 
-// Spline segment point evaluation functions, for a given t [0.0f .. 1.0f]
+// Spline segment point evaluation functions, for a provided t [0.0f .. 1.0f]
 RLAPI Vector2 GetSplinePointLinear(Vector2 startPos, Vector2 endPos, float t);                           // Get (evaluate) spline point: Linear
 RLAPI Vector2 GetSplinePointBasis(Vector2 p1, Vector2 p2, Vector2 p3, Vector2 p4, float t);              // Get (evaluate) spline point: B-Spline
 RLAPI Vector2 GetSplinePointCatmullRom(Vector2 p1, Vector2 p2, Vector2 p3, Vector2 p4, float t);         // Get (evaluate) spline point: Catmull-Rom
@@ -1416,7 +1423,7 @@ RLAPI Color GetImageColor(Image image, int x, int y);                           
 
 // Image drawing functions
 // NOTE: Image software-rendering functions (CPU)
-RLAPI void ImageClearBackground(Image *dst, Color color);                                                // Clear image background with given color
+RLAPI void ImageClearBackground(Image *dst, Color color);                                                // Clear image background with provided color
 RLAPI void ImageDrawPixel(Image *dst, int posX, int posY, Color color);                                  // Draw pixel within an image
 RLAPI void ImageDrawPixelV(Image *dst, Vector2 position, Color color);                                   // Draw pixel within an image (Vector version)
 RLAPI void ImageDrawLine(Image *dst, int startPosX, int startPosY, int endPosX, int endPosY, Color color); // Draw line within an image
@@ -1431,8 +1438,10 @@ RLAPI void ImageDrawTriangleStrip(Image *dst, const Vector2 *points, int pointCo
 RLAPI void ImageDrawRectangle(Image *dst, int posX, int posY, int width, int height, Color color);       // Draw rectangle within an image
 RLAPI void ImageDrawRectangleV(Image *dst, Vector2 position, Vector2 size, Color color);                 // Draw rectangle within an image (Vector version)
 RLAPI void ImageDrawRectangleRec(Image *dst, Rectangle rec, Color color);                                // Draw rectangle within an image
+RLAPI void ImageDrawRectanglePro(Image *dst, Rectangle rec, Vector2 origin, float rotation, Color color); // Draw a color-filled rectangle with pro parameters within and image
 RLAPI void ImageDrawRectangleLines(Image *dst, int posX, int posY, int width, int height, Color color);  // Draw rectangle lines within an image
 RLAPI void ImageDrawRectangleLinesEx(Image *dst, Rectangle rec, int thick, Color color);                 // Draw rectangle lines within an image with line thickness
+RLAPI void ImageDrawRectangleGradientEx(Image *dst, Rectangle rec, Color col1, Color col2, Color col3, Color col4); // Draw rectangle with gradient colors within an image, counter-clockwise color order
 RLAPI void ImageDrawCircle(Image *dst, int centerX, int centerY, int radius, Color color);               // Draw a filled circle within an image
 RLAPI void ImageDrawCircleV(Image *dst, Vector2 center, int radius, Color color);                        // Draw a filled circle within an image (Vector version)
 RLAPI void ImageDrawCircleLines(Image *dst, int centerX, int centerY, int radius, Color color);          // Draw circle outline within an image
@@ -1440,10 +1449,12 @@ RLAPI void ImageDrawCircleLinesV(Image *dst, Vector2 center, int radius, Color c
 RLAPI void ImageDrawCircleGradient(Image *dst, Vector2 center, float radius, Color inner, Color outer);  // Draw a gradient-filled circle within an image
 
 RLAPI void ImageDrawImage(Image *dst, Image src, int posX, int posY, Color tint);                      // Draw an image within an image
+RLAPI void ImageDrawImageEx(Image *dst, Image src, Vector2 position, float rotation, float scale, Color tint); // Draw an image with scaling and rotation within an image
 RLAPI void ImageDrawImageRec(Image *dst, Image src, Rectangle srcRec, Vector2 position, Color tint);     // Draw a part of an image defined by a rectangle within an image
 RLAPI void ImageDrawImagePro(Image *dst, Image src, Rectangle srcRec, Rectangle dstRec, Vector2 origin, float rotation, Color tint); // Draw a part of an image defined by a rectangle into destination rectangle, with scaling and rotation, within an image
 RLAPI void ImageDrawText(Image *dst, const char *text, int posX, int posY, int fontSize, Color color);   // Draw text (using default font) within an image (destination)
 RLAPI void ImageDrawTextEx(Image *dst, Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint); // Draw text (custom sprite font) within an image (destination)
+RLAPI void ImageDrawTextPro(Image *dst, Font font, const char *text, Vector2 position, Vector2 origin, float rotation, float fontSize, float spacing, Color tint); // Draw text using Font and pro parameters (rotation)
 
 // Texture loading functions
 // NOTE: These functions require GPU access
@@ -1451,6 +1462,7 @@ RLAPI Texture2D LoadTexture(const char *fileName);                              
 RLAPI Texture2D LoadTextureFromImage(Image image);                                                       // Load texture from image data
 RLAPI TextureCubemap LoadTextureCubemap(Image image, int layout);                                        // Load cubemap from image, multiple image cubemap layouts supported
 RLAPI RenderTexture2D LoadRenderTexture(int width, int height);                                          // Load texture for rendering (framebuffer)
+RLAPI RenderTexture2D LoadRenderTextureEx(int width, int height, int format);                            // Load texture for rendering (framebuffer), with specific format
 RLAPI bool IsTextureValid(Texture2D texture);                                                            // Check if texture is valid (loaded in GPU)
 RLAPI void UnloadTexture(Texture2D texture);                                                             // Unload texture from GPU memory (VRAM)
 RLAPI bool IsRenderTextureValid(RenderTexture2D target);                                                 // Check if render texture is valid (loaded in GPU)

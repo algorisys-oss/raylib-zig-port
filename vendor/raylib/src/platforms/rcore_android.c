@@ -285,7 +285,6 @@ static int android_close(void *cookie);
 //       CMake: handled automatically — the PUBLIC flag propagates as INTERFACE_LINK_OPTIONS
 //              to the consumer's final link via target_link_libraries
 //        Make: pass -Wl,--wrap=fopen to the linker command producing the final artifact
-//   build.zig: pass -Wl,--wrap=fopen to the linker command producing the final artifact
 //      custom: pass -Wl,--wrap=fopen to the linker command producing the final artifact
 //
 // SHARED library (.so) — wrapping is self-contained:
@@ -296,8 +295,6 @@ static int android_close(void *cookie);
 //              only raylib internals are wrapped, app code requires a separate flag
 //        Make: handled automatically — src/Makefile sets LDFLAGS += -Wl,--wrap=fopen;
 //              only raylib internals are wrapped, app code requires a separate flag
-//   build.zig: NOT supported — std.Build has no dedicated linker wrap helper, the flag
-//              is not correctly applied at the .so link step
 //      custom: apply -Wl,--wrap=fopen to the linker command producing the .so
 FILE *__real_fopen(const char *fileName, const char *mode); // Real fopen, provided by the linker (--wrap=fopen)
 FILE *__wrap_fopen(const char *fileName, const char *mode); // Replacement for fopen()
@@ -663,13 +660,22 @@ double GetTime(void)
 }
 
 // Open URL with default system browser (if available)
-// NOTE: This function is only safe to use if the provided URL is safe
-// A user could craft a malicious string performing another action
-// Avoid calling this function with user input non-validated strings
+// WARNING: This function is only safe to use if you control the URL given,
+// a user could craft a malicious string to perform and undesired action
+// NOTE: Some safety checks have been added to mitigate security issues
 void OpenURL(const char *url)
 {
     // Security check to (partially) avoid malicious code
-    if (strchr(url, '\'') != NULL) TRACELOG(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'] character");
+    if ((strchr(url, '\'') != NULL) || (strchr(url, '\"') != NULL))
+    {
+        // Filter characters: ' and "
+        TRACELOG(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\'\"] characters");
+    }
+    else if ((strncmp(url, "http://", 7) != 0) && (strncmp(url, "https://", 8) != 0))
+    {
+        // Only allow URL starting with "http://" or "https://" protocols
+        TRACELOG(LOG_WARNING, "SYSTEM: Provided URL must start with 'http://' or 'https://' protocols");
+    }
     else
     {
         JNIEnv *env = NULL;
@@ -717,7 +723,6 @@ void SetGamepadVibration(int gamepad, float leftMotor, float rightMotor, float d
 void SetMousePosition(int x, int y)
 {
     CORE.Input.Mouse.currentPosition = (Vector2){ (float)x, (float)y };
-    CORE.Input.Mouse.previousPosition = CORE.Input.Mouse.currentPosition;
 }
 
 // Set mouse cursor
@@ -749,12 +754,12 @@ void PollInputEvents(void)
     for (int i = 0; i < MAX_KEYBOARD_KEYS; i++) CORE.Input.Keyboard.keyRepeatInFrame[i] = 0;
 
     // Reset last gamepad button/axis registered state
-    CORE.Input.Gamepad.lastButtonPressed = 0;       // GAMEPAD_BUTTON_UNKNOWN
+    CORE.Input.Gamepad.lastButtonPressed = 0; // GAMEPAD_BUTTON_UNKNOWN
     //CORE.Input.Gamepad.axisCount = 0;
 
     for (int i = 0; i < MAX_GAMEPADS; i++)
     {
-        if (CORE.Input.Gamepad.ready[i])     // Check if gamepad is available
+        if (CORE.Input.Gamepad.ready[i]) // Check if gamepad is available
         {
             // Register previous gamepad states
             for (int k = 0; k < MAX_GAMEPAD_BUTTONS; k++)
@@ -793,6 +798,7 @@ void PollInputEvents(void)
         if (platform.app->destroyRequested != 0)
         {
             CORE.Window.shouldClose = true;
+            break;
         }
     }
 }

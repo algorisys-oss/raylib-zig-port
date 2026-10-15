@@ -222,3 +222,14 @@ audio/audio_sound_positioning.c
 audio/audio_spectrum_visualizer.c
 audio/audio_stream_callback.c
 audio/audio_stream_effects.c
+# --- raylib 6.2 (2026-10-16): examples new in 6.2 ---
+models/models_mesh_uv_painting.c
+models/models_procedural_decals.c
+others/gl_scissor_shapes.c
+shaders/shaders_lights_bloom.c
+shapes/shapes_drag_puzzle.c
+shapes/shapes_outlines_testbed.c
+shapes/shapes_outlines_thickness.c
+shapes/shapes_polygon_lines.c
+text/text_animations.c
+textures/textures_portal_window.c
