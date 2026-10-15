@@ -8,6 +8,7 @@
 //!
 //! This build mirrors raylib's default `config.h`: enabled formats are PNG, BMP, GIF,
 //! QOI, DDS; image export (PNG/QOI/BMP) and procedural image generation are enabled.
+//! PEP (`SUPPORT_FILEFORMAT_PEP`, new in raylib 6.2) is disabled by default and not ported.
 //! The third-party single-file libraries (stb_image, stb_image_write, stb_image_resize2,
 //! qoi, stb_perlin, rltexgpu) are instantiated in the C shim `src/c/rtextures_stb_impl.c`
 //! and only `extern`-declared and called here.
@@ -330,6 +331,11 @@ inline fn tuc(v: anytype) u8 {
 // C `(unsigned char)` truncation from an integer (low 8 bits).
 inline fn iuc(v: anytype) u8 {
     return @truncate(@as(c_uint, @bitCast(@as(c_int, v))));
+}
+
+// C implicit integer-to-float promotion in mixed arithmetic.
+inline fn f(v: anytype) f32 {
+    return @floatFromInt(v);
 }
 
 // C `MIN(a,b)` macro for ints.
@@ -858,11 +864,13 @@ export fn ExportImageAsCode(image: Image, fileName: [*c]const u8) callconv(.c) b
 //------------------------------------------------------------------------------------
 // Generate image: plain color
 export fn GenImageColor(width: c_int, height: c_int, color: Color) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_CALLOC(@intCast(width * height), @sizeOf(Color))));
+    const dataSize = GetPixelDataSize(width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    const pixels: ?[*]Color = @ptrCast(@alignCast(RL_CALLOC(@intCast(dataSize), 1)));
 
-    var i: usize = 0;
-    const total: usize = @intCast(width * height);
-    while (i < total) : (i += 1) pixels[i] = color;
+    if (pixels) |p| {
+        var i: c_int = 0;
+        while (i < width * height) : (i += 1) p[@intCast(i)] = color;
+    }
 
     return .{
         .data = pixels,
@@ -1190,6 +1198,23 @@ export fn ImageCopy(image: Image) callconv(.c) Image {
 // Create an image from another image piece
 export fn ImageFromImage(image: Image, rec: Rectangle) callconv(.c) Image {
     var result: Image = std.mem.zeroes(Image);
+
+    // Security check to avoid program crash
+    if ((image.data == null) or (image.width == 0) or (image.height == 0)) return result;
+
+    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+        TraceLog(LOG_WARNING, "IMAGE: Image manipulation not supported for compressed formats");
+        return result;
+    }
+
+    // Basic rectangle validation: size smaller than image size
+    const valid = (rec.x >= 0) and (rec.y >= 0) and (rec.width > 0) and (rec.height > 0) and
+        ((ti(rec.x) + ti(rec.width)) <= image.width) and
+        ((ti(rec.y) + ti(rec.height)) <= image.height);
+    if (!valid) {
+        TraceLog(LOG_WARNING, "IMAGE: ImageFromImage(), rectangle provided not valid");
+        return result;
+    }
 
     const bytesPerPixel = GetPixelDataSize(1, 1, image.format);
 
@@ -2156,24 +2181,7 @@ export fn ImageKernelConvolution(image: [*c]Image, kernel: [*c]const f32, kernel
     }
 
     const pixels = LoadImageColors(image.*);
-
-    const imageCopy2: [*c]Vector4 = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.*.height * image.*.width * @as(c_int, @sizeOf(Vector4))))));
-    const temp: [*c]Vector4 = @ptrCast(@alignCast(RL_MALLOC(@intCast(kernelSize * @as(c_int, @sizeOf(Vector4))))));
-
-    {
-        var i: usize = 0;
-        while (i < @as(usize, @intCast(kernelSize))) : (i += 1) {
-            temp[i].x = 0.0;
-            temp[i].y = 0.0;
-            temp[i].z = 0.0;
-            temp[i].w = 0.0;
-        }
-    }
-
-    var rRes: f32 = 0.0;
-    var gRes: f32 = 0.0;
-    var bRes: f32 = 0.0;
-    var aRes: f32 = 0.0;
+    const result: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.*.height * image.*.width * @as(c_int, @sizeOf(Color))))));
 
     var startRange: c_int = 0;
     var endRange: c_int = 0;
@@ -2186,96 +2194,55 @@ export fn ImageKernelConvolution(image: [*c]Image, kernel: [*c]const f32, kernel
         endRange = @divTrunc(kernelWidth, 2) + 1;
     }
 
-    const totalImg: c_uint = @bitCast(image.*.width * image.*.height);
-
     var x: c_int = 0;
     while (x < image.*.height) : (x += 1) {
         var y: c_int = 0;
         while (y < image.*.width) : (y += 1) {
+            var rRes: f32 = 0.0;
+            var gRes: f32 = 0.0;
+            var bRes: f32 = 0.0;
+            var aRes: f32 = 0.0;
+
             var xk: c_int = startRange;
             while (xk < endRange) : (xk += 1) {
+                // Clamp neighbour row and column to image bounds, edge pixels are repeated
+                const row = std.math.clamp(x + xk, 0, image.*.height - 1);
+
                 var yk: c_int = startRange;
                 while (yk < endRange) : (yk += 1) {
+                    const col = std.math.clamp(y + yk, 0, image.*.width - 1);
+
                     const xkabs = xk + @divTrunc(kernelWidth, 2);
                     const ykabs = yk + @divTrunc(kernelWidth, 2);
-                    const imgindex: c_uint = @bitCast(image.*.width * (x + xk) + (y + yk));
-                    const ti_idx: usize = @intCast(kernelWidth * xkabs + ykabs);
+                    const ker = kernel[@intCast(kernelWidth * xkabs + ykabs)];
+                    const px = pixels[@intCast(image.*.width * row + col)];
 
-                    if (imgindex >= totalImg) {
-                        temp[ti_idx].x = 0.0;
-                        temp[ti_idx].y = 0.0;
-                        temp[ti_idx].z = 0.0;
-                        temp[ti_idx].w = 0.0;
-                    } else {
-                        const ker = kernel[ti_idx];
-                        const px = pixels[@intCast(imgindex)];
-                        temp[ti_idx].x = (@as(f32, @floatFromInt(px.r))) / 255.0 * ker;
-                        temp[ti_idx].y = (@as(f32, @floatFromInt(px.g))) / 255.0 * ker;
-                        temp[ti_idx].z = (@as(f32, @floatFromInt(px.b))) / 255.0 * ker;
-                        temp[ti_idx].w = (@as(f32, @floatFromInt(px.a))) / 255.0 * ker;
-                    }
+                    rRes += @as(f32, @floatFromInt(px.r)) / 255.0 * ker;
+                    gRes += @as(f32, @floatFromInt(px.g)) / 255.0 * ker;
+                    bRes += @as(f32, @floatFromInt(px.b)) / 255.0 * ker;
+                    aRes += @as(f32, @floatFromInt(px.a)) / 255.0 * ker;
                 }
             }
 
-            {
-                var i: usize = 0;
-                while (i < @as(usize, @intCast(kernelSize))) : (i += 1) {
-                    rRes += temp[i].x;
-                    gRes += temp[i].y;
-                    bRes += temp[i].z;
-                    aRes += temp[i].w;
-                }
-            }
+            rRes = std.math.clamp(rRes, 0.0, 1.0);
+            gRes = std.math.clamp(gRes, 0.0, 1.0);
+            bRes = std.math.clamp(bRes, 0.0, 1.0);
+            aRes = std.math.clamp(aRes, 0.0, 1.0);
 
-            if (rRes < 0.0) rRes = 0.0;
-            if (gRes < 0.0) gRes = 0.0;
-            if (bRes < 0.0) bRes = 0.0;
-
-            if (rRes > 1.0) rRes = 1.0;
-            if (gRes > 1.0) gRes = 1.0;
-            if (bRes > 1.0) bRes = 1.0;
-
-            const o: usize = @intCast(image.*.width * x + y);
-            imageCopy2[o].x = rRes;
-            imageCopy2[o].y = gRes;
-            imageCopy2[o].z = bRes;
-            imageCopy2[o].w = aRes;
-
-            rRes = 0.0;
-            gRes = 0.0;
-            bRes = 0.0;
-            aRes = 0.0;
-
-            {
-                var i: usize = 0;
-                while (i < @as(usize, @intCast(kernelSize))) : (i += 1) {
-                    temp[i].x = 0.0;
-                    temp[i].y = 0.0;
-                    temp[i].z = 0.0;
-                    temp[i].w = 0.0;
-                }
-            }
-        }
-    }
-
-    {
-        var i: usize = 0;
-        const total: usize = @intCast(image.*.width * image.*.height);
-        while (i < total) : (i += 1) {
-            const alpha: f32 = imageCopy2[i].w;
-            pixels[i].r = tuc(imageCopy2[i].x * 255.0);
-            pixels[i].g = tuc(imageCopy2[i].y * 255.0);
-            pixels[i].b = tuc(imageCopy2[i].z * 255.0);
-            pixels[i].a = tuc(alpha * 255.0);
+            result[@intCast(image.*.width * x + y)] = .{
+                .r = tuc(rRes * 255.0),
+                .g = tuc(gRes * 255.0),
+                .b = tuc(bRes * 255.0),
+                .a = tuc(aRes * 255.0),
+            };
         }
     }
 
     const format = image.*.format;
     RL_FREE(image.*.data);
-    RL_FREE(imageCopy2);
-    RL_FREE(temp);
+    RL_FREE(pixels);
 
-    image.*.data = pixels;
+    image.*.data = result;
     image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
     ImageFormat(image, format);
 }
@@ -2509,8 +2476,9 @@ export fn ImageRotate(image: [*c]Image, degrees: c_int) callconv(.c) void {
         const width = ti(fabsf(@as(f32, @floatFromInt(image.*.width)) * cosRadius) + fabsf(@as(f32, @floatFromInt(image.*.height)) * sinRadius));
         const height = ti(fabsf(@as(f32, @floatFromInt(image.*.height)) * cosRadius) + fabsf(@as(f32, @floatFromInt(image.*.width)) * sinRadius));
 
+        const dataSize = GetPixelDataSize(width, height, image.*.format);
         const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const rotatedData: [*]u8 = @ptrCast(RL_CALLOC(@intCast(width * height), @intCast(bytesPerPixel)));
+        const rotatedData: [*]u8 = @ptrCast(RL_CALLOC(@intCast(dataSize), 1) orelse return);
         const src8: [*]const u8 = @ptrCast(image.*.data);
         const iw = image.*.width;
 
@@ -3565,6 +3533,76 @@ export fn ImageDrawRectangleRec(dst: [*c]Image, rec_in: Rectangle, color: Color)
     }
 }
 
+// Bounding box of a rectangle rotated around `pivot`; corners are given relative to the pivot.
+const Bounds = struct { x0: c_int, y0: c_int, x1: c_int, y1: c_int };
+
+fn rotatedBounds(cornersX: [4]f32, cornersY: [4]f32, cosA: f32, sinA: f32, pivot: Vector2, width: c_int, height: c_int) ?Bounds {
+    var minX: f32 = 65536;
+    var minY: f32 = 65536;
+    var maxX: f32 = -65536;
+    var maxY: f32 = -65536;
+
+    for (cornersX, cornersY) |cx, cy| {
+        const rx = (cx * cosA - cy * sinA) + pivot.x;
+        const ry = (cx * sinA + cy * cosA) + pivot.y;
+
+        if (rx < minX) minX = rx;
+        if (ry < minY) minY = ry;
+        if (rx > maxX) maxX = rx;
+        if (ry > maxY) maxY = ry;
+    }
+
+    return clampBounds(ti(floorf(minX)), ti(floorf(minY)), ti(ceilf(maxX)), ti(ceilf(maxY)), width, height);
+}
+
+// Limit integer pixel bounds to the image; null when nothing remains to draw.
+fn clampBounds(x0: c_int, y0: c_int, x1: c_int, y1: c_int, width: c_int, height: c_int) ?Bounds {
+    const b = Bounds{ .x0 = @max(x0, 0), .y0 = @max(y0, 0), .x1 = @min(x1, width), .y1 = @min(y1, height) };
+    if ((b.x0 >= b.x1) or (b.y0 >= b.y1)) return null;
+    return b;
+}
+
+// Draw a color-filled rectangle with pro parameters within and image
+export fn ImageDrawRectanglePro(dst: [*c]Image, rec: Rectangle, origin: Vector2, rotation: f32, color: Color) callconv(.c) void {
+    // Security checks to avoid program crash
+    if ((dst == null) or (dst.*.data == null) or (rec.width <= 0) or (rec.height <= 0)) return;
+
+    const cosAngle = cosf(rotation * DEG2RAD);
+    const sinAngle = sinf(rotation * DEG2RAD);
+
+    // Rotation origin in world/image coordinates
+    const ox = rec.x + origin.x;
+    const oy = rec.y + origin.y;
+
+    // Rectangle corners relative to rotation origin
+    const x1 = -origin.x;
+    const y1 = -origin.y;
+    const x2 = rec.width - origin.x;
+    const y2 = rec.height - origin.y;
+
+    const b = rotatedBounds(.{ x1, x2, x2, x1 }, .{ y1, y1, y2, y2 }, cosAngle, sinAngle, .{ .x = ox, .y = oy }, dst.*.width, dst.*.height) orelse return;
+
+    var y = b.y0;
+    while (y < b.y1) : (y += 1) {
+        var x = b.x0;
+        while (x < b.x1) : (x += 1) {
+            // Pixel center in world coordinates
+            const px = @as(f32, @floatFromInt(x)) + 0.5 - ox;
+            const py = @as(f32, @floatFromInt(y)) + 0.5 - oy;
+
+            // Inverse-rotate pixel into rectangle local space
+            const localX = px * cosAngle + py * sinAngle;
+            const localY = -px * sinAngle + py * cosAngle;
+
+            // Check whether pixel lies inside the rectangle
+            if ((localX >= x1) and (localX < x2) and (localY >= y1) and (localY < y2)) {
+                // NOTE: Pixel format conversion managed by function
+                ImageDrawPixel(dst, x, y, color);
+            }
+        }
+    }
+}
+
 // Draw rectangle lines within an image
 export fn ImageDrawRectangleLines(dst: [*c]Image, posX: c_int, posY: c_int, width: c_int, height: c_int, color: Color) callconv(.c) void {
     const rec = Rectangle{ .x = @floatFromInt(posX), .y = @floatFromInt(posY), .width = @floatFromInt(width), .height = @floatFromInt(height) };
@@ -3579,6 +3617,42 @@ export fn ImageDrawRectangleLinesEx(dst: [*c]Image, rec: Rectangle, thick: c_int
     ImageDrawRectangle(dst, ti(rec.x), ti(rec.y + rec.height - @as(f32, @floatFromInt(thick))), ti(rec.width), thick, color);
 }
 
+// Draw rectangle with gradient colors within an image, counter-clockwise color order
+export fn ImageDrawRectangleGradientEx(dst: [*c]Image, rec: Rectangle, col1: Color, col2: Color, col3: Color, col4: Color) callconv(.c) void {
+    // Security checks to avoid program crash
+    if ((dst == null) or (dst.*.data == null) or (rec.width <= 0) or (rec.height <= 0)) return;
+
+    const b = clampBounds(
+        ti(floorf(rec.x)),
+        ti(floorf(rec.y)),
+        ti(ceilf(rec.x + rec.width)),
+        ti(ceilf(rec.y + rec.height)),
+        dst.*.width,
+        dst.*.height,
+    ) orelse return;
+
+    var y = b.y0;
+    while (y < b.y1) : (y += 1) {
+        const ty = std.math.clamp((@as(f32, @floatFromInt(y)) - rec.y) / rec.height, 0.0, 1.0);
+
+        var x = b.x0;
+        while (x < b.x1) : (x += 1) {
+            const tx = std.math.clamp((@as(f32, @floatFromInt(x)) - rec.x) / rec.width, 0.0, 1.0);
+
+            // Bilinear interpolation weights
+            const w = [4]f32{ (1.0 - tx) * (1.0 - ty), (1.0 - tx) * ty, tx * ty, tx * (1.0 - ty) };
+
+            // Using ImageDrawPixel() to let it manage color format conversion
+            ImageDrawPixel(dst, x, y, .{
+                .r = tuc(f(col1.r) * w[0] + f(col2.r) * w[1] + f(col3.r) * w[2] + f(col4.r) * w[3]),
+                .g = tuc(f(col1.g) * w[0] + f(col2.g) * w[1] + f(col3.g) * w[2] + f(col4.g) * w[3]),
+                .b = tuc(f(col1.b) * w[0] + f(col2.b) * w[1] + f(col3.b) * w[2] + f(col4.b) * w[3]),
+                .a = tuc(f(col1.a) * w[0] + f(col2.a) * w[1] + f(col3.a) * w[2] + f(col4.a) * w[3]),
+            });
+        }
+    }
+}
+
 // Draw circle within an image
 export fn ImageDrawCircle(dst: [*c]Image, centerX: c_int, centerY: c_int, radius: c_int, color: Color) callconv(.c) void {
     var x: c_int = 0;
@@ -3586,10 +3660,10 @@ export fn ImageDrawCircle(dst: [*c]Image, centerX: c_int, centerY: c_int, radius
     var decesionParameter: c_int = 3 - 2 * radius;
 
     while (y >= x) {
-        ImageDrawRectangle(dst, centerX - x, centerY + y, x * 2, 1, color);
-        ImageDrawRectangle(dst, centerX - x, centerY - y, x * 2, 1, color);
-        ImageDrawRectangle(dst, centerX - y, centerY + x, y * 2, 1, color);
-        ImageDrawRectangle(dst, centerX - y, centerY - x, y * 2, 1, color);
+        ImageDrawRectangle(dst, centerX - x, centerY + y, x * 2 + 1, 1, color);
+        ImageDrawRectangle(dst, centerX - x, centerY - y, x * 2 + 1, 1, color);
+        ImageDrawRectangle(dst, centerX - y, centerY + x, y * 2 + 1, 1, color);
+        ImageDrawRectangle(dst, centerX - y, centerY - x, y * 2 + 1, 1, color);
         x += 1;
 
         if (decesionParameter > 0) {
@@ -3635,12 +3709,51 @@ export fn ImageDrawCircleLinesV(dst: [*c]Image, center: Vector2, radius: c_int, 
 
 // Draw a gradient-filled circle within an image
 export fn ImageDrawCircleGradient(dst: [*c]Image, center: Vector2, radius: f32, inner: Color, outer: Color) callconv(.c) void {
-    // TODO: Implement gradient circle drawing
-    _ = dst;
-    _ = center;
-    _ = radius;
-    _ = inner;
-    _ = outer;
+    // Security checks to avoid program crash
+    if ((dst == null) or (dst.*.data == null) or (radius <= 0.0)) return;
+
+    const b = clampBounds(
+        ti(floorf(center.x - radius)),
+        ti(floorf(center.y - radius)),
+        ti(ceilf(center.x + radius)),
+        ti(ceilf(center.y + radius)),
+        dst.*.width,
+        dst.*.height,
+    ) orelse return;
+
+    const radiusSq = radius * radius;
+
+    var y = b.y0;
+    while (y < b.y1) : (y += 1) {
+        var x = b.x0;
+        while (x < b.x1) : (x += 1) {
+            // Center relative to circle center
+            const dx = (@as(f32, @floatFromInt(x)) + 0.5) - center.x;
+            const dy = (@as(f32, @floatFromInt(y)) + 0.5) - center.y;
+
+            const distSq = dx * dx + dy * dy;
+
+            // Skip pixels outside the circle
+            if (distSq > radiusSq) continue;
+
+            // Linear interpolation from inner to outer color
+            const t = sqrtf(distSq) / radius;
+
+            // NOTE: Pixel format conversion managed by function
+            ImageDrawPixel(dst, x, y, .{
+                .r = lerpChannel(inner.r, outer.r, t),
+                .g = lerpChannel(inner.g, outer.g, t),
+                .b = lerpChannel(inner.b, outer.b, t),
+                .a = lerpChannel(inner.a, outer.a, t),
+            });
+        }
+    }
+}
+
+// C `(unsigned char)(a + (b - a)*t)`: the channel difference is an int, promoted to float.
+fn lerpChannel(a: u8, b: u8, t: f32) u8 {
+    const diff: c_int = @as(c_int, b) - @as(c_int, a);
+    return tuc(f(a) + @as(f32, @floatFromInt(diff)) * t);
 }
 
 // Draw an image within an image
@@ -3648,6 +3761,48 @@ export fn ImageDrawImage(dst: [*c]Image, src: Image, posX: c_int, posY: c_int, t
     const srcRec = Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(src.width), .height = @floatFromInt(src.height) };
     const dstRec = Rectangle{ .x = @floatFromInt(posX), .y = @floatFromInt(posY), .width = srcRec.width, .height = srcRec.height };
     ImageDrawImagePro(dst, src, srcRec, dstRec, .{ .x = 0, .y = 0 }, 0.0, tint);
+}
+
+// Draw an image with scaling and rotation within an image
+// NOTE: Rotation applied from top-left corner origin
+export fn ImageDrawImageEx(dst: [*c]Image, src: Image, position: Vector2, rotation: f32, scale: f32, tint: Color) callconv(.c) void {
+    // Security checks to avoid program crash
+    if ((dst == null) or (dst.*.data == null) or (dst.*.width <= 0) or (dst.*.height <= 0) or (src.width <= 0) or (src.height <= 0)) return;
+
+    const cosA = cosf(rotation * DEG2RAD);
+    const sinA = sinf(rotation * DEG2RAD);
+
+    // Rotate around the source image top-left corner
+    const w = f(src.width) * scale;
+    const h = f(src.height) * scale;
+    const b = rotatedBounds(.{ 0.0, w, w, 0.0 }, .{ 0.0, 0.0, h, h }, cosA, sinA, position, dst.*.width, dst.*.height) orelse return;
+
+    var y = b.y0;
+    while (y < b.y1) : (y += 1) {
+        var x = b.x0;
+        while (x < b.x1) : (x += 1) {
+            // Destination pixel center relative to image position
+            const dx = (@as(f32, @floatFromInt(x)) + 0.5) - position.x;
+            const dy = (@as(f32, @floatFromInt(y)) + 0.5) - position.y;
+
+            // Inverse-rotate into the scaled source space, then revert scaling
+            const sx = (dx * cosA + dy * sinA) / scale;
+            const sy = (-dx * sinA + dy * cosA) / scale;
+
+            // Skip pixels outside the source image
+            if ((sx < 0.0) or (sy < 0.0) or (sx >= f(src.width)) or (sy >= f(src.height))) continue;
+
+            // Nearest-neighbor source sampling
+            const srcColor = GetImageColor(src, ti(sx), ti(sy));
+
+            // Skip fully transparent pixels
+            if (srcColor.a == 0) continue;
+
+            // Blend source over destination (takes destination alpha into account), applying tint
+            const dstColor = GetImageColor(dst.*, x, y);
+            ImageDrawPixel(dst, x, y, ColorAlphaBlend(dstColor, srcColor, tint));
+        }
+    }
 }
 
 // Draw a part of an image defined by a rectangle within an image
@@ -3663,7 +3818,7 @@ export fn ImageDrawImagePro(dst: [*c]Image, src: Image, srcRec_in: Rectangle, ds
     var srcRec = srcRec_in;
     var dstRec = dstRec_in;
 
-    if ((dst.*.data == null) or (dst.*.width == 0) or (dst.*.height == 0) or
+    if ((dst == null) or (dst.*.data == null) or (dst.*.width == 0) or (dst.*.height == 0) or
         (src.data == null) or (src.width == 0) or (src.height == 0)) return;
 
     if (dst.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
@@ -3812,6 +3967,12 @@ export fn ImageDrawTextEx(dst: [*c]Image, font: Font, text: [*c]const u8, positi
     UnloadImage(imText);
 }
 
+// Draw text using Font and pro parameters (rotation)
+// NOTE: Not implemented upstream yet (raylib 6.2 ships an empty stub); kept a no-op for parity
+export fn ImageDrawTextPro(dst: [*c]Image, font: Font, text: [*c]const u8, position: Vector2, origin: Vector2, rotation: f32, fontSize: f32, spacing: f32, tint: Color) callconv(.c) void {
+    _ = .{ dst, font, text, position, origin, rotation, fontSize, spacing, tint };
+}
+
 //------------------------------------------------------------------------------------
 // Texture loading functions
 //------------------------------------------------------------------------------------
@@ -3954,7 +4115,18 @@ export fn LoadTextureCubemap(image: Image, layout_in: c_int) callconv(.c) Textur
 
 // Load texture for rendering (framebuffer)
 export fn LoadRenderTexture(width: c_int, height: c_int) callconv(.c) RenderTexture2D {
+    return LoadRenderTextureEx(width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+}
+
+// Load texture for rendering (framebuffer), with specific format
+// NOTE: Render texture is loaded by default with RGBA color attachment and depth RenderBuffer
+export fn LoadRenderTextureEx(width: c_int, height: c_int, format: c_int) callconv(.c) RenderTexture2D {
     var target: RenderTexture2D = std.mem.zeroes(RenderTexture2D);
+
+    if (format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+        TraceLog(LOG_WARNING, "FBO: Render texture format not supported");
+        return target;
+    }
 
     target.id = rlLoadFramebuffer(); // Load an empty framebuffer
 
@@ -3962,10 +4134,10 @@ export fn LoadRenderTexture(width: c_int, height: c_int) callconv(.c) RenderText
         rlEnableFramebuffer(target.id);
 
         // Create color texture (default to RGBA)
-        target.texture.id = rlLoadTexture(null, width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+        target.texture.id = rlLoadTexture(null, width, height, format, 1);
         target.texture.width = width;
         target.texture.height = height;
-        target.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+        target.texture.format = format;
         target.texture.mipmaps = 1;
 
         // Create depth renderbuffer/texture
@@ -4761,7 +4933,7 @@ export fn GetPixelColor(srcPtr: ?*const anyopaque, format: c_int) callconv(.c) C
         PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
             color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 11)) * 255, 31));
             color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 6) & 0b0000000000011111)) * 255, 31));
-            color.b = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] & 0b0000000000011111)) * 255, 31));
+            color.b = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 1) & 0b0000000000011111)) * 255, 31));
             color.a = if ((s16(srcPtr)[0] & 0b0000000000000001) != 0) 255 else 0;
         },
         PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
@@ -4878,6 +5050,8 @@ export fn GetPixelDataSize(width: c_int, height: c_int, format: c_int) callconv(
     var dataSize: c_int = 0; // Size in bytes
     var bpp: c_int = 0; // Bits per pixel
 
+    if ((width <= 0) or (height <= 0)) return dataSize;
+
     switch (format) {
         PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => bpp = 8,
         PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA,
@@ -4909,9 +5083,19 @@ export fn GetPixelDataSize(width: c_int, height: c_int, format: c_int) callconv(
         else => {},
     }
 
-    const bytesPerPixel: f64 = @as(f64, @floatFromInt(bpp)) / 8.0;
-    dataSize = ti(bytesPerPixel * @as(f64, @floatFromInt(width)) * @as(f64, @floatFromInt(height))); // Total data size in bytes
+    // Size in bytes (bits divided by 8); width/height are positive here, bpp is non-negative
+    const dataSizeBytes = (@as(u64, @intCast(width)) * @as(u64, @intCast(height)) * @as(u64, @intCast(bpp))) >> 3;
 
+    if (dataSizeBytes >= std.math.maxInt(c_int)) {
+        // NOTE: In case required image data larger than 2GB, no memory allocated at all (NULL)
+        TraceLog(LOG_WARNING, "Requested image size is larger than 2GB, it can not be allocated");
+        return dataSize;
+    }
+
+    dataSize = @intCast(dataSizeBytes);
+
+    // Most compressed formats works on 4x4 blocks,
+    // if texture is smaller, minimum dataSize is 8 or 16
     if ((width < 4) and (height < 4)) {
         if ((format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) and (format < PIXELFORMAT_COMPRESSED_DXT3_RGBA)) {
             dataSize = 8;
