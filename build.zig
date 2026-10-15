@@ -95,7 +95,7 @@ fn isPorted(name: []const u8) bool {
 fn raylibLib(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: ?std.builtin.Optimize,
     cfg_mod: *std.Build.Module,
     swap: bool,
     name: []const u8,
@@ -135,6 +135,7 @@ fn raylibLib(
                 .root_source_file = b.path(b.fmt("src/{s}.zig", .{stem})),
                 .target = target,
                 .optimize = optimize,
+                .link_libc = true,
             });
             obj_mod.addImport("config", cfg_mod);
             const obj = b.addObject(.{ .name = stem, .root_module = obj_mod });
@@ -172,6 +173,7 @@ fn raylibLib(
             .root_source_file = b.path("src/rlgl.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }) });
         rlgl_obj.use_llvm = true;
         mod.addObject(rlgl_obj);
@@ -204,7 +206,7 @@ fn raylibLib(
 fn linkExe(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: ?std.builtin.Optimize,
     lib: *std.Build.Step.Compile,
     name: []const u8,
     csrc: []const u8,

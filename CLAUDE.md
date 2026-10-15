@@ -50,7 +50,7 @@ correctness oracle is fundamentally different from SQLite's.**
 |---|---|---|
 | raylib C source | `/home/rajesh/opensource/graphics/raylib` | v6.1-dev (git `6.0-178-g67359073`). zlib/libpng license. Uses **Git**. |
 | Zig compiler/stdlib | `/home/rajesh/opensource/ziglang/zig` | Build/run toolchain reference (`src/`). |
-| Zig toolchain in PATH | `zig` (`~/.asdf/shims/zig`) | `0.17.0-dev.644+3de725074`. |
+| Zig toolchain in PATH | `zig` (`~/.asdf/shims/zig`) | `0.18.0-dev.246+05671ced9` (moved from 0.17.0-dev.644 on 2026-10-16; build.zig ported — Optimize is now optional, Zig objects must set link_libc). |
 | sqlite-zig (sibling) | `/home/rajesh/lab/ai-port/sqlite-zig` | The migration playbook this project copies. |
 
 Treat the source trees as **immutable references**. All new work lands here.
