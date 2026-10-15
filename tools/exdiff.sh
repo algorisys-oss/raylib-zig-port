@@ -11,8 +11,10 @@
 # category dir, so relative asset loads work and any writes the example does
 # land in the temp dir — the reference tree is never written to.
 #
-# Usage: exdiff.sh <oracle_lib.a> <zig_lib.a> [name-filter]
-#   name-filter: only run examples whose path contains the substring.
+# Usage: exdiff.sh <oracle_lib.a> <zig_lib.a> [name-filter] [list-file] [zig-bin-dir]
+#   name-filter: only run examples whose path contains the substring ('' = all).
+#   list-file:   example list (default test/examples.list).
+#   zig-bin-dir: Zig-API mode (see below).
 #
 # List format (test/examples.list): `<category>/<file.c> [frames]`,
 # '#' comments allowed. Default frames: 240.
@@ -24,7 +26,12 @@ FILTER="${3:-}"
 
 RAYLIB_SRC="vendor/raylib/src"
 EXAMPLES="${RAYLIB_EXAMPLES:-/home/rajesh/opensource/graphics/raylib-6.2/examples}"
-LIST="test/examples.list"
+LIST="${4:-test/examples.list}"
+# Zig-API mode (zig build apiexamples): when a zig-bin-dir is given, the "zig"
+# side of each pair is the prebuilt Zig-API translation <zig-bin-dir>/<name>
+# (already linked against the Zig library) instead of the C example relinked;
+# the C side is unchanged (upstream example + oracle lib).
+ZIG_BIN_DIR="${5:-}"
 SYS_LIBS=(-lX11 -lXrandr -lXinerama -lXcursor -lXi -lGL -lm -lpthread -ldl -lrt)
 
 export DISPLAY="${RAYLIB_ZIG_DISPLAY:-${DISPLAY:-:0}}"
@@ -41,7 +48,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Driver objects (one per lib is unnecessary — driver only uses raylib.h).
-zig cc -c tools/exdiff/driver.c -o "$TMP/driver.o" -I"$RAYLIB_SRC" -std=c99 \
+zig cc -c tools/exdiff/driver.c -o "$TMP/driver.o" -std=c99 \
+  && zig cc -c tools/exdiff/hooks.c -o "$TMP/hooks.o" -I"$RAYLIB_SRC" -std=c99 \
   || { echo "driver compile failed"; exit 3; }
 
 # Clock freezer (see fakeclock.c): preloaded into every run so library-internal
@@ -80,8 +88,12 @@ while read -r entry frames; do
   fi
   ok=1
   for side in c zig; do
+    if [ "$side" = zig ] && [ -n "$ZIG_BIN_DIR" ]; then
+      cp "$ZIG_BIN_DIR/$name" "$TMP/${name}_zig" 2> "$TMP/$name.zig.ld.log" || ok=0
+      continue
+    fi
     lib="$ORACLE_LIB"; [ "$side" = zig ] && lib="$ZIG_LIB"
-    zig cc "$TMP/$name.o" "$TMP/driver.o" "$lib" -o "$TMP/${name}_$side" \
+    zig cc "$TMP/$name.o" "$TMP/driver.o" "$TMP/hooks.o" "$lib" -o "$TMP/${name}_$side" \
       -L/usr/lib/x86_64-linux-gnu "${SYS_LIBS[@]}" 2> "$TMP/$name.$side.ld.log" || ok=0
   done
   if [ "$ok" = 0 ]; then
