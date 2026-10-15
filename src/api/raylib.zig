@@ -3963,3 +3963,744 @@ pub fn attachAudioMixedProcessor(processor: AudioCallback) void {
 pub fn detachAudioMixedProcessor(processor: AudioCallback) void {
     c.DetachAudioMixedProcessor(processor);
 }
+
+// --------------------------------------------------------------------------
+// raymath — vector, matrix and quaternion math (raymath.h)
+// --------------------------------------------------------------------------
+
+/// raymath: same functions as raymath.h, first letter lower-cased
+/// (`Vector2Add` -> `rl.math.vector2Add`).
+pub const math = struct {
+    pub const float3 = extern struct { v: [3]f32 };
+    pub const float16 = extern struct { v: [16]f32 };
+
+    /// Clamp float value
+    pub fn clamp(value: f32, min: f32, max: f32) f32 {
+        return c.Clamp(value, min, max);
+    }
+
+    /// Calculate linear interpolation between two floats
+    pub fn lerp(start: f32, end: f32, amount: f32) f32 {
+        return c.Lerp(start, end, amount);
+    }
+
+    /// Normalize input value within input range
+    pub fn normalize(value: f32, start: f32, end: f32) f32 {
+        return c.Normalize(value, start, end);
+    }
+
+    /// Remap input value within input range to output range
+    pub fn remap(value: f32, inputStart: f32, inputEnd: f32, outputStart: f32, outputEnd: f32) f32 {
+        return c.Remap(value, inputStart, inputEnd, outputStart, outputEnd);
+    }
+
+    /// Wrap input value from min to max
+    pub fn wrap(value: f32, min: f32, max: f32) f32 {
+        return c.Wrap(value, min, max);
+    }
+
+    /// Check whether two given floats are almost equal
+    pub fn floatEquals(x: f32, y: f32) i32 {
+        return c.FloatEquals(x, y);
+    }
+
+    /// Vector with components value 0.0f
+    pub fn vector2Zero() Vector2 {
+        return c.Vector2Zero();
+    }
+
+    /// Vector with components value 1.0f
+    pub fn vector2One() Vector2 {
+        return c.Vector2One();
+    }
+
+    /// Add two vectors (v1 + v2)
+    pub fn vector2Add(v1: Vector2, v2: Vector2) Vector2 {
+        return c.Vector2Add(v1, v2);
+    }
+
+    /// Add vector and float value
+    pub fn vector2AddValue(v: Vector2, add: f32) Vector2 {
+        return c.Vector2AddValue(v, add);
+    }
+
+    /// Subtract two vectors (v1 - v2)
+    pub fn vector2Subtract(v1: Vector2, v2: Vector2) Vector2 {
+        return c.Vector2Subtract(v1, v2);
+    }
+
+    /// Subtract vector by float value
+    pub fn vector2SubtractValue(v: Vector2, sub: f32) Vector2 {
+        return c.Vector2SubtractValue(v, sub);
+    }
+
+    /// Calculate vector length
+    pub fn vector2Length(v: Vector2) f32 {
+        return c.Vector2Length(v);
+    }
+
+    /// Calculate vector square length
+    pub fn vector2LengthSqr(v: Vector2) f32 {
+        return c.Vector2LengthSqr(v);
+    }
+
+    /// Calculate two vectors dot product
+    pub fn vector2DotProduct(v1: Vector2, v2: Vector2) f32 {
+        return c.Vector2DotProduct(v1, v2);
+    }
+
+    /// Calculate two vectors cross product
+    pub fn vector2CrossProduct(v1: Vector2, v2: Vector2) f32 {
+        return c.Vector2CrossProduct(v1, v2);
+    }
+
+    /// Calculate distance between two vectors
+    pub fn vector2Distance(v1: Vector2, v2: Vector2) f32 {
+        return c.Vector2Distance(v1, v2);
+    }
+
+    /// Calculate square distance between two vectors
+    pub fn vector2DistanceSqr(v1: Vector2, v2: Vector2) f32 {
+        return c.Vector2DistanceSqr(v1, v2);
+    }
+
+    /// positive angles appear clockwise, and negative angles appear counterclockwise
+    pub fn vector2Angle(v1: Vector2, v2: Vector2) f32 {
+        return c.Vector2Angle(v1, v2);
+    }
+
+    /// Current implementation should be aligned with glm::angle
+    pub fn vector2LineAngle(start: Vector2, end: Vector2) f32 {
+        return c.Vector2LineAngle(start, end);
+    }
+
+    /// Scale vector (multiply by value)
+    pub fn vector2Scale(v: Vector2, scale: f32) Vector2 {
+        return c.Vector2Scale(v, scale);
+    }
+
+    /// Multiply vector by vector
+    pub fn vector2Multiply(v1: Vector2, v2: Vector2) Vector2 {
+        return c.Vector2Multiply(v1, v2);
+    }
+
+    /// Negate vector
+    pub fn vector2Negate(v: Vector2) Vector2 {
+        return c.Vector2Negate(v);
+    }
+
+    /// Divide vector by vector
+    pub fn vector2Divide(v1: Vector2, v2: Vector2) Vector2 {
+        return c.Vector2Divide(v1, v2);
+    }
+
+    /// Normalize provided vector
+    pub fn vector2Normalize(v: Vector2) Vector2 {
+        return c.Vector2Normalize(v);
+    }
+
+    /// Transforms a Vector2 by a given Matrix
+    pub fn vector2Transform(v: Vector2, mat: Matrix) Vector2 {
+        return c.Vector2Transform(v, mat);
+    }
+
+    /// Calculate linear interpolation between two vectors
+    pub fn vector2Lerp(v1: Vector2, v2: Vector2, amount: f32) Vector2 {
+        return c.Vector2Lerp(v1, v2, amount);
+    }
+
+    /// Calculate reflected vector to normal
+    pub fn vector2Reflect(v: Vector2, normal: Vector2) Vector2 {
+        return c.Vector2Reflect(v, normal);
+    }
+
+    /// Get min value for each pair of components
+    pub fn vector2Min(v1: Vector2, v2: Vector2) Vector2 {
+        return c.Vector2Min(v1, v2);
+    }
+
+    /// Get max value for each pair of components
+    pub fn vector2Max(v1: Vector2, v2: Vector2) Vector2 {
+        return c.Vector2Max(v1, v2);
+    }
+
+    /// Rotate vector by angle
+    pub fn vector2Rotate(v: Vector2, angle: f32) Vector2 {
+        return c.Vector2Rotate(v, angle);
+    }
+
+    /// Move Vector towards target
+    pub fn vector2MoveTowards(v: Vector2, target: Vector2, maxDistance: f32) Vector2 {
+        return c.Vector2MoveTowards(v, target, maxDistance);
+    }
+
+    /// Invert the given vector
+    pub fn vector2Invert(v: Vector2) Vector2 {
+        return c.Vector2Invert(v);
+    }
+
+    /// min and max values specified by the given vectors
+    pub fn vector2Clamp(v: Vector2, min: Vector2, max: Vector2) Vector2 {
+        return c.Vector2Clamp(v, min, max);
+    }
+
+    /// Clamp the magnitude of the vector between two min and max values
+    pub fn vector2ClampValue(v: Vector2, min: f32, max: f32) Vector2 {
+        return c.Vector2ClampValue(v, min, max);
+    }
+
+    /// Check whether two given vectors are almost equal
+    pub fn vector2Equals(p: Vector2, q: Vector2) i32 {
+        return c.Vector2Equals(p, q);
+    }
+
+    /// to the refractive index of the medium on the other side of the surface
+    pub fn vector2Refract(v: Vector2, n: Vector2, r: f32) Vector2 {
+        return c.Vector2Refract(v, n, r);
+    }
+
+    /// Vector with components value 0.0f
+    pub fn vector3Zero() Vector3 {
+        return c.Vector3Zero();
+    }
+
+    /// Vector with components value 1.0f
+    pub fn vector3One() Vector3 {
+        return c.Vector3One();
+    }
+
+    /// Add two vectors
+    pub fn vector3Add(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Add(v1, v2);
+    }
+
+    /// Add vector and float value
+    pub fn vector3AddValue(v: Vector3, add: f32) Vector3 {
+        return c.Vector3AddValue(v, add);
+    }
+
+    /// Subtract two vectors
+    pub fn vector3Subtract(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Subtract(v1, v2);
+    }
+
+    /// Subtract vector by float value
+    pub fn vector3SubtractValue(v: Vector3, sub: f32) Vector3 {
+        return c.Vector3SubtractValue(v, sub);
+    }
+
+    /// Multiply vector by scalar
+    pub fn vector3Scale(v: Vector3, scalar: f32) Vector3 {
+        return c.Vector3Scale(v, scalar);
+    }
+
+    /// Multiply vector by vector
+    pub fn vector3Multiply(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Multiply(v1, v2);
+    }
+
+    /// Calculate two vectors cross product
+    pub fn vector3CrossProduct(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3CrossProduct(v1, v2);
+    }
+
+    /// Calculate one vector perpendicular vector
+    pub fn vector3Perpendicular(v: Vector3) Vector3 {
+        return c.Vector3Perpendicular(v);
+    }
+
+    /// Calculate vector length
+    pub fn vector3Length(v: Vector3) f32 {
+        return c.Vector3Length(v);
+    }
+
+    /// Calculate vector square length
+    pub fn vector3LengthSqr(v: Vector3) f32 {
+        return c.Vector3LengthSqr(v);
+    }
+
+    /// Calculate two vectors dot product
+    pub fn vector3DotProduct(v1: Vector3, v2: Vector3) f32 {
+        return c.Vector3DotProduct(v1, v2);
+    }
+
+    /// Calculate distance between two vectors
+    pub fn vector3Distance(v1: Vector3, v2: Vector3) f32 {
+        return c.Vector3Distance(v1, v2);
+    }
+
+    /// Calculate square distance between two vectors
+    pub fn vector3DistanceSqr(v1: Vector3, v2: Vector3) f32 {
+        return c.Vector3DistanceSqr(v1, v2);
+    }
+
+    /// Calculate angle between two vectors
+    pub fn vector3Angle(v1: Vector3, v2: Vector3) f32 {
+        return c.Vector3Angle(v1, v2);
+    }
+
+    /// Negate provided vector (invert direction)
+    pub fn vector3Negate(v: Vector3) Vector3 {
+        return c.Vector3Negate(v);
+    }
+
+    /// Divide vector by vector
+    pub fn vector3Divide(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Divide(v1, v2);
+    }
+
+    /// Normalize provided vector
+    pub fn vector3Normalize(v: Vector3) Vector3 {
+        return c.Vector3Normalize(v);
+    }
+
+    /// Calculate the projection of the vector v1 on to v2
+    pub fn vector3Project(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Project(v1, v2);
+    }
+
+    /// Calculate the rejection of the vector v1 on to v2
+    pub fn vector3Reject(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Reject(v1, v2);
+    }
+
+    /// Gram-Schmidt function implementation
+    pub fn vector3OrthoNormalize(v1: *Vector3, v2: *Vector3) void {
+        c.Vector3OrthoNormalize(v1, v2);
+    }
+
+    /// Transforms a Vector3 by a given Matrix
+    pub fn vector3Transform(v: Vector3, mat: Matrix) Vector3 {
+        return c.Vector3Transform(v, mat);
+    }
+
+    /// Transform a vector by quaternion rotation
+    pub fn vector3RotateByQuaternion(v: Vector3, q: Quaternion) Vector3 {
+        return c.Vector3RotateByQuaternion(v, q);
+    }
+
+    /// Rotates a vector around an axis
+    pub fn vector3RotateByAxisAngle(v: Vector3, axis: Vector3, angle: f32) Vector3 {
+        return c.Vector3RotateByAxisAngle(v, axis, angle);
+    }
+
+    /// Move Vector towards target
+    pub fn vector3MoveTowards(v: Vector3, target: Vector3, maxDistance: f32) Vector3 {
+        return c.Vector3MoveTowards(v, target, maxDistance);
+    }
+
+    /// Calculate linear interpolation between two vectors
+    pub fn vector3Lerp(v1: Vector3, v2: Vector3, amount: f32) Vector3 {
+        return c.Vector3Lerp(v1, v2, amount);
+    }
+
+    /// as described in the GLTF 2.0 specification: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#interpolation-cubic
+    pub fn vector3CubicHermite(v1: Vector3, tangent1: Vector3, v2: Vector3, tangent2: Vector3, amount: f32) Vector3 {
+        return c.Vector3CubicHermite(v1, tangent1, v2, tangent2, amount);
+    }
+
+    /// Calculate reflected vector to normal
+    pub fn vector3Reflect(v: Vector3, normal: Vector3) Vector3 {
+        return c.Vector3Reflect(v, normal);
+    }
+
+    /// Get min value for each pair of components
+    pub fn vector3Min(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Min(v1, v2);
+    }
+
+    /// Get max value for each pair of components
+    pub fn vector3Max(v1: Vector3, v2: Vector3) Vector3 {
+        return c.Vector3Max(v1, v2);
+    }
+
+    /// NOTE: Assumes P is on the plane of the triangle
+    pub fn vector3Barycenter(p: Vector3, v1: Vector3, v2: Vector3, v3: Vector3) Vector3 {
+        return c.Vector3Barycenter(p, v1, v2, v3);
+    }
+
+    /// NOTE: Self-contained function, no other raymath functions are called
+    pub fn vector3Unproject(source: Vector3, projection: Matrix, view: Matrix) Vector3 {
+        return c.Vector3Unproject(source, projection, view);
+    }
+
+    /// Get Vector3 as float array
+    pub fn vector3ToFloatV(v: Vector3) float3 {
+        return c.Vector3ToFloatV(v);
+    }
+
+    /// Invert the given vector
+    pub fn vector3Invert(v: Vector3) Vector3 {
+        return c.Vector3Invert(v);
+    }
+
+    /// min and max values specified by the given vectors
+    pub fn vector3Clamp(v: Vector3, min: Vector3, max: Vector3) Vector3 {
+        return c.Vector3Clamp(v, min, max);
+    }
+
+    /// Clamp the magnitude of the vector between two values
+    pub fn vector3ClampValue(v: Vector3, min: f32, max: f32) Vector3 {
+        return c.Vector3ClampValue(v, min, max);
+    }
+
+    /// Check whether two given vectors are almost equal
+    pub fn vector3Equals(p: Vector3, q: Vector3) i32 {
+        return c.Vector3Equals(p, q);
+    }
+
+    /// to the refractive index of the medium on the other side of the surface
+    pub fn vector3Refract(v: Vector3, n: Vector3, r: f32) Vector3 {
+        return c.Vector3Refract(v, n, r);
+    }
+
+    /// Get  vector zero
+    pub fn vector4Zero() Vector4 {
+        return c.Vector4Zero();
+    }
+
+    /// Get vector one
+    pub fn vector4One() Vector4 {
+        return c.Vector4One();
+    }
+
+    /// Add two vectors
+    pub fn vector4Add(v1: Vector4, v2: Vector4) Vector4 {
+        return c.Vector4Add(v1, v2);
+    }
+
+    /// Add value to vector components
+    pub fn vector4AddValue(v: Vector4, add: f32) Vector4 {
+        return c.Vector4AddValue(v, add);
+    }
+
+    /// Substract vectors
+    pub fn vector4Subtract(v1: Vector4, v2: Vector4) Vector4 {
+        return c.Vector4Subtract(v1, v2);
+    }
+
+    /// Substract value from vector components
+    pub fn vector4SubtractValue(v: Vector4, add: f32) Vector4 {
+        return c.Vector4SubtractValue(v, add);
+    }
+
+    /// Vector length
+    pub fn vector4Length(v: Vector4) f32 {
+        return c.Vector4Length(v);
+    }
+
+    /// Vector square length
+    pub fn vector4LengthSqr(v: Vector4) f32 {
+        return c.Vector4LengthSqr(v);
+    }
+
+    /// Vectors dot product
+    pub fn vector4DotProduct(v1: Vector4, v2: Vector4) f32 {
+        return c.Vector4DotProduct(v1, v2);
+    }
+
+    /// Calculate distance between two vectors
+    pub fn vector4Distance(v1: Vector4, v2: Vector4) f32 {
+        return c.Vector4Distance(v1, v2);
+    }
+
+    /// Calculate square distance between two vectors
+    pub fn vector4DistanceSqr(v1: Vector4, v2: Vector4) f32 {
+        return c.Vector4DistanceSqr(v1, v2);
+    }
+
+    /// Scale vector components by value (multiply)
+    pub fn vector4Scale(v: Vector4, scale: f32) Vector4 {
+        return c.Vector4Scale(v, scale);
+    }
+
+    /// Multiply vector by vector
+    pub fn vector4Multiply(v1: Vector4, v2: Vector4) Vector4 {
+        return c.Vector4Multiply(v1, v2);
+    }
+
+    /// Negate vector
+    pub fn vector4Negate(v: Vector4) Vector4 {
+        return c.Vector4Negate(v);
+    }
+
+    /// Divide vector by vector
+    pub fn vector4Divide(v1: Vector4, v2: Vector4) Vector4 {
+        return c.Vector4Divide(v1, v2);
+    }
+
+    /// Normalize provided vector
+    pub fn vector4Normalize(v: Vector4) Vector4 {
+        return c.Vector4Normalize(v);
+    }
+
+    /// Get min value for each pair of components
+    pub fn vector4Min(v1: Vector4, v2: Vector4) Vector4 {
+        return c.Vector4Min(v1, v2);
+    }
+
+    /// Get max value for each pair of components
+    pub fn vector4Max(v1: Vector4, v2: Vector4) Vector4 {
+        return c.Vector4Max(v1, v2);
+    }
+
+    /// Calculate linear interpolation between two vectors
+    pub fn vector4Lerp(v1: Vector4, v2: Vector4, amount: f32) Vector4 {
+        return c.Vector4Lerp(v1, v2, amount);
+    }
+
+    /// Move Vector towards target
+    pub fn vector4MoveTowards(v: Vector4, target: Vector4, maxDistance: f32) Vector4 {
+        return c.Vector4MoveTowards(v, target, maxDistance);
+    }
+
+    /// Invert the given vector
+    pub fn vector4Invert(v: Vector4) Vector4 {
+        return c.Vector4Invert(v);
+    }
+
+    /// Check whether two given vectors are almost equal
+    pub fn vector4Equals(p: Vector4, q: Vector4) i32 {
+        return c.Vector4Equals(p, q);
+    }
+
+    /// Compute matrix determinant
+    pub fn matrixDeterminant(mat: Matrix) f32 {
+        return c.MatrixDeterminant(mat);
+    }
+
+    /// Get the trace of the matrix (sum of the values along the diagonal)
+    pub fn matrixTrace(mat: Matrix) f32 {
+        return c.MatrixTrace(mat);
+    }
+
+    /// Transposes provided matrix
+    pub fn matrixTranspose(mat: Matrix) Matrix {
+        return c.MatrixTranspose(mat);
+    }
+
+    /// Invert provided matrix
+    pub fn matrixInvert(mat: Matrix) Matrix {
+        return c.MatrixInvert(mat);
+    }
+
+    /// Get identity matrix
+    pub fn matrixIdentity() Matrix {
+        return c.MatrixIdentity();
+    }
+
+    /// Add two matrices
+    pub fn matrixAdd(left: Matrix, right: Matrix) Matrix {
+        return c.MatrixAdd(left, right);
+    }
+
+    /// Subtract two matrices (left - right)
+    pub fn matrixSubtract(left: Matrix, right: Matrix) Matrix {
+        return c.MatrixSubtract(left, right);
+    }
+
+    /// NOTE: When multiplying matrices... the order matters!
+    pub fn matrixMultiply(left: Matrix, right: Matrix) Matrix {
+        return c.MatrixMultiply(left, right);
+    }
+
+    /// Multiply matrix components by value
+    pub fn matrixMultiplyValue(left: Matrix, value: f32) Matrix {
+        return c.MatrixMultiplyValue(left, value);
+    }
+
+    /// Get translation matrix
+    pub fn matrixTranslate(x: f32, y: f32, z: f32) Matrix {
+        return c.MatrixTranslate(x, y, z);
+    }
+
+    /// NOTE: Angle should be provided in radians
+    pub fn matrixRotate(axis: Vector3, angle: f32) Matrix {
+        return c.MatrixRotate(axis, angle);
+    }
+
+    /// NOTE: Angle must be provided in radians
+    pub fn matrixRotateX(angle: f32) Matrix {
+        return c.MatrixRotateX(angle);
+    }
+
+    /// NOTE: Angle must be provided in radians
+    pub fn matrixRotateY(angle: f32) Matrix {
+        return c.MatrixRotateY(angle);
+    }
+
+    /// NOTE: Angle must be provided in radians
+    pub fn matrixRotateZ(angle: f32) Matrix {
+        return c.MatrixRotateZ(angle);
+    }
+
+    /// NOTE: Angle must be provided in radians
+    pub fn matrixRotateXYZ(angle: Vector3) Matrix {
+        return c.MatrixRotateXYZ(angle);
+    }
+
+    /// NOTE: Angle must be provided in radians
+    pub fn matrixRotateZYX(angle: Vector3) Matrix {
+        return c.MatrixRotateZYX(angle);
+    }
+
+    /// Get scaling matrix
+    pub fn matrixScale(x: f32, y: f32, z: f32) Matrix {
+        return c.MatrixScale(x, y, z);
+    }
+
+    /// Get perspective projection matrix
+    pub fn matrixFrustum(left: f64, right: f64, bottom: f64, top: f64, nearPlane: f64, farPlane: f64) Matrix {
+        return c.MatrixFrustum(left, right, bottom, top, nearPlane, farPlane);
+    }
+
+    /// NOTE: Fovy angle must be provided in radians
+    pub fn matrixPerspective(fovY: f64, aspect: f64, nearPlane: f64, farPlane: f64) Matrix {
+        return c.MatrixPerspective(fovY, aspect, nearPlane, farPlane);
+    }
+
+    /// Get orthographic projection matrix
+    pub fn matrixOrtho(left: f64, right: f64, bottom: f64, top: f64, nearPlane: f64, farPlane: f64) Matrix {
+        return c.MatrixOrtho(left, right, bottom, top, nearPlane, farPlane);
+    }
+
+    /// Get camera look-at matrix (view matrix)
+    pub fn matrixLookAt(eye: Vector3, target: Vector3, up: Vector3) Matrix {
+        return c.MatrixLookAt(eye, target, up);
+    }
+
+    /// Get float array of matrix data
+    pub fn matrixToFloatV(mat: Matrix) float16 {
+        return c.MatrixToFloatV(mat);
+    }
+
+    /// Add two quaternions
+    pub fn quaternionAdd(q1: Quaternion, q2: Quaternion) Quaternion {
+        return c.QuaternionAdd(q1, q2);
+    }
+
+    /// Add quaternion and float value
+    pub fn quaternionAddValue(q: Quaternion, add: f32) Quaternion {
+        return c.QuaternionAddValue(q, add);
+    }
+
+    /// Subtract two quaternions
+    pub fn quaternionSubtract(q1: Quaternion, q2: Quaternion) Quaternion {
+        return c.QuaternionSubtract(q1, q2);
+    }
+
+    /// Subtract quaternion and float value
+    pub fn quaternionSubtractValue(q: Quaternion, sub: f32) Quaternion {
+        return c.QuaternionSubtractValue(q, sub);
+    }
+
+    /// Get identity quaternion
+    pub fn quaternionIdentity() Quaternion {
+        return c.QuaternionIdentity();
+    }
+
+    /// Computes the length of a quaternion
+    pub fn quaternionLength(q: Quaternion) f32 {
+        return c.QuaternionLength(q);
+    }
+
+    /// Normalize provided quaternion
+    pub fn quaternionNormalize(q: Quaternion) Quaternion {
+        return c.QuaternionNormalize(q);
+    }
+
+    /// Invert provided quaternion
+    pub fn quaternionInvert(q: Quaternion) Quaternion {
+        return c.QuaternionInvert(q);
+    }
+
+    /// Calculate two quaternion multiplication
+    pub fn quaternionMultiply(q1: Quaternion, q2: Quaternion) Quaternion {
+        return c.QuaternionMultiply(q1, q2);
+    }
+
+    /// Scale quaternion by float value
+    pub fn quaternionScale(q: Quaternion, mul: f32) Quaternion {
+        return c.QuaternionScale(q, mul);
+    }
+
+    /// Divide two quaternions
+    pub fn quaternionDivide(q1: Quaternion, q2: Quaternion) Quaternion {
+        return c.QuaternionDivide(q1, q2);
+    }
+
+    /// Calculate linear interpolation between two quaternions
+    pub fn quaternionLerp(q1: Quaternion, q2: Quaternion, amount: f32) Quaternion {
+        return c.QuaternionLerp(q1, q2, amount);
+    }
+
+    /// Calculate slerp-optimized interpolation between two quaternions
+    pub fn quaternionNlerp(q1: Quaternion, q2: Quaternion, amount: f32) Quaternion {
+        return c.QuaternionNlerp(q1, q2, amount);
+    }
+
+    /// Calculates spherical linear interpolation between two quaternions
+    pub fn quaternionSlerp(q1: Quaternion, q2: Quaternion, amount: f32) Quaternion {
+        return c.QuaternionSlerp(q1, q2, amount);
+    }
+
+    /// as described in the GLTF 2.0 specification: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#interpolation-cubic
+    pub fn quaternionCubicHermiteSpline(q1: Quaternion, outTangent1: Quaternion, q2: Quaternion, inTangent2: Quaternion, t: f32) Quaternion {
+        return c.QuaternionCubicHermiteSpline(q1, outTangent1, q2, inTangent2, t);
+    }
+
+    /// Calculate quaternion based on the rotation from one vector to another
+    pub fn quaternionFromVector3ToVector3(from: Vector3, to: Vector3) Quaternion {
+        return c.QuaternionFromVector3ToVector3(from, to);
+    }
+
+    /// Get a quaternion for a given rotation matrix
+    pub fn quaternionFromMatrix(mat: Matrix) Quaternion {
+        return c.QuaternionFromMatrix(mat);
+    }
+
+    /// Get a matrix for a given quaternion
+    pub fn quaternionToMatrix(q: Quaternion) Matrix {
+        return c.QuaternionToMatrix(q);
+    }
+
+    /// NOTE: Angle must be provided in radians
+    pub fn quaternionFromAxisAngle(axis: Vector3, angle: f32) Quaternion {
+        return c.QuaternionFromAxisAngle(axis, angle);
+    }
+
+    /// Get the rotation angle and axis for a given quaternion
+    pub fn quaternionToAxisAngle(q: Quaternion, outAxis: *Vector3, outAngle: *f32) void {
+        c.QuaternionToAxisAngle(q, outAxis, outAngle);
+    }
+
+    /// NOTE: Rotation order is ZYX
+    pub fn quaternionFromEuler(pitch: f32, yaw: f32, roll: f32) Quaternion {
+        return c.QuaternionFromEuler(pitch, yaw, roll);
+    }
+
+    /// NOTE: Angles are returned in a Vector3 struct in radians
+    pub fn quaternionToEuler(q: Quaternion) Vector3 {
+        return c.QuaternionToEuler(q);
+    }
+
+    /// Transform a quaternion given a transformation matrix
+    pub fn quaternionTransform(q: Quaternion, mat: Matrix) Quaternion {
+        return c.QuaternionTransform(q, mat);
+    }
+
+    /// Check whether two given quaternions are almost equal
+    pub fn quaternionEquals(p: Quaternion, q: Quaternion) i32 {
+        return c.QuaternionEquals(p, q);
+    }
+
+    /// Compose a transformation matrix from rotational, translational and scaling components
+    pub fn matrixCompose(translation: Vector3, rotation: Quaternion, scale: Vector3) Matrix {
+        return c.MatrixCompose(translation, rotation, scale);
+    }
+
+    /// TODO: WARNING: Following raymath convention and make the function self-contained
+    pub fn matrixDecompose(mat: Matrix, translation: *Vector3, rotation: *Quaternion, scale: *Vector3) void {
+        c.MatrixDecompose(mat, translation, rotation, scale);
+    }
+};

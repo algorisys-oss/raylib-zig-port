@@ -18,6 +18,7 @@ import re
 import sys
 
 HEADER = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "vendor/raylib/src/raylib.h")
+RAYMATH = HEADER.with_name("raymath.h")
 OUT_DIR = pathlib.Path("src/api")
 
 ZIG_KEYWORDS = {
@@ -99,7 +100,14 @@ RETURN_ENUMS = {
 COUNT_NAMES = re.compile(r"(?:[cC]ount|[sS]ize|[lL]ength|^instances)$")
 
 # Params whose C name would shadow a declaration in Zig (Zig forbids shadowing).
-PARAM_RENAMES = {("FileRename", "fileRename"): "newFileName"}
+PARAM_RENAMES = {
+    ("FileRename", "fileRename"): "newFileName",
+    # `c` is the boundary namespace; name the triangle's vertices uniformly.
+    ("Vector3Barycenter", "a"): "v1",
+    ("Vector3Barycenter", "b"): "v2",
+    ("Vector3Barycenter", "c"): "v3",
+}
+RESERVED_PARAMS = {"c", "std", "math"}  # module-level names in raylib.zig
 
 # `const char *` params that raylib documents as accepting NULL.
 NULLABLE_STRINGS = {
@@ -555,6 +563,15 @@ pub fn unloadRandomSequence(sequence: []i32) void {
 ''',
 }
 
+MATH_OVERRIDES = {
+    "QuaternionToAxisAngle": '''
+/// Get the rotation angle and axis for a given quaternion
+pub fn quaternionToAxisAngle(q: Quaternion, outAxis: *Vector3, outAngle: *f32) void {
+    c.QuaternionToAxisAngle(q, outAxis, outAngle);
+}
+''',
+}
+
 # --------------------------------------------------------------------------
 # Parsing
 # --------------------------------------------------------------------------
@@ -590,13 +607,20 @@ def split_decl(decl):
     return Param(ctype.replace(" *", "*").replace("*", " *").strip(), name)
 
 
-def parse_functions(src):
+def parse_functions(src, prefix="RLAPI "):
+    """RLAPI prototypes (raylib.h, comment trailing) or RMAPI definitions
+    (raymath.h, comment on the preceding line)."""
     funcs = []
-    for line in src.splitlines():
-        if not line.startswith("RLAPI "):
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith(prefix):
             continue
-        comment = line.split("//", 1)[1].strip() if "//" in line else ""
-        decl = line.split("//", 1)[0].strip()[len("RLAPI "):].rstrip(";").strip()
+        if "//" in line:
+            comment = line.split("//", 1)[1].strip()
+        else:
+            above = lines[i - 1].strip()
+            comment = above[2:].strip() if above.startswith("//") else ""
+        decl = line.split("//", 1)[0].strip()[len(prefix):].rstrip(";").strip()
         head, args = decl.split("(", 1)
         args = args.rsplit(")", 1)[0].strip()
         ret = split_decl(head)
@@ -698,6 +722,9 @@ class Gen:
         self.enums = parse_enums(src)
         self.enum_names = {n for n, _ in self.enums}
         self.funcs = parse_functions(src)
+        self.math_src = RAYMATH.read_text()
+        self.math_funcs = parse_functions(self.math_src, "RMAPI ")
+        self.struct_names |= {"float3", "float16"}
         self.callbacks = re.findall(r"^typedef (.+?)\(\*(\w+)\)\((.*?)\);", src, re.M)
         self.callback_names = {n for _, n, _ in self.callbacks}
         self.errors = []
@@ -744,6 +771,8 @@ class Gen:
             p = params[i]
             nxt = params[i + 1] if i + 1 < len(params) else None
             pn = zig_ident(PARAM_RENAMES.get((fname, p.name), p.name))
+            if pn in RESERVED_PARAMS:
+                raise ValueError(f"param '{pn}' shadows a module-level name; add a PARAM_RENAMES entry")
             if p.ctype == "...":
                 raise ValueError("varargs")
             enum = self.enum_for(fname, p.name)
@@ -838,7 +867,7 @@ class Gen:
             r = self.c_type(split_decl(rt.strip() + " x"))
             out.append(f"pub const {name} = ?*const fn ({', '.join(cps)}) callconv(.c) {r};")
         out.append("")
-        for fname, ret, params, _ in self.funcs:
+        for fname, ret, params, _ in self.funcs + self.math_funcs:
             cps = []
             for p in params:
                 cps.append("..." if p.ctype == "..." else f"{zig_ident(p.name)}: {self.c_type(p)}")
@@ -919,6 +948,29 @@ class Gen:
                 out.append(self.wrap_function(fname, ret, params, comment) + "\n")
             except ValueError as e:
                 self.errors.append(f"{fname}: {e}")
+        out.append(self.emit_math())
+        return "\n".join(out)
+
+    def emit_math(self):
+        out = ["// " + "-" * 74,
+               "// raymath — vector, matrix and quaternion math (raymath.h)",
+               "// " + "-" * 74,
+               "",
+               "/// raymath: same functions as raymath.h, first letter lower-cased",
+               "/// (`Vector2Add` -> `rl.math.vector2Add`).",
+               "pub const math = struct {",
+               "    pub const float3 = extern struct { v: [3]f32 };",
+               "    pub const float16 = extern struct { v: [16]f32 };",
+               ""]
+        for fname, ret, params, comment in self.math_funcs:
+            try:
+                body = MATH_OVERRIDES.get(fname) or self.wrap_function(fname, ret, params, comment)
+            except ValueError as e:
+                self.errors.append(f"raymath {fname}: {e}")
+                continue
+            out.extend("    " + l if l else "" for l in body.strip("\n").splitlines())
+            out.append("")
+        out.append("};")
         return "\n".join(out)
 
     def emit_flags(self, ename, members, prefix):
@@ -988,6 +1040,8 @@ const VrStereoConfig = raylib.VrStereoConfig;
 const FilePathList = raylib.FilePathList;
 const AutomationEvent = raylib.AutomationEvent;
 const AutomationEventList = raylib.AutomationEventList;
+const float3 = raylib.math.float3;
+const float16 = raylib.math.float16;
 '''
 
 # Functions the examples gate's determinism shim replaces (tools/exdiff/hooks.c).
@@ -1033,8 +1087,8 @@ def main():
     (OUT_DIR / "c.zig").write_text(gen.emit_c())
     (OUT_DIR / "c_exdiff.zig").write_text(gen.emit_c(shim=True))
     (OUT_DIR / "raylib.zig").write_text(api)
-    print(f"OK  {len(gen.funcs)} functions, {len(gen.structs)} structs, "
-          f"{len(gen.enums)} enums -> {OUT_DIR}/raylib.zig, {OUT_DIR}/c.zig")
+    print(f"OK  {len(gen.funcs)} raylib + {len(gen.math_funcs)} raymath functions, "
+          f"{len(gen.structs)} structs, {len(gen.enums)} enums -> {OUT_DIR}/")
 
 
 if __name__ == "__main__":

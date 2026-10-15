@@ -67,6 +67,13 @@ Enums that represent open sets (key codes, gamepad buttons, gestures,
 shader locations) are non-exhaustive (`_`), so any value raylib can return
 round-trips.
 
+## raymath
+
+`raymath.h` is exposed as the `math` namespace with the same rules:
+`Vector2Add(a, b)` → `rl.math.vector2Add(a, b)`, `MatrixRotateY(angle)` →
+`rl.math.matrixRotateY(angle)`. (`rlgl.h` is not wrapped yet — it is raylib's
+low-level GL layer; examples that need it stay C-only for now.)
+
 ## Memory
 
 raylib allocates with its own `MemAlloc`/`MemFree` (libc malloc); the API
