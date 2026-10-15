@@ -122,8 +122,7 @@ core_loading_thread.c no longer exists upstream). test/examples.list =
 skipped silently.
 
 ### THEN — cleanups (non-blocking)
-- ReleaseFast static-archive LLD failure (workaround candidates noted in
-  "Known issues").
+- ~~ReleaseFast static-archive LLD failure~~ — resolved (Zig 0.18; see Known issues).
 - Idiomatic-Zig API layer (Phase 6, separate surface; C ABI stays frozen).
 
 ## Status snapshot (2026-07-04)
@@ -193,13 +192,11 @@ zig build runners      # build scene_runner_oracle + scene_runner_zig
 
 ## Known issues / notes
 
-- **ReleaseFast fails to archive the static lib** (`LLD: UnableToWriteArchive`)
-  with the full TU set; **Debug builds fine** and is the default. Disk/space ruled
-  out (181 G free); an isolated 2-file `build-lib` archives OK, so it's an
-  LLD-archive-writer quirk at `-OReleaseFast` + many large C objects. Debug is
-  fine for the correctness gate (determinism holds). Revisit for an optimized
-  production lib later (possible workarounds: `zig ar` post-step, or `-fno-lto`/
-  per-object archive). Tracked; not blocking.
+- ~~ReleaseFast fails to archive the static lib~~ — **resolved by the Zig
+  0.18-dev toolchain (2026-10-16)**: `zig build -Doptimize=ReleaseFast` archives
+  (11 MB vs 59 MB Debug) and every non-example gate is byte-identical at
+  ReleaseFast (pixel 12/12, math 90,200, cam, gest, data, audio 43/43, cdiff
+  4/4). (Was `LLD: UnableToWriteArchive` under 0.17-dev.)
 - **Goldens are not committed** — the gate compares the two live builds against
   each other (no machine-specific golden PNGs to maintain). llvmpipe output is
   machine/driver-specific, so committed pixel goldens would not be portable; the
