@@ -28,8 +28,14 @@ LIST="test/examples.list"
 SYS_LIBS=(-lX11 -lXrandr -lXinerama -lXcursor -lXi -lGL -lm -lpthread -ldl -lrt)
 
 export DISPLAY="${RAYLIB_ZIG_DISPLAY:-${DISPLAY:-:0}}"
-export LIBGL_ALWAYS_SOFTWARE=1
-export GALLIUM_DRIVER=llvmpipe
+# Default: mesa llvmpipe (deterministic software GL — the gate). EXDIFF_GPU=1
+# uses the real hardware driver instead: a spot check that the llvmpipe path
+# isn't masking a GPU-state bug (CLAUDE.md oracle item 4). Hardware output is
+# not guaranteed bit-deterministic, so a GPU diff is a lead, not a verdict.
+if [ "${EXDIFF_GPU:-0}" != 1 ]; then
+  export LIBGL_ALWAYS_SOFTWARE=1
+  export GALLIUM_DRIVER=llvmpipe
+fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

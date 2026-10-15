@@ -298,6 +298,37 @@ pub fn build(b: *std.Build) void {
     audiodiff.addArtifactArg(audiocheck_zig);
     b.step("audiocheck", "C-vs-Zig audio decode diff (the raudio gate)").dependOn(&audiodiff.step);
 
+    // `zig build cdiff` — direct C-vs-Zig differentials for paths the examples
+    // gate can't reach (input-gated branches, edge-case parameters). Each
+    // test/cdiff program is linked against both libraries; tools/cdiff.sh runs
+    // the pair with identical args and byte-diffs stdout.
+    {
+        const cdiff_step = b.step("cdiff", "C-vs-Zig differentials for paths the examples can't reach");
+        const fonts_dir = "/home/rajesh/opensource/graphics/raylib-6.2/examples/text/resources";
+        const programs = [_]struct { name: []const u8, args: []const []const u8 }{
+            .{ .name = "text_strings", .args = &.{} },
+            .{ .name = "core_files", .args = &.{} },
+            .{ .name = "shapes_sweep", .args = &.{} },
+            .{ .name = "font_data", .args = &.{
+                fonts_dir ++ "/anonymous_pro_bold.ttf",
+                fonts_dir ++ "/pixantiqua.ttf",
+                fonts_dir ++ "/NotoSansTC-Regular.ttf",
+                fonts_dir ++ "/DotGothic16-Regular.ttf",
+            } },
+        };
+        for (programs) |p| {
+            const src = b.fmt("test/cdiff/{s}.c", .{p.name});
+            const exe_c = linkExe(b, target, optimize, oracle, b.fmt("{s}_oracle", .{p.name}), src);
+            const exe_zig = linkExe(b, target, optimize, lib, b.fmt("{s}_zig", .{p.name}), src);
+            const run = b.addSystemCommand(&.{"tools/cdiff.sh"});
+            run.addArtifactArg(exe_c);
+            run.addArtifactArg(exe_zig);
+            run.addArgs(p.args);
+            run.has_side_effects = true;
+            cdiff_step.dependOn(&run.step);
+        }
+    }
+
     // `zig build mathtest` — raymath bit-exact numeric gate. Builds the C oracle
     // (raymath.h inline, strict IEEE) and the Zig harness (linked against the
     // raymath.zig exports), runs both over the same input stream, diffs raw float
