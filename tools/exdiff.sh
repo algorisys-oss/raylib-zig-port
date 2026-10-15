@@ -62,9 +62,13 @@ while read -r entry frames; do
   fi
 
   # Compile the example once (lib-independent object), link twice.
-  # gnu99, not c99: upstream builds examples in GNU mode (e.g. strnlen).
+  # Flags mirror upstream examples/Makefile: gnu99 (e.g. strnlen),
+  # -DPLATFORM_DESKTOP (selects GLSL 330 shaders and desktop-only paths — without
+  # it shader examples silently load their GLSL 100/ES variants), and
+  # -I src/external (glad.h for raylib_opengl_interop).
   if ! zig cc -c "$src" -o "$TMP/$name.o" -include tools/exdiff/shim.h \
-        -I"$RAYLIB_SRC" -std=gnu99 2> "$TMP/$name.cc.log"; then
+        -I"$RAYLIB_SRC" -I"$RAYLIB_SRC/external" -DPLATFORM_DESKTOP -std=gnu99 \
+        2> "$TMP/$name.cc.log"; then
     broken=$((broken+1)); failures+=("$name (compile)")
     printf "  CFAIL %s\n" "$name"; continue
   fi

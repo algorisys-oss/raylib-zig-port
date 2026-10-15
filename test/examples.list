@@ -173,7 +173,7 @@ models/models_waving_cubes.c
 models/models_yaw_pitch_roll.c
 others/embedded_files_loading.c
 others/raylib_opengl_interop.c
-others/rlgl_standalone.c
+#others/rlgl_standalone.c  EXCLUDED: does not use the raylib library — embeds its own C rlgl (RLGL_IMPLEMENTATION) + raw GLFW loop; nothing of the port to test, and its rl* symbols collide with ours
 shaders/shaders_ascii_rendering.c
 shaders/shaders_basic_lighting.c
 shaders/shaders_basic_pbr.c
@@ -213,14 +213,14 @@ shaders/shaders_vertex_displacement.c
 # --- batch 3 (2026-07-04): audio (UI pixels; playback-progress UIs may be excluded) ---
 audio/audio_amp_envelope.c
 audio/audio_mixed_processor.c
-audio/audio_module_playing.c
+#audio/audio_module_playing.c  EXCLUDED: self-nondeterministic (C vs C differs): progress bar driven by the audio thread's real-time play position
 audio/audio_music_stream.c
-audio/audio_raw_stream.c
+#audio/audio_raw_stream.c  EXCLUDED: self-nondeterministic (C vs C differs): waveform depends on audio-callback timing
 audio/audio_sound_loading.c
 audio/audio_sound_multi.c
 audio/audio_sound_positioning.c
 audio/audio_spectrum_visualizer.c
-audio/audio_stream_callback.c
+#audio/audio_stream_callback.c  EXCLUDED (6.1-dev only): upstream example reads buffer[SAMPLE_RATE] out of bounds (UBSan trap in both builds); fixed upstream in 6.2
 audio/audio_stream_effects.c
 # --- raylib 6.2 (2026-10-16): examples new in 6.2 ---
 models/models_mesh_uv_painting.c
