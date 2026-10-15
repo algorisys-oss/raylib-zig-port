@@ -219,6 +219,6 @@ audio/audio_music_stream.c
 audio/audio_sound_loading.c
 audio/audio_sound_multi.c
 audio/audio_sound_positioning.c
-audio/audio_spectrum_visualizer.c
+#audio/audio_spectrum_visualizer.c  EXCLUDED: self-nondeterministic (C vs C differs 2 of 3 runs): spectrum of live audio-thread output
 #audio/audio_stream_callback.c  EXCLUDED (6.1-dev only): upstream example reads buffer[SAMPLE_RATE] out of bounds (UBSan trap in both builds); fixed upstream in 6.2
 audio/audio_stream_effects.c
