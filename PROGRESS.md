@@ -4,6 +4,47 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
+## raylib 6.2 parity — ✅ DONE 2026-10-16 (tag `raylib-6.2-parity`)
+
+raylib 6.2 was tagged upstream 2026-10-15 (352 commits past our 6.1-dev pin,
+a direct descendant). Rebased the whole port onto it in one session:
+
+- **Toolchain:** Zig moved to 0.18.0-dev.246 (asdf master). build.zig ported:
+  `standardOptimizeOption` now returns `?Optimize`; ported Zig objects must set
+  `link_libc` (else std's no-libc Thread/getauxval paths need `__zig_elf_*`
+  symbols only Zig's start code defines). All gates byte-identical after.
+- **6.1-dev examples gate closed first:** 209/209 automated pass; 8 excluded
+  with reasons (see test/examples.list) = all 217. The sweep exposed that the
+  gate compiled examples without upstream's `-DPLATFORM_DESKTOP -I src/external`
+  (shader examples ran their GLSL 100 variants) — fixed, re-swept green.
+- **Re-vendor:** vendor/raylib/src = 6.2 (02566453) + the one local patch.
+  Reference tree: /home/rajesh/opensource/graphics/raylib-6.2.
+- **Module deltas** (5 drafting agents in worktrees + lead; serial merge/verify):
+  rshapes (new outline-thickness API: DrawTriangleLinesEx, DrawCircleSectorLinesEx,
+  DrawEllipseLinesEx, DrawRingLinesEx; rounded/poly/ring rewrites), rtextures
+  (ImageDrawRectanglePro, ImageDrawRectangleGradientEx, ImageDrawImageEx,
+  ImageDrawTextPro [upstream stub], LoadRenderTextureEx; kernel convolution,
+  circle gradient, R5G5B5A1 fix), rtext (Unicode space glyphs, Text* edge
+  cases; + pre-existing FONT_SDF gap fixed), rmodels (SUPPORT_GPU_SKINNING now
+  1 → 9 VBOs + bone binding; unsigned boneCount; sphere/animation/glTF/OBJ
+  changes), rcore+glfw (IsFileHidden, IsPathDirectory, IsPathAbsolute; GetFPS,
+  SHA256 padding, GetPrevDirectoryPath, OpenURL, RAYLIB_VERSION was stale),
+  raymath (from→to opposite vectors, MatrixDecompose transpose), rlgl
+  (rlGetPixelDataSize overflow guards), raudio (close order, CALLOC, leak fix).
+- **Gates vs 6.2 oracle:** pixel 12/12; audio 43/43; datacheck; mathtest
+  90,200 values (grid extended — 3 changed fns were never covered; old port
+  fails it); camtest; gesttest; **examples 220/220** (7 excluded with reasons
+  = all 227); `tools/constaudit.py` 514 constants, 0 mismatches; RLAPI parity
+  619/619 symbols, each defined once, all from Zig objects; angrybirds selftest OK.
+
+### Excluded examples (6.2) — reasons in test/examples.list
+core_custom_frame_control, core_input_gestures_testbed, core_window_should_close
+(as before); rlgl_standalone (embeds its own C rlgl + raw GLFW, never touches the
+library); audio_module_playing, audio_raw_stream, audio_spectrum_visualizer (fail
+C-vs-C: pixels driven by real-time audio thread). audio_mixed_processor and
+audio_stream_effects are load-sensitive (flaked once under heavy concurrent CPU
+load; 3/3 green idle).
+
 ## Capstone (user request 2026-06-28) — ✅ DONE 2026-07-04
 
 `examples/angrybirds/` — the C# reference game
@@ -68,7 +109,7 @@ Two more port bugs found and fixed (commit `a5e0ee6`):
   domain). Plus `-fno-sanitize=alignment` for vendored parsers' misaligned
   reads (m3d.h, vox_loader.h — benign x86 UB the oracle build ignores).
 
-### IN PROGRESS — final full sweep (all 214 listed examples incl. audio/others)
+### DONE (2026-10-16) — final full 6.1-dev sweep: 209/209 (see 6.2 section above)
 Audio (11) and others (3) categories are getting first coverage. Expected:
 auto-playing music UIs may need exclusion (playback progress is device-thread
 real time); rlgl_standalone bypasses InitWindow/WindowShouldClose so the shim

@@ -1,55 +1,52 @@
-# handoff.md — fresh-session bootstrap (written 2026-07-04, end of session)
+# handoff.md — fresh-session bootstrap (written 2026-10-16)
 
-> Per CLAUDE.md this file is overwritten at the end of every run. PROGRESS.md
-> holds the long-lived history; this is only "what a new session needs".
+> Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
 ## 1. State right now
 
-- 🏁 **100% of raylib-authored code is Zig — all 10 modules ported, gated,
-  tagged** (`rmodels-ported`, `raudio-ported`). Remaining C in the swapped
-  build = bundled third-party only (rglfw.c + src/c/ shims), per charter.
-- **Examples acceptance suite: first batch 135/135 byte-identical** — every
-  core/shapes/text/textures upstream example, unmodified, C-vs-Zig pixel diff
-  (2 excluded with reasons in test/examples.list). Run:
-  `zig build && tools/exdiff.sh <oracle.a> zig-out/lib/libraylib.a [filter]`
-  (oracle .a path: `find .zig-cache -name libraylib_oracle.a -newer build.zig`).
-- Other gates all green: `zig build test` 12/12, `zig build audiocheck` 43/43,
-  datacheck, mathtest/camgrid/gestgrid. Capstone: `zig build angrybirds`
-  (docs: examples/angrybirds/README.md).
-- Repo clean, pushed to origin (github.com/algorisys-oss/raylib-zig-port).
+- **raylib 6.2 parity reached** — tag `raylib-6.2-parity` on `main`, pushed.
+  vendor/raylib/src = raylib 6.2 (02566453) + one local patch; reference tree
+  `/home/rajesh/opensource/graphics/raylib-6.2` (6.1-dev tree kept for diffs).
+- All 10 modules Zig. Gates vs the 6.2 all-C oracle, all green:
+  pixel 12/12 · audio 43/43 · datacheck · mathtest 90,200 · camtest · gesttest ·
+  **examples 220/220** (7 excluded with reasons = all 227) ·
+  `python3 tools/constaudit.py` 514/0 · RLAPI parity 619/619 from Zig objects ·
+  angrybirds selftest OK.
+- Toolchain: Zig 0.18.0-dev.246 (build.zig ported this run).
+- Repo clean after merge; scratch worktrees/branches (p62-*, raylib-6.2) can be
+  deleted — everything is merged.
 
-## 2. What this run did (2026-07-04, ~2.5 h + 3 background agents/sweeps)
+## 2. What this run did (2026-10-16, ~00:29–02:00 IST)
 
-- rmodels: fixed DrawSphereEx result-location aliasing → 12/12 → tagged.
-- raudio: agent-drafted (2287 lines, 78 exports + shim), fixed the
-  callback-before-cache device-start bug the audiocheck gate caught → 43/43 →
-  tagged. audiocheck harness built this session (43 checks, PCM hashes).
-- Angry Birds capstone shipped (examples/angrybirds/, selftest verified).
-- Examples gate (exdiff) built and first batch landed 135/135 after fixing
-  3 real port bugs (rtext null-glyph atlas panic, rtextures GetPixelColor
-  eager @alignCast, rtext MeasureTextEx fractional-spacing truncation) and
-  2 oracle-build issues (-ffp-contract=off everywhere; UBSan off for the
-  oracle lib only). All post-mortems recorded as CLAUDE.md gotchas.
-- README refreshed (was "planning only"); angrybirds run docs added.
+- Ported build.zig to Zig 0.18-dev (optional Optimize; link_libc on Zig objects).
+- Closed the 6.1-dev examples gate (209/209 + 8 excluded) and fixed the gate's
+  compile flags to match upstream's Makefile (-DPLATFORM_DESKTOP, -I external).
+- Rebased onto raylib 6.2: re-vendor, 5 parallel drafting agents (rshapes,
+  rtextures, rtext, rmodels, rcore+glfw) + lead (raymath, rlgl, raudio),
+  serial merge + verify. 12 new RLAPI functions exported.
+- New tool `tools/constaudit.py` (enum/int/bool/string constant audit, with
+  negative controls); math grid extended to 3 never-covered functions.
+- CLAUDE.md: 5 new gotchas (input-gated paths, @intFromFloat vs (int),
+  signedness ripple, example flags, audio C-vs-C triage); docs refreshed.
 
 ## 3. Next step on resume
 
-**Extend exdiff to the remaining upstream example categories** (~81 examples):
-add `models/`, `shaders/`, `audio/`, `others/` to test/examples.list, sweep,
-triage failures by root cause (process proven — see PROGRESS.md "NEXT"
-section for per-category expectations). 218-example bar = suite complete.
+No open porting work. Candidates, in priority order:
+1. Real-GPU spot check of a few 6.2 examples on GLFW + hardware GL 3.3 (the
+   oracle is llvmpipe; CLAUDE.md oracle item 4).
+2. Direct C-vs-Zig differentials for input-gated paths the examples can't
+   reach (see the new CLAUDE.md gotcha) — rshapes/rtext agents left drivers in
+   the old session scratchpad; recreate under test/ if wanted.
+3. Cleanups from PROGRESS.md "THEN" (ReleaseFast LLD issue; Phase 6 Zig API).
+4. When raylib 6.3 lands: same playbook — clone to raylib-6.3, diff per module,
+   re-vendor on a branch, port, gate, merge.
 
-Then (non-blocking): ReleaseFast archive workaround; Phase-6 idiomatic API.
+## 4. Open issues / gotchas hit
 
-## 4. Open issues / gotchas hit this run
-
-- **Audio device flake:** if audiocheck warns the device section was skipped,
-  the desktop default sink is HDMI (spec miniaudio can't map). Prefix with
-  `PULSE_SINK=alsa_output.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__hw_sofhdadsp__sink`.
-- exdiff examples run with an LD_PRELOAD clock freezer (tools/exdiff/
-  fakeclock.c) — library-internal time is frozen; example-side time comes from
-  the shim's fixed 60 Hz clock. Don't "fix" one by removing the other.
-- The C oracle now builds WITHOUT UBSan and with -ffp-contract=off — both
-  deliberate (see build.zig comments); don't revert while diffing.
-- `zig build test/audiocheck` rebuild both libs; after build.zig changes the
-  oracle .a path in .zig-cache changes — locate with `-newer build.zig`.
+- audio_mixed_processor / audio_stream_effects are load-sensitive: run sweeps on
+  a quiet machine; triage any audio failure C-vs-C first.
+- ImageDrawTextPro is an empty stub upstream in 6.2 (exported as no-op).
+- 6.2's PEP image loader (SUPPORT_FILEFORMAT_PEP, off by default) has an
+  upstream use-after-free; not ported — fix if PEP is ever enabled.
+- Concurrent builds on the shared zig cache race at link time — use
+  `--cache-dir` per worktree.

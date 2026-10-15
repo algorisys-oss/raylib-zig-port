@@ -116,3 +116,15 @@
 # audiocheck gate (43), exdiff examples gate (first batch 135/135), 3 port-bug
 # fixes, docs/handoff/README. Background agents: raudio draft ~268.8k out,
 # angrybirds ~103.8k out.
+
+# === Session 2026-10-16 — raylib 6.2 parity (transcript ab42810a) ===
+# Wall clock ~00:29–01:30 IST (~1h). Figures from tools/token_usage.py --tsv.
+1	2026-10-16	00:29:29	00:30:08	24	75225	963818	7301	1046368	1046368	scoped 6.2 delta (352 commits, 12 new RLAPI fns); recommended finishing 6.1 sweep first
+2	2026-10-16	00:31:00	00:50:14	316	243531	21915753	108868	22268468	23314836	Zig 0.18 build port; 6.2 re-vendor branch; raymath/rlgl/raudio deltas; constaudit; launched 5 agents
+3	2026-10-16	00:51:19	01:16:58	208	163389	22852583	60693	23076873	46391709	6.1 sweep 209/209 + exdiff flag fix; merged+verified 5 agent branches; RLAPI parity; docs
+4	2026-10-16	01:25:15	01:30:00+	20	6406	2284951	8371	2299748	48691457	(in progress at record) 6.2 sweep 220/220; angrybirds; handoff; merge+tag+push
+# Background drafting agents (subagent_tokens as reported by the Agent tool):
+#   rshapes 248.3k · rmodels 204.3k · rtextures 163.0k · rcore 141.9k · rtext 128.4k  = ~885.9k
+# Session total ~48.7M main-loop (incl. cache reads) + ~0.89M agents.
+# Landed: Zig 0.18 port; 6.1 examples gate closed (209/209); raylib 6.2 parity
+# (examples 220/220, all gates green), tag raylib-6.2-parity.

@@ -4,8 +4,9 @@ Living migration plan. Source of truth for scope, strategy, and progress.
 Update checkboxes and notes as work lands.
 
 - **Target to port:** raylib v6.1-dev (`/home/rajesh/opensource/graphics/raylib`,
-  git `6.0-178-g67359073`)
-- **Toolchain:** Zig `0.17.0-dev.644+3de725074`
+  git `6.0-178-g67359073`) — **rebased to v6.2 on 2026-10-16**
+  (`/home/rajesh/opensource/graphics/raylib-6.2`; see PROGRESS.md)
+- **Toolchain:** Zig `0.17.0-dev.644+3de725074` (now `0.18.0-dev.246+05671ced9`)
 - **Scope:** ~38k LOC of hand-written raylib C/H (6 `.c` modules + 4 header-only
   modules + 1 platform backend), ~408k source tokens. The ~13 MB of bundled
   third-party `src/external/` libs are **linked, not ported**. See

@@ -33,9 +33,9 @@ linked C.** A "pure-Zig raylib" means exactly that, and any module that turns ou
 in `docs/not-migrated.md` (create it when porting starts, like sqlite-zig's) —
 never dropped silently.
 
-This directory (`/home/rajesh/lab/ai-port/raylib-zig`) currently holds only
-planning docs. Implementation has not started; see [plan.md](plan.md) for the
-staged approach.
+Status: all 10 modules are ported (100% of raylib-authored code is Zig) and
+tracking **raylib 6.2**; see [PROGRESS.md](PROGRESS.md) for gate results and
+[handoff.md](handoff.md) for the current resume point.
 
 This is the sibling of the completed **sqlite-zig** migration
 (`/home/rajesh/lab/ai-port/sqlite-zig`). We reuse its proven playbook —
@@ -48,7 +48,8 @@ correctness oracle is fundamentally different from SQLite's.**
 
 | What | Path | Notes |
 |---|---|---|
-| raylib C source | `/home/rajesh/opensource/graphics/raylib` | v6.1-dev (git `6.0-178-g67359073`). zlib/libpng license. Uses **Git**. |
+| raylib C source | `/home/rajesh/opensource/graphics/raylib-6.2` | **v6.2** (tag `6.2`, git `02566453`) — the current port target since 2026-10-16. zlib/libpng license. Uses **Git**. |
+| raylib C source (previous) | `/home/rajesh/opensource/graphics/raylib` | v6.1-dev (git `6.0-178-g67359073`) — the original port target; kept for diffing old→new. |
 | Zig compiler/stdlib | `/home/rajesh/opensource/ziglang/zig` | Build/run toolchain reference (`src/`). |
 | Zig toolchain in PATH | `zig` (`~/.asdf/shims/zig`) | `0.18.0-dev.246+05671ced9` (moved from 0.17.0-dev.644 on 2026-10-16; build.zig ported — Optimize is now optional, Zig objects must set link_libc). |
 | sqlite-zig (sibling) | `/home/rajesh/lab/ai-port/sqlite-zig` | The migration playbook this project copies. |
@@ -113,9 +114,9 @@ with the Lemon-generated `parse.c` still C.
 SQLite shipped millions of TCL assertions; "the test suite is the spec" made the
 port safe. **raylib has no comprehensive automated test suite** — no unit tests,
 no assertion harness; upstream CI merely *builds* the examples. Its de facto test
-suite *is* its **218 example programs** (`examples/`), normally eyeballed by a
+suite *is* its **example programs** (`examples/`; 217 in 6.1-dev, 227 in 6.2), normally eyeballed by a
 human. We cannot eyeball every commit, and the user's bar is explicit: **the port
-must pass all the original raylib test cases — i.e. all 218 examples.** So we
+must pass all the original raylib test cases — i.e. all the examples.** So we
 manufacture an automatable oracle that turns "the examples" into a hard gate:
 
 1. **Software-renderer pixel diff (primary gate).** raylib bundles
@@ -127,11 +128,11 @@ manufacture an automatable oracle that turns "the examples" into a hard gate:
    This is our `make devtest`. Stand it up in Phase 0 before porting anything.
 2. **Numeric differential for `raymath`.** Pure math functions: diff Zig vs C
    outputs over a large input grid to ULP tolerance. No rendering needed.
-3. **Examples as the acceptance suite (all 218 — these ARE raylib's test cases).**
+3. **Examples as the acceptance suite (all of them — these ARE raylib's test cases).**
    Drive every `examples/*.c` program (which calls the public API) through the
    software renderer, screenshot to PNG via `TakeScreenshot`, and diff against a
    golden PNG captured from pure-C raylib. An example "passes" when it builds,
-   links against the Zig library, and pixel-matches. **100% done = all 218 pass**
+   links against the Zig library, and pixel-matches. **100% done = every example passes or is excluded with a logged reason**
    (build + diff); audio examples diff on decoded PCM instead of pixels. Track the
    pass count in PROGRESS.md. No example skipped silently — log any that can't
    pass, with the reason, in `docs/not-migrated.md`.
@@ -220,10 +221,35 @@ before claiming a module done.
   at the wrong indices while rmodels read the right ones — ALL GPU instancing
   silently rendered nothing.) Every module keeps private copies of raylib.h
   enums; two modules can each look plausible and still disagree. After any
-  module lands, run the constant audit (parse raylib.h/rlgl.h enums+defines,
-  diff against every `const NAME = N` in src/*.zig — script pattern in git
-  history at commit a5e0ee6). Beware false positives from commented-out
-  `//#define` lines in config.h.
+  module lands, run `python3 tools/constaudit.py` (enums, numeric AND string
+  #defines, bool-mirrored config flags vs every `const NAME = …` in
+  src/*.zig). Limitation: a name C defines per-#if branch (e.g.
+  MAX_MESH_VERTEX_BUFFERS 7/9 by SUPPORT_GPU_SKINNING) passes if it matches
+  ANY branch — check config-dependent values by hand when a flag flips.
+- **The examples gate only sees what an example renders unattended.** (6.2
+  rebase: rtext's FONT_SDF glyph generation was never ported — text_font_sdf
+  draws SDF text only while SPACE is held; rshapes' new thickness/angle paths
+  are reached only through UI sliders.) Any branch an example reaches only via
+  input needs its own direct C-vs-Zig differential (small C driver linked
+  against both libs, byte-compare output). Likewise the math grid had never
+  covered QuaternionFromVector3ToVector3/MatrixCompose/MatrixDecompose — when a
+  function changes upstream, first confirm a gate actually exercises it
+  (negative control: the OLD port must fail the gate).
+- **`@intFromFloat` is not C's `(int)`.** On x86-64 C's cast yields INT_MIN for
+  NaN/out-of-range and raylib's `if (segments <= 0)` fallbacks rely on it (tiny
+  radii push `acosf` out of domain → NaN); Zig traps. Use a checked helper
+  (rshapes `cInt`) wherever the float can be NaN or huge.
+- **Signedness changes in C struct fields ripple into every implicit
+  conversion.** (6.2: Model/ModelAnimation `boneCount` int → unsigned int.) C
+  silently converts back to int at each use; Zig needs an explicit `@bitCast`
+  there, and `size_t` → field narrowing needs `@truncate`, not `@intCast`.
+- **Example compile flags must mirror upstream's Makefile.** The gate omitted
+  `-DPLATFORM_DESKTOP`, so shader examples loaded their GLSL 100 (ES) shaders —
+  passing, but on a configuration desktop raylib never runs. Upstream passes
+  `-DPLATFORM_DESKTOP -I src/external`; so does tools/exdiff.sh now.
+- **Audio-driven examples are timing-sensitive under load.** Before calling an
+  audio example a port failure, run it C-vs-C (`exdiff.sh <oracle> <oracle>`)
+  several times; exclude it only if C disagrees with itself.
 - **FMA contraction is real, and the scene battery can miss it.** Confirmed:
   clang fuses `a*b + c` (rlVertex3f's transform multiply) while Zig never
   contracts — visible only when the transform has non-zero off-diagonals
@@ -344,8 +370,16 @@ required.
 
 ## Build (this project)
 
-Not yet scaffolded. Phase 0 stands up: a Zig build of unmodified upstream raylib
-C (per-TU, swap-ready) + the software-renderer pixel-diff harness + the
-`ported_modules` swap list (empty → 100% C baseline). See [plan.md](plan.md) for
-the staged approach and the open decisions to resolve before committing to a
-build shape.
+```bash
+zig build                      # libraylib.a (Zig-swapped) + all-C oracle lib
+zig build test                 # 12 pixel scenes, C vs Zig (llvmpipe)
+zig build mathtest camtest gesttest datacheck audiocheck   # numeric/data/PCM gates
+python3 tools/constaudit.py    # mirrored-constant audit
+tools/exdiff.sh <oracle.a> zig-out/lib/libraylib.a [filter]  # examples gate
+```
+
+The oracle archive lives in the zig cache:
+`find .zig-cache ~/.cache/zig-local -name libraylib_oracle.a` (newest). When
+several builds run concurrently (e.g. agent worktrees), pass a private
+`--cache-dir` to avoid shared-cache link races. Vendored C (vendor/raylib/src)
+is raylib 6.2 + one local patch (see vendor/README.md).

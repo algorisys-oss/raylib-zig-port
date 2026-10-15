@@ -33,17 +33,19 @@ drag with the left mouse button and release to fire, `R` restarts, `SPACE`
 advances after a level clear. See its [README](examples/angrybirds/README.md)
 for the headless self-test mode.
 
-- **Porting:** raylib v6.1-dev (`/home/rajesh/opensource/graphics/raylib`, git
-  `6.0-178`)
-- **Toolchain:** Zig `0.17.0-dev.644+3de725074`
+- **Porting:** raylib **v6.2** (`/home/rajesh/opensource/graphics/raylib-6.2`, tag
+  `6.2`, git `02566453`) — rebased from 6.1-dev on 2026-10-16
+- **Toolchain:** Zig `0.18.0-dev.246+05671ced9`
+- **Status:** 10/10 modules Zig; examples gate **220/220** byte-identical vs
+  pure-C raylib 6.2 (7 excluded with reasons — all 227 accounted for)
 - **License:** zlib/libpng (same as upstream raylib)
 
 ## Goal
 
 **100% port** of all raylib-authored C to Zig — all 6 `.c` modules, all 4
 header-only modules, and the platform backend. "Done" means no raylib-authored C
-remains in the build, the code is clean idiomatic Zig, and **all 218 upstream
-examples pass**.
+remains in the build, the code is clean idiomatic Zig, and **every upstream
+example passes** (or is excluded with a logged reason).
 
 Two deliberate, intended **exceptions** (linked as C, not ported — the raylib
 analog of sqlite-zig keeping the generated `parse.c` as C):
@@ -86,7 +88,7 @@ resolve in Phase 0.
 ## How correctness is established (the manufactured oracle)
 
 **raylib ships no assertion/unit test suite** — upstream CI only *builds* the
-examples. Its de facto test cases are its **218 example programs**. Since we
+examples. Its de facto test cases are its **example programs** (227 in 6.2). Since we
 can't eyeball every commit, we manufacture an automatable oracle:
 
 1. **Numeric diff (`raymath`)** — pure functions diffed Zig-vs-C over a large
@@ -96,9 +98,9 @@ can't eyeball every commit, we manufacture an automatable oracle:
    renders **headlessly and deterministically** to a CPU framebuffer. Render a
    workload through pure-C and Zig-swapped builds, read back the framebuffer, and
    compare **byte-for-byte**.
-3. **Example acceptance suite (all 218)** — drive each `examples/*.c` through the
+3. **Example acceptance suite (all of them)** — drive each `examples/*.c` through the
    software renderer, `TakeScreenshot` to PNG, and diff against a golden captured
-   from pure-C raylib. **100% done = all 218 build, link, and pixel-match**
+   from pure-C raylib. **100% done = every example builds, links, and pixel-matches**
    (audio examples diffed on decoded PCM instead of pixels).
 4. **Real-GPU spot check** — periodically run examples on real GLFW + OpenGL 3.3
    to catch anything the software path masks. GPU output isn't bit-deterministic,
@@ -156,7 +158,8 @@ src/*.zig            The ported modules.
 
 | What | Path | Notes |
 |---|---|---|
-| raylib C source | `/home/rajesh/opensource/graphics/raylib` | v6.1-dev. zlib license. |
+| raylib C source | `/home/rajesh/opensource/graphics/raylib-6.2` | v6.2 (current target). zlib license. |
+| raylib C source (previous) | `/home/rajesh/opensource/graphics/raylib` | v6.1-dev (original target). |
 | Zig compiler/stdlib | `/home/rajesh/opensource/ziglang/zig` | Toolchain reference. |
 | sqlite-zig (sibling) | `/home/rajesh/lab/ai-port/sqlite-zig` | The completed migration whose playbook this copies. |
 
