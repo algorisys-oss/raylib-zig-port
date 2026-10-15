@@ -109,6 +109,11 @@ PARAM_RENAMES = {
 }
 RESERVED_PARAMS = {"c", "std", "math"}  # module-level names in raylib.zig
 
+# A `void *` buffer becomes a byte slice only when its length param is in bytes.
+BYTE_SIZE_NAMES = re.compile(r"[sS]ize$")
+# Pointer params whose following "size" is NOT the buffer length.
+NO_SLICE = {("rlLoadTextureCubemap", "data")}
+
 # `const char *` params that raylib documents as accepting NULL.
 NULLABLE_STRINGS = {
     ("LoadShader", "vsFileName"), ("LoadShader", "fsFileName"),
@@ -787,7 +792,10 @@ class Gen:
                     sig.append(f"{pn}: [:0]const u8")
                     call.append(f"{pn}.ptr")
             elif (p.stars == 1 and nxt is not None and nxt.stars == 0 and nxt.base in ("int", "unsigned int")
-                  and COUNT_NAMES.search(nxt.name) and p.base != "char"):
+                  and COUNT_NAMES.search(nxt.name) and p.base != "char"
+                  # untyped data only pairs with a BYTE size (frameCount etc. stay explicit)
+                  and (p.base != "void" or BYTE_SIZE_NAMES.search(nxt.name))
+                  and (fname, p.name) not in NO_SLICE):
                 elem = "u8" if p.base == "void" else self.api_scalar(p.base)
                 if p.base == "char":
                     raise ValueError("char slice")

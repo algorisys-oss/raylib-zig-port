@@ -3688,8 +3688,8 @@ pub fn isSoundValid(sound: Sound) bool {
 }
 
 /// Update sound buffer with new data (default data format: 32 bit float, stereo)
-pub fn updateSound(sound: Sound, data: []const u8) void {
-    c.UpdateSound(sound, @ptrCast(data.ptr), @intCast(data.len));
+pub fn updateSound(sound: Sound, data: *const anyopaque, frameCount: i32) void {
+    c.UpdateSound(sound, data, frameCount);
 }
 
 /// Unload wave data
@@ -3885,8 +3885,8 @@ pub fn unloadAudioStream(stream: AudioStream) void {
 }
 
 /// Update audio stream buffers with data
-pub fn updateAudioStream(stream: AudioStream, data: []const u8) void {
-    c.UpdateAudioStream(stream, @ptrCast(data.ptr), @intCast(data.len));
+pub fn updateAudioStream(stream: AudioStream, data: *const anyopaque, frameCount: i32) void {
+    c.UpdateAudioStream(stream, data, frameCount);
 }
 
 /// Check if any audio stream buffers requires refill
