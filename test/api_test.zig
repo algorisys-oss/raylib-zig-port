@@ -12,6 +12,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 const c = @import("c_raylib");
+const c_rlgl = @import("c_rlgl");
 
 test "API structs are layout-identical to raylib.h" {
     var checked: usize = 0;
@@ -40,8 +41,17 @@ fn expectLayout(name: []const u8, comptime T: type, comptime C: type) !void {
     }
 }
 
+test "rlgl batch structs are layout-identical to rlgl.h (OPENGL_33)" {
+    try expectLayout("VertexBuffer", rl.gl.VertexBuffer, c_rlgl.rlVertexBuffer);
+    try expectLayout("DrawCall", rl.gl.DrawCall, c_rlgl.rlDrawCall);
+    try expectLayout("RenderBatch", rl.gl.RenderBatch, c_rlgl.rlRenderBatch);
+    try expectLayout("float16", rl.math.float16, extern struct { v: [16]f32 });
+}
+
 test "all API wrappers compile" {
     std.testing.refAllDecls(rl);
+    std.testing.refAllDecls(rl.math);
+    std.testing.refAllDecls(rl.gl);
 }
 
 test "colors and enums match raylib.h" {
@@ -50,6 +60,10 @@ test "colors and enums match raylib.h" {
     try std.testing.expectEqual(c.MOUSE_BUTTON_RIGHT, @backingInt(rl.MouseButton.right));
     try std.testing.expectEqual(c.SHADER_LOC_VERTEX_INSTANCETRANSFORM, @backingInt(rl.ShaderLocationIndex.vertex_instancetransform));
     try std.testing.expectEqual(c.MATERIAL_MAP_ALBEDO, @backingInt(rl.MaterialMapIndex.diffuse));
+    try std.testing.expectEqual(c_rlgl.RL_QUADS, rl.gl.quads);
+    try std.testing.expectEqual(c_rlgl.RL_TEXTURE_WRAP_S, rl.gl.texture_wrap_s);
+    try std.testing.expectEqual(c_rlgl.RL_DEFAULT_BATCH_BUFFER_ELEMENTS, rl.gl.default_batch_buffer_elements);
+    try std.testing.expectEqual(@as(i32, c_rlgl.RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8), rl.gl.pixelformat_uncompressed_r8g8b8a8);
     const flags: rl.ConfigFlags = .{ .vsync_hint = true, .window_hidden = true, .msaa_4x_hint = true };
     try std.testing.expectEqual(@as(u32, c.FLAG_VSYNC_HINT | c.FLAG_WINDOW_HIDDEN | c.FLAG_MSAA_4X_HINT), @as(u32, @bitCast(flags)));
 }

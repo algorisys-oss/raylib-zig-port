@@ -283,6 +283,13 @@ pub fn build(b: *std.Build) void {
         });
         test_mod.addImport("raylib", api_mod);
         test_mod.addImport("c_raylib", raylib_h.createModule());
+        const rlgl_h = b.addTranslateC(.{
+            .root_source_file = b.path("vendor/raylib/src/rlgl.h"),
+            .target = target,
+            .optimize = optimize orelse .Debug,
+        });
+        rlgl_h.defineCMacro("GRAPHICS_API_OPENGL_33", null);
+        test_mod.addImport("c_rlgl", rlgl_h.createModule());
         const api_tests = b.addTest(.{ .root_module = test_mod });
         api_tests.use_llvm = true;
         b.step("apitest", "Check the idiomatic Zig API against raylib.h").dependOn(&b.addRunArtifact(api_tests).step);

@@ -4704,3 +4704,1052 @@ pub const math = struct {
         c.MatrixDecompose(mat, translation, rotation, scale);
     }
 };
+
+// --------------------------------------------------------------------------
+// rlgl — raylib's OpenGL abstraction layer (rlgl.h)
+// --------------------------------------------------------------------------
+
+/// rlgl: same functions as rlgl.h without the `rl`/`rlgl` prefix
+/// (`rlPushMatrix` -> `rl.gl.pushMatrix`), constants without `RL_`
+/// (`RL_QUADS` -> `rl.gl.quads`). A low-level layer: GL enums stay `i32`.
+pub const gl = struct {
+    pub const VertexBuffer = extern struct {
+        elementCount: c_int, // Number of elements in the buffer (QUADS)
+        vertices: ?[*]f32, // Vertex position (XYZ - 3 components per vertex)
+        texcoords: ?[*]f32, // Vertex texture coordinates (UV - 2 components per vertex)
+        normals: ?[*]f32, // Vertex normal (XYZ - 3 components per vertex)
+        colors: ?[*]u8, // Vertex colors (RGBA - 4 components per vertex)
+        indices: ?[*]c_uint, // Vertex indices (6 indices per quad)
+        vaoId: c_uint, // OpenGL Vertex Array Object id
+        vboId: [5]c_uint, // OpenGL Vertex Buffer Objects id (5 types of vertex data)
+    };
+
+    pub const DrawCall = extern struct {
+        mode: c_int, // Drawing mode: LINES, TRIANGLES, QUADS
+        vertexCount: c_int, // Number of vertex of the draw
+        vertexAlignment: c_int, // Number of vertex required for index alignment (LINES, TRIANGLES)
+        textureId: c_uint, // Texture id to be used on the draw
+    };
+
+    pub const RenderBatch = extern struct {
+        bufferCount: c_int, // Number of vertex buffers (multi-buffering support)
+        currentBuffer: c_int, // Current buffer tracking in case of multi-buffering
+        vertexBuffer: ?[*]VertexBuffer, // Dynamic buffer(s) for vertex data
+        draws: ?[*]DrawCall, // Draw calls array, depends on textureId
+        drawCounter: c_int, // Draw calls counter
+        currentDepth: f32, // Current depth value for next draw
+    };
+
+    pub const default_batch_buffer_elements: i32 = 8192;
+    pub const default_batch_buffers: i32 = 1; // Default number of batch buffers (multi-buffering)
+    pub const default_batch_drawcalls: i32 = 256; // Default number of batch draw calls (by state changes: mode, texture)
+    pub const default_batch_max_texture_units: i32 = 4; // Maximum number of textures units that can be activated on batch drawing (SetShaderValueTexture())
+    pub const max_matrix_stack_size: i32 = 32; // Maximum size of Matrix stack
+    pub const max_shader_locations: i32 = 32; // Maximum number of shader locations supported
+    pub const texture_wrap_s: i32 = 10242; // GL_TEXTURE_WRAP_S
+    pub const texture_wrap_t: i32 = 10243; // GL_TEXTURE_WRAP_T
+    pub const texture_mag_filter: i32 = 10240; // GL_TEXTURE_MAG_FILTER
+    pub const texture_min_filter: i32 = 10241; // GL_TEXTURE_MIN_FILTER
+    pub const texture_filter_nearest: i32 = 9728; // GL_NEAREST
+    pub const texture_filter_linear: i32 = 9729; // GL_LINEAR
+    pub const texture_filter_mip_nearest: i32 = 9984; // GL_NEAREST_MIPMAP_NEAREST
+    pub const texture_filter_nearest_mip_linear: i32 = 9986; // GL_NEAREST_MIPMAP_LINEAR
+    pub const texture_filter_linear_mip_nearest: i32 = 9985; // GL_LINEAR_MIPMAP_NEAREST
+    pub const texture_filter_mip_linear: i32 = 9987; // GL_LINEAR_MIPMAP_LINEAR
+    pub const texture_filter_anisotropic: i32 = 12288; // Anisotropic filter (custom identifier)
+    pub const texture_mipmap_bias_ratio: i32 = 16384; // Texture mipmap bias, percentage ratio (custom identifier)
+    pub const texture_wrap_repeat: i32 = 10497; // GL_REPEAT
+    pub const texture_wrap_clamp: i32 = 33071; // GL_CLAMP_TO_EDGE
+    pub const texture_wrap_mirror_repeat: i32 = 33648; // GL_MIRRORED_REPEAT
+    pub const texture_wrap_mirror_clamp: i32 = 34626; // GL_MIRROR_CLAMP_EXT
+    pub const modelview: i32 = 5888; // GL_MODELVIEW
+    pub const projection: i32 = 5889; // GL_PROJECTION
+    pub const texture: i32 = 5890; // GL_TEXTURE
+    pub const lines: i32 = 1; // GL_LINES
+    pub const triangles: i32 = 4; // GL_TRIANGLES
+    pub const quads: i32 = 7; // GL_QUADS
+    pub const unsigned_byte: i32 = 5121; // GL_UNSIGNED_BYTE
+    pub const float: i32 = 5126; // GL_FLOAT
+    pub const stream_draw: i32 = 35040; // GL_STREAM_DRAW
+    pub const stream_read: i32 = 35041; // GL_STREAM_READ
+    pub const stream_copy: i32 = 35042; // GL_STREAM_COPY
+    pub const static_draw: i32 = 35044; // GL_STATIC_DRAW
+    pub const static_read: i32 = 35045; // GL_STATIC_READ
+    pub const static_copy: i32 = 35046; // GL_STATIC_COPY
+    pub const dynamic_draw: i32 = 35048; // GL_DYNAMIC_DRAW
+    pub const dynamic_read: i32 = 35049; // GL_DYNAMIC_READ
+    pub const dynamic_copy: i32 = 35050; // GL_DYNAMIC_COPY
+    pub const fragment_shader: i32 = 35632; // GL_FRAGMENT_SHADER
+    pub const vertex_shader: i32 = 35633; // GL_VERTEX_SHADER
+    pub const compute_shader: i32 = 37305; // GL_COMPUTE_SHADER
+    pub const zero: i32 = 0; // GL_ZERO
+    pub const one: i32 = 1; // GL_ONE
+    pub const src_color: i32 = 768; // GL_SRC_COLOR
+    pub const one_minus_src_color: i32 = 769; // GL_ONE_MINUS_SRC_COLOR
+    pub const src_alpha: i32 = 770; // GL_SRC_ALPHA
+    pub const one_minus_src_alpha: i32 = 771; // GL_ONE_MINUS_SRC_ALPHA
+    pub const dst_alpha: i32 = 772; // GL_DST_ALPHA
+    pub const one_minus_dst_alpha: i32 = 773; // GL_ONE_MINUS_DST_ALPHA
+    pub const dst_color: i32 = 774; // GL_DST_COLOR
+    pub const one_minus_dst_color: i32 = 775; // GL_ONE_MINUS_DST_COLOR
+    pub const src_alpha_saturate: i32 = 776; // GL_SRC_ALPHA_SATURATE
+    pub const constant_color: i32 = 32769; // GL_CONSTANT_COLOR
+    pub const one_minus_constant_color: i32 = 32770; // GL_ONE_MINUS_CONSTANT_COLOR
+    pub const constant_alpha: i32 = 32771; // GL_CONSTANT_ALPHA
+    pub const one_minus_constant_alpha: i32 = 32772; // GL_ONE_MINUS_CONSTANT_ALPHA
+    pub const func_add: i32 = 32774; // GL_FUNC_ADD
+    pub const min: i32 = 32775; // GL_MIN
+    pub const max: i32 = 32776; // GL_MAX
+    pub const func_subtract: i32 = 32778; // GL_FUNC_SUBTRACT
+    pub const func_reverse_subtract: i32 = 32779; // GL_FUNC_REVERSE_SUBTRACT
+    pub const blend_equation: i32 = 32777; // GL_BLEND_EQUATION
+    pub const blend_equation_rgb: i32 = 32777; // GL_BLEND_EQUATION_RGB   // (Same as BLEND_EQUATION)
+    pub const blend_equation_alpha: i32 = 34877; // GL_BLEND_EQUATION_ALPHA
+    pub const blend_dst_rgb: i32 = 32968; // GL_BLEND_DST_RGB
+    pub const blend_src_rgb: i32 = 32969; // GL_BLEND_SRC_RGB
+    pub const blend_dst_alpha: i32 = 32970; // GL_BLEND_DST_ALPHA
+    pub const blend_src_alpha: i32 = 32971; // GL_BLEND_SRC_ALPHA
+    pub const blend_color: i32 = 32773; // GL_BLEND_COLOR
+    pub const read_framebuffer: i32 = 36008; // GL_READ_FRAMEBUFFER
+    pub const draw_framebuffer: i32 = 36009; // GL_DRAW_FRAMEBUFFER
+    pub const default_shader_attrib_location_position: i32 = 0;
+    pub const default_shader_attrib_location_texcoord: i32 = 1;
+    pub const default_shader_attrib_location_normal: i32 = 2;
+    pub const default_shader_attrib_location_color: i32 = 3;
+    pub const default_shader_attrib_location_tangent: i32 = 4;
+    pub const default_shader_attrib_location_texcoord2: i32 = 5;
+    pub const default_shader_attrib_location_indices: i32 = 6;
+    pub const default_shader_attrib_location_boneindices: i32 = 7;
+    pub const default_shader_attrib_location_boneweights: i32 = 8;
+    pub const default_shader_attrib_location_instancetransform: i32 = 9;
+    pub const opengl_software: i32 = 0; // Software rendering
+    pub const opengl_11: i32 = 1; // OpenGL 1.1
+    pub const opengl_21: i32 = 2; // OpenGL 2.1 (GLSL 120)
+    pub const opengl_33: i32 = 3; // OpenGL 3.3 (GLSL 330)
+    pub const opengl_43: i32 = 4; // OpenGL 4.3 (using GLSL 330)
+    pub const opengl_es_20: i32 = 5; // OpenGL ES 2.0 (GLSL 100)
+    pub const opengl_es_30: i32 = 6; // OpenGL ES 3.0 (GLSL 300 es)
+    pub const log_all: i32 = 0; // Display all logs
+    pub const log_trace: i32 = 1; // Trace logging, intended for internal use only
+    pub const log_debug: i32 = 2; // Debug logging, used for internal debugging, it should be disabled on release builds
+    pub const log_info: i32 = 3; // Info logging, used for program execution info
+    pub const log_warning: i32 = 4; // Warning logging, used on recoverable failures
+    pub const log_error: i32 = 5; // Error logging, used on unrecoverable failures
+    pub const log_fatal: i32 = 6; // Fatal logging, used to abort program: exit(EXIT_FAILURE)
+    pub const log_none: i32 = 7; // Disable logging
+    pub const pixelformat_uncompressed_grayscale: i32 = 1; // 8 bit per pixel (no alpha)
+    pub const pixelformat_uncompressed_gray_alpha: i32 = 2; // 8*2 bpp (2 channels)
+    pub const pixelformat_uncompressed_r5g6b5: i32 = 3; // 16 bpp
+    pub const pixelformat_uncompressed_r8g8b8: i32 = 4; // 24 bpp
+    pub const pixelformat_uncompressed_r5g5b5a1: i32 = 5; // 16 bpp (1 bit alpha)
+    pub const pixelformat_uncompressed_r4g4b4a4: i32 = 6; // 16 bpp (4 bit alpha)
+    pub const pixelformat_uncompressed_r8g8b8a8: i32 = 7; // 32 bpp
+    pub const pixelformat_uncompressed_r32: i32 = 8; // 32 bpp (1 channel - float)
+    pub const pixelformat_uncompressed_r32g32b32: i32 = 9; // 32*3 bpp (3 channels - float)
+    pub const pixelformat_uncompressed_r32g32b32a32: i32 = 10; // 32*4 bpp (4 channels - float)
+    pub const pixelformat_uncompressed_r16: i32 = 11; // 16 bpp (1 channel - half float)
+    pub const pixelformat_uncompressed_r16g16b16: i32 = 12; // 16*3 bpp (3 channels - half float)
+    pub const pixelformat_uncompressed_r16g16b16a16: i32 = 13; // 16*4 bpp (4 channels - half float)
+    pub const pixelformat_compressed_dxt1_rgb: i32 = 14; // 4 bpp (no alpha)
+    pub const pixelformat_compressed_dxt1_rgba: i32 = 15; // 4 bpp (1 bit alpha)
+    pub const pixelformat_compressed_dxt3_rgba: i32 = 16; // 8 bpp
+    pub const pixelformat_compressed_dxt5_rgba: i32 = 17; // 8 bpp
+    pub const pixelformat_compressed_etc1_rgb: i32 = 18; // 4 bpp
+    pub const pixelformat_compressed_etc2_rgb: i32 = 19; // 4 bpp
+    pub const pixelformat_compressed_etc2_eac_rgba: i32 = 20; // 8 bpp
+    pub const pixelformat_compressed_pvrt_rgb: i32 = 21; // 4 bpp
+    pub const pixelformat_compressed_pvrt_rgba: i32 = 22; // 4 bpp
+    pub const pixelformat_compressed_astc_4x4_rgba: i32 = 23; // 8 bpp
+    pub const pixelformat_compressed_astc_8x8_rgba: i32 = 24; // 2 bpp
+    pub const texture_filter_point: i32 = 0; // No filter, pixel approximation
+    pub const texture_filter_bilinear: i32 = 1; // Linear filtering
+    pub const texture_filter_trilinear: i32 = 2; // Trilinear filtering (linear with mipmaps)
+    pub const texture_filter_anisotropic_4x: i32 = 3; // Anisotropic filtering 4x
+    pub const texture_filter_anisotropic_8x: i32 = 4; // Anisotropic filtering 8x
+    pub const texture_filter_anisotropic_16x: i32 = 5; // Anisotropic filtering 16x
+    pub const blend_alpha: i32 = 0; // Blend textures considering alpha (default)
+    pub const blend_additive: i32 = 1; // Blend textures adding colors
+    pub const blend_multiplied: i32 = 2; // Blend textures multiplying colors
+    pub const blend_add_colors: i32 = 3; // Blend textures adding colors (alternative)
+    pub const blend_subtract_colors: i32 = 4; // Blend textures subtracting colors (alternative)
+    pub const blend_alpha_premultiply: i32 = 5; // Blend premultiplied textures considering alpha
+    pub const blend_custom: i32 = 6; // Blend textures using custom src/dst factors (use rlSetBlendFactors())
+    pub const blend_custom_separate: i32 = 7; // Blend textures using custom src/dst factors (use rlSetBlendFactorsSeparate())
+    pub const shader_loc_vertex_position: i32 = 0; // Shader location: vertex attribute: position
+    pub const shader_loc_vertex_texcoord01: i32 = 1; // Shader location: vertex attribute: texcoord01
+    pub const shader_loc_vertex_texcoord02: i32 = 2; // Shader location: vertex attribute: texcoord02
+    pub const shader_loc_vertex_normal: i32 = 3; // Shader location: vertex attribute: normal
+    pub const shader_loc_vertex_tangent: i32 = 4; // Shader location: vertex attribute: tangent
+    pub const shader_loc_vertex_color: i32 = 5; // Shader location: vertex attribute: color
+    pub const shader_loc_matrix_mvp: i32 = 6; // Shader location: matrix uniform: model-view-projection
+    pub const shader_loc_matrix_view: i32 = 7; // Shader location: matrix uniform: view (camera transform)
+    pub const shader_loc_matrix_projection: i32 = 8; // Shader location: matrix uniform: projection
+    pub const shader_loc_matrix_model: i32 = 9; // Shader location: matrix uniform: model (transform)
+    pub const shader_loc_matrix_normal: i32 = 10; // Shader location: matrix uniform: normal
+    pub const shader_loc_vector_view: i32 = 11; // Shader location: vector uniform: view
+    pub const shader_loc_color_diffuse: i32 = 12; // Shader location: vector uniform: diffuse color
+    pub const shader_loc_color_specular: i32 = 13; // Shader location: vector uniform: specular color
+    pub const shader_loc_color_ambient: i32 = 14; // Shader location: vector uniform: ambient color
+    pub const shader_loc_map_albedo: i32 = 15; // Shader location: sampler2d texture: albedo (same as: RL_SHADER_LOC_MAP_DIFFUSE)
+    pub const shader_loc_map_metalness: i32 = 16; // Shader location: sampler2d texture: metalness (same as: RL_SHADER_LOC_MAP_SPECULAR)
+    pub const shader_loc_map_normal: i32 = 17; // Shader location: sampler2d texture: normal
+    pub const shader_loc_map_roughness: i32 = 18; // Shader location: sampler2d texture: roughness
+    pub const shader_loc_map_occlusion: i32 = 19; // Shader location: sampler2d texture: occlusion
+    pub const shader_loc_map_emission: i32 = 20; // Shader location: sampler2d texture: emission
+    pub const shader_loc_map_height: i32 = 21; // Shader location: sampler2d texture: height
+    pub const shader_loc_map_cubemap: i32 = 22; // Shader location: samplerCube texture: cubemap
+    pub const shader_loc_map_irradiance: i32 = 23; // Shader location: samplerCube texture: irradiance
+    pub const shader_loc_map_prefilter: i32 = 24; // Shader location: samplerCube texture: prefilter
+    pub const shader_loc_map_brdf: i32 = 25; // Shader location: sampler2d texture: brdf
+    pub const shader_uniform_float: i32 = 0; // Shader uniform type: float
+    pub const shader_uniform_vec2: i32 = 1; // Shader uniform type: vec2 (2 float)
+    pub const shader_uniform_vec3: i32 = 2; // Shader uniform type: vec3 (3 float)
+    pub const shader_uniform_vec4: i32 = 3; // Shader uniform type: vec4 (4 float)
+    pub const shader_uniform_int: i32 = 4; // Shader uniform type: int
+    pub const shader_uniform_ivec2: i32 = 5; // Shader uniform type: ivec2 (2 int)
+    pub const shader_uniform_ivec3: i32 = 6; // Shader uniform type: ivec3 (3 int)
+    pub const shader_uniform_ivec4: i32 = 7; // Shader uniform type: ivec4 (4 int)
+    pub const shader_uniform_uint: i32 = 8; // Shader uniform type: unsigned int
+    pub const shader_uniform_uivec2: i32 = 9; // Shader uniform type: uivec2 (2 unsigned int)
+    pub const shader_uniform_uivec3: i32 = 10; // Shader uniform type: uivec3 (3 unsigned int)
+    pub const shader_uniform_uivec4: i32 = 11; // Shader uniform type: uivec4 (4 unsigned int)
+    pub const shader_uniform_sampler2d: i32 = 12; // Shader uniform type: sampler2d
+    pub const shader_attrib_float: i32 = 0; // Shader attribute type: float
+    pub const shader_attrib_vec2: i32 = 1; // Shader attribute type: vec2 (2 float)
+    pub const shader_attrib_vec3: i32 = 2; // Shader attribute type: vec3 (3 float)
+    pub const shader_attrib_vec4: i32 = 3; // Shader attribute type: vec4 (4 float)
+    pub const attachment_color_channel0: i32 = 0; // Framebuffer attachment type: color 0
+    pub const attachment_color_channel1: i32 = 1; // Framebuffer attachment type: color 1
+    pub const attachment_color_channel2: i32 = 2; // Framebuffer attachment type: color 2
+    pub const attachment_color_channel3: i32 = 3; // Framebuffer attachment type: color 3
+    pub const attachment_color_channel4: i32 = 4; // Framebuffer attachment type: color 4
+    pub const attachment_color_channel5: i32 = 5; // Framebuffer attachment type: color 5
+    pub const attachment_color_channel6: i32 = 6; // Framebuffer attachment type: color 6
+    pub const attachment_color_channel7: i32 = 7; // Framebuffer attachment type: color 7
+    pub const attachment_depth: i32 = 100; // Framebuffer attachment type: depth
+    pub const attachment_stencil: i32 = 200; // Framebuffer attachment type: stencil
+    pub const attachment_cubemap_positive_x: i32 = 0; // Framebuffer texture attachment type: cubemap, +X side
+    pub const attachment_cubemap_negative_x: i32 = 1; // Framebuffer texture attachment type: cubemap, -X side
+    pub const attachment_cubemap_positive_y: i32 = 2; // Framebuffer texture attachment type: cubemap, +Y side
+    pub const attachment_cubemap_negative_y: i32 = 3; // Framebuffer texture attachment type: cubemap, -Y side
+    pub const attachment_cubemap_positive_z: i32 = 4; // Framebuffer texture attachment type: cubemap, +Z side
+    pub const attachment_cubemap_negative_z: i32 = 5; // Framebuffer texture attachment type: cubemap, -Z side
+    pub const attachment_texture2d: i32 = 100; // Framebuffer texture attachment type: texture2d
+    pub const attachment_renderbuffer: i32 = 200; // Framebuffer texture attachment type: renderbuffer
+    pub const cull_face_front: i32 = 0;
+    pub const cull_face_back: i32 = 1;
+
+    /// Choose the current matrix to be transformed
+    pub fn matrixMode(mode: i32) void {
+        c.rlMatrixMode(mode);
+    }
+
+    /// Push the current matrix to stack
+    pub fn pushMatrix() void {
+        c.rlPushMatrix();
+    }
+
+    /// Pop latest inserted matrix from stack
+    pub fn popMatrix() void {
+        c.rlPopMatrix();
+    }
+
+    /// Reset current matrix to identity matrix
+    pub fn loadIdentity() void {
+        c.rlLoadIdentity();
+    }
+
+    /// Multiply the current matrix by a translation matrix
+    pub fn translatef(x: f32, y: f32, z: f32) void {
+        c.rlTranslatef(x, y, z);
+    }
+
+    /// Multiply the current matrix by a rotation matrix
+    pub fn rotatef(angle: f32, x: f32, y: f32, z: f32) void {
+        c.rlRotatef(angle, x, y, z);
+    }
+
+    /// Multiply the current matrix by a scaling matrix
+    pub fn scalef(x: f32, y: f32, z: f32) void {
+        c.rlScalef(x, y, z);
+    }
+
+    /// Multiply the current matrix by another matrix (column-major float[16])
+    pub fn multMatrixf(matf: *const [16]f32) void {
+        c.rlMultMatrixf(matf);
+    }
+
+    pub fn frustum(left: f64, right: f64, bottom: f64, top: f64, znear: f64, zfar: f64) void {
+        c.rlFrustum(left, right, bottom, top, znear, zfar);
+    }
+
+    pub fn ortho(left: f64, right: f64, bottom: f64, top: f64, znear: f64, zfar: f64) void {
+        c.rlOrtho(left, right, bottom, top, znear, zfar);
+    }
+
+    /// Set the viewport area
+    pub fn viewport(x: i32, y: i32, width: i32, height: i32) void {
+        c.rlViewport(x, y, width, height);
+    }
+
+    /// Set clip planes distances
+    pub fn setClipPlanes(nearPlane: f64, farPlane: f64) void {
+        c.rlSetClipPlanes(nearPlane, farPlane);
+    }
+
+    /// Get cull plane distance near
+    pub fn getCullDistanceNear() f64 {
+        return c.rlGetCullDistanceNear();
+    }
+
+    /// Get cull plane distance far
+    pub fn getCullDistanceFar() f64 {
+        return c.rlGetCullDistanceFar();
+    }
+
+    /// Initialize drawing mode (how to organize vertex)
+    pub fn begin(mode: i32) void {
+        c.rlBegin(mode);
+    }
+
+    /// Finish vertex providing
+    pub fn end() void {
+        c.rlEnd();
+    }
+
+    /// Define one vertex (position) - 2 int
+    pub fn vertex2i(x: i32, y: i32) void {
+        c.rlVertex2i(x, y);
+    }
+
+    /// Define one vertex (position) - 2 float
+    pub fn vertex2f(x: f32, y: f32) void {
+        c.rlVertex2f(x, y);
+    }
+
+    /// Define one vertex (position) - 3 float
+    pub fn vertex3f(x: f32, y: f32, z: f32) void {
+        c.rlVertex3f(x, y, z);
+    }
+
+    /// Define one vertex (texture coordinate) - 2 float
+    pub fn texCoord2f(x: f32, y: f32) void {
+        c.rlTexCoord2f(x, y);
+    }
+
+    /// Define one vertex (normal) - 3 float
+    pub fn normal3f(x: f32, y: f32, z: f32) void {
+        c.rlNormal3f(x, y, z);
+    }
+
+    /// Define one vertex (color) - 4 byte
+    pub fn color4ub(r: u8, g: u8, b: u8, a: u8) void {
+        c.rlColor4ub(r, g, b, a);
+    }
+
+    /// Define one vertex (color) - 3 float
+    pub fn color3f(x: f32, y: f32, z: f32) void {
+        c.rlColor3f(x, y, z);
+    }
+
+    /// Define one vertex (color) - 4 float
+    pub fn color4f(x: f32, y: f32, z: f32, w: f32) void {
+        c.rlColor4f(x, y, z, w);
+    }
+
+    /// Enable vertex array (VAO, if supported)
+    pub fn enableVertexArray(vaoId: u32) bool {
+        return c.rlEnableVertexArray(vaoId);
+    }
+
+    /// Disable vertex array (VAO, if supported)
+    pub fn disableVertexArray() void {
+        c.rlDisableVertexArray();
+    }
+
+    /// Enable vertex buffer (VBO)
+    pub fn enableVertexBuffer(id: u32) void {
+        c.rlEnableVertexBuffer(id);
+    }
+
+    /// Disable vertex buffer (VBO)
+    pub fn disableVertexBuffer() void {
+        c.rlDisableVertexBuffer();
+    }
+
+    /// Enable vertex buffer element (VBO element)
+    pub fn enableVertexBufferElement(id: u32) void {
+        c.rlEnableVertexBufferElement(id);
+    }
+
+    /// Disable vertex buffer element (VBO element)
+    pub fn disableVertexBufferElement() void {
+        c.rlDisableVertexBufferElement();
+    }
+
+    /// Enable vertex attribute index
+    pub fn enableVertexAttribute(index: u32) void {
+        c.rlEnableVertexAttribute(index);
+    }
+
+    /// Disable vertex attribute index
+    pub fn disableVertexAttribute(index: u32) void {
+        c.rlDisableVertexAttribute(index);
+    }
+
+    /// Enable attribute state pointer
+    pub fn enableStatePointer(vertexAttribType: i32, buffer: ?*anyopaque) void {
+        c.rlEnableStatePointer(vertexAttribType, buffer);
+    }
+
+    /// Disable attribute state pointer
+    pub fn disableStatePointer(vertexAttribType: i32) void {
+        c.rlDisableStatePointer(vertexAttribType);
+    }
+
+    /// Select and active a texture slot
+    pub fn activeTextureSlot(slot: i32) void {
+        c.rlActiveTextureSlot(slot);
+    }
+
+    /// Enable texture
+    pub fn enableTexture(id: u32) void {
+        c.rlEnableTexture(id);
+    }
+
+    /// Disable texture
+    pub fn disableTexture() void {
+        c.rlDisableTexture();
+    }
+
+    /// Enable texture cubemap
+    pub fn enableTextureCubemap(id: u32) void {
+        c.rlEnableTextureCubemap(id);
+    }
+
+    /// Disable texture cubemap
+    pub fn disableTextureCubemap() void {
+        c.rlDisableTextureCubemap();
+    }
+
+    /// Set texture parameters (filter, wrap)
+    pub fn textureParameters(id: u32, param: i32, value: i32) void {
+        c.rlTextureParameters(id, param, value);
+    }
+
+    /// Set cubemap parameters (filter, wrap)
+    pub fn cubemapParameters(id: u32, param: i32, value: i32) void {
+        c.rlCubemapParameters(id, param, value);
+    }
+
+    /// Enable shader program
+    pub fn enableShader(id: u32) void {
+        c.rlEnableShader(id);
+    }
+
+    /// Disable shader program
+    pub fn disableShader() void {
+        c.rlDisableShader();
+    }
+
+    /// Enable render texture (fbo)
+    pub fn enableFramebuffer(id: u32) void {
+        c.rlEnableFramebuffer(id);
+    }
+
+    /// Disable render texture (fbo), return to default framebuffer
+    pub fn disableFramebuffer() void {
+        c.rlDisableFramebuffer();
+    }
+
+    /// Get the currently active render texture (fbo), 0 for default framebuffer
+    pub fn getActiveFramebuffer() u32 {
+        return c.rlGetActiveFramebuffer();
+    }
+
+    /// Activate multiple draw color buffers
+    pub fn activeDrawBuffers(count: i32) void {
+        c.rlActiveDrawBuffers(count);
+    }
+
+    /// Blit active framebuffer to main framebuffer
+    pub fn blitFramebuffer(srcX: i32, srcY: i32, srcWidth: i32, srcHeight: i32, dstX: i32, dstY: i32, dstWidth: i32, dstHeight: i32, bufferMask: i32) void {
+        c.rlBlitFramebuffer(srcX, srcY, srcWidth, srcHeight, dstX, dstY, dstWidth, dstHeight, bufferMask);
+    }
+
+    /// Bind framebuffer (FBO)
+    pub fn bindFramebuffer(target: u32, framebuffer: u32) void {
+        c.rlBindFramebuffer(target, framebuffer);
+    }
+
+    /// Enable color blending
+    pub fn enableColorBlend() void {
+        c.rlEnableColorBlend();
+    }
+
+    /// Disable color blending
+    pub fn disableColorBlend() void {
+        c.rlDisableColorBlend();
+    }
+
+    /// Enable depth test
+    pub fn enableDepthTest() void {
+        c.rlEnableDepthTest();
+    }
+
+    /// Disable depth test
+    pub fn disableDepthTest() void {
+        c.rlDisableDepthTest();
+    }
+
+    /// Enable depth write
+    pub fn enableDepthMask() void {
+        c.rlEnableDepthMask();
+    }
+
+    /// Disable depth write
+    pub fn disableDepthMask() void {
+        c.rlDisableDepthMask();
+    }
+
+    /// Enable backface culling
+    pub fn enableBackfaceCulling() void {
+        c.rlEnableBackfaceCulling();
+    }
+
+    /// Disable backface culling
+    pub fn disableBackfaceCulling() void {
+        c.rlDisableBackfaceCulling();
+    }
+
+    /// Color mask control
+    pub fn colorMask(r: bool, g: bool, b: bool, a: bool) void {
+        c.rlColorMask(r, g, b, a);
+    }
+
+    /// Set face culling mode
+    pub fn setCullFace(mode: i32) void {
+        c.rlSetCullFace(mode);
+    }
+
+    /// Enable scissor test
+    pub fn enableScissorTest() void {
+        c.rlEnableScissorTest();
+    }
+
+    /// Disable scissor test
+    pub fn disableScissorTest() void {
+        c.rlDisableScissorTest();
+    }
+
+    /// Scissor test
+    pub fn scissor(x: i32, y: i32, width: i32, height: i32) void {
+        c.rlScissor(x, y, width, height);
+    }
+
+    /// Enable point mode
+    pub fn enablePointMode() void {
+        c.rlEnablePointMode();
+    }
+
+    /// Disable point mode
+    pub fn disablePointMode() void {
+        c.rlDisablePointMode();
+    }
+
+    /// Set the point drawing size
+    pub fn setPointSize(size: f32) void {
+        c.rlSetPointSize(size);
+    }
+
+    /// Get the point drawing size
+    pub fn getPointSize() f32 {
+        return c.rlGetPointSize();
+    }
+
+    /// Enable wire mode
+    pub fn enableWireMode() void {
+        c.rlEnableWireMode();
+    }
+
+    /// Disable wire mode
+    pub fn disableWireMode() void {
+        c.rlDisableWireMode();
+    }
+
+    /// Set the line drawing width
+    pub fn setLineWidth(width: f32) void {
+        c.rlSetLineWidth(width);
+    }
+
+    /// Get the line drawing width
+    pub fn getLineWidth() f32 {
+        return c.rlGetLineWidth();
+    }
+
+    /// Enable line aliasing
+    pub fn enableSmoothLines() void {
+        c.rlEnableSmoothLines();
+    }
+
+    /// Disable line aliasing
+    pub fn disableSmoothLines() void {
+        c.rlDisableSmoothLines();
+    }
+
+    /// Enable stereo rendering
+    pub fn enableStereoRender() void {
+        c.rlEnableStereoRender();
+    }
+
+    /// Disable stereo rendering
+    pub fn disableStereoRender() void {
+        c.rlDisableStereoRender();
+    }
+
+    /// Check if stereo render is enabled
+    pub fn isStereoRenderEnabled() bool {
+        return c.rlIsStereoRenderEnabled();
+    }
+
+    /// Clear color buffer with color
+    pub fn clearColor(r: u8, g: u8, b: u8, a: u8) void {
+        c.rlClearColor(r, g, b, a);
+    }
+
+    /// Clear used screen buffers (color and depth)
+    pub fn clearScreenBuffers() void {
+        c.rlClearScreenBuffers();
+    }
+
+    /// Check and log OpenGL error codes
+    pub fn checkErrors() void {
+        c.rlCheckErrors();
+    }
+
+    /// Set blending mode
+    pub fn setBlendMode(mode: i32) void {
+        c.rlSetBlendMode(mode);
+    }
+
+    /// Set blending mode factor and equation (using OpenGL factors)
+    pub fn setBlendFactors(glSrcFactor: i32, glDstFactor: i32, glEquation: i32) void {
+        c.rlSetBlendFactors(glSrcFactor, glDstFactor, glEquation);
+    }
+
+    /// Set blending mode factors and equations separately (using OpenGL factors)
+    pub fn setBlendFactorsSeparate(glSrcRGB: i32, glDstRGB: i32, glSrcAlpha: i32, glDstAlpha: i32, glEqRGB: i32, glEqAlpha: i32) void {
+        c.rlSetBlendFactorsSeparate(glSrcRGB, glDstRGB, glSrcAlpha, glDstAlpha, glEqRGB, glEqAlpha);
+    }
+
+    /// Initialize rlgl (buffers, shaders, textures, states)
+    pub fn init(width: i32, height: i32) void {
+        c.rlglInit(width, height);
+    }
+
+    /// De-initialize rlgl (buffers, shaders, textures)
+    pub fn close() void {
+        c.rlglClose();
+    }
+
+    /// Load OpenGL extensions (loader function required)
+    pub fn loadExtensions(loader: ?*anyopaque) void {
+        c.rlLoadExtensions(loader);
+    }
+
+    /// Get OpenGL procedure address
+    pub fn getProcAddress(procName: [:0]const u8) ?*anyopaque {
+        return c.rlGetProcAddress(procName.ptr);
+    }
+
+    /// Get current OpenGL version
+    pub fn getVersion() i32 {
+        return c.rlGetVersion();
+    }
+
+    /// Set current framebuffer width
+    pub fn setFramebufferWidth(width: i32) void {
+        c.rlSetFramebufferWidth(width);
+    }
+
+    /// Get default framebuffer width
+    pub fn getFramebufferWidth() i32 {
+        return c.rlGetFramebufferWidth();
+    }
+
+    /// Set current framebuffer height
+    pub fn setFramebufferHeight(height: i32) void {
+        c.rlSetFramebufferHeight(height);
+    }
+
+    /// Get default framebuffer height
+    pub fn getFramebufferHeight() i32 {
+        return c.rlGetFramebufferHeight();
+    }
+
+    /// Get default texture id
+    pub fn getTextureIdDefault() u32 {
+        return c.rlGetTextureIdDefault();
+    }
+
+    /// Get default shader id
+    pub fn getShaderIdDefault() u32 {
+        return c.rlGetShaderIdDefault();
+    }
+
+    /// Get default shader locations (RL_MAX_SHADER_LOCATIONS entries)
+    pub fn getShaderLocsDefault() [*]i32 {
+        return @ptrCast(c.rlGetShaderLocsDefault());
+    }
+
+    /// Load a render batch system
+    pub fn loadRenderBatch(numBuffers: i32, bufferElements: i32) RenderBatch {
+        return c.rlLoadRenderBatch(numBuffers, bufferElements);
+    }
+
+    /// Unload render batch system
+    pub fn unloadRenderBatch(batch: RenderBatch) void {
+        c.rlUnloadRenderBatch(batch);
+    }
+
+    /// Draw render batch data (Update->Draw->Reset)
+    pub fn drawRenderBatch(batch: *RenderBatch) void {
+        c.rlDrawRenderBatch(batch);
+    }
+
+    /// Set the active render batch for rlgl (null for default internal)
+    pub fn setRenderBatchActive(batch: ?*RenderBatch) void {
+        c.rlSetRenderBatchActive(batch);
+    }
+
+    /// Update and draw internal render batch
+    pub fn drawRenderBatchActive() void {
+        c.rlDrawRenderBatchActive();
+    }
+
+    /// Check internal buffer overflow for a given number of vertex
+    pub fn checkRenderBatchLimit(vCount: i32) bool {
+        return c.rlCheckRenderBatchLimit(vCount);
+    }
+
+    /// Set current texture for render batch and check buffers limits
+    pub fn setTexture(id: u32) void {
+        c.rlSetTexture(id);
+    }
+
+    /// Load vertex array (vao) if supported
+    pub fn loadVertexArray() u32 {
+        return c.rlLoadVertexArray();
+    }
+
+    /// Load a vertex buffer object
+    pub fn loadVertexBuffer(buffer: []const u8, dynamic: bool) u32 {
+        return c.rlLoadVertexBuffer(@ptrCast(buffer.ptr), @intCast(buffer.len), dynamic);
+    }
+
+    /// Load vertex buffer elements object
+    pub fn loadVertexBufferElement(buffer: []const u8, dynamic: bool) u32 {
+        return c.rlLoadVertexBufferElement(@ptrCast(buffer.ptr), @intCast(buffer.len), dynamic);
+    }
+
+    /// Update vertex buffer object data on GPU buffer
+    pub fn updateVertexBuffer(bufferId: u32, data: []const u8, offset: i32) void {
+        c.rlUpdateVertexBuffer(bufferId, @ptrCast(data.ptr), @intCast(data.len), offset);
+    }
+
+    /// Update vertex buffer elements data on GPU buffer
+    pub fn updateVertexBufferElements(id: u32, data: []const u8, offset: i32) void {
+        c.rlUpdateVertexBufferElements(id, @ptrCast(data.ptr), @intCast(data.len), offset);
+    }
+
+    /// Unload vertex array (vao)
+    pub fn unloadVertexArray(vaoId: u32) void {
+        c.rlUnloadVertexArray(vaoId);
+    }
+
+    /// Unload vertex buffer object
+    pub fn unloadVertexBuffer(vboId: u32) void {
+        c.rlUnloadVertexBuffer(vboId);
+    }
+
+    /// Set vertex attribute data configuration
+    pub fn setVertexAttribute(index: u32, compSize: i32, @"type": i32, normalized: bool, stride: i32, offset: i32) void {
+        c.rlSetVertexAttribute(index, compSize, @"type", normalized, stride, offset);
+    }
+
+    /// Set vertex attribute data divisor
+    pub fn setVertexAttributeDivisor(index: u32, divisor: i32) void {
+        c.rlSetVertexAttributeDivisor(index, divisor);
+    }
+
+    /// Set vertex attribute default value, when attribute to provided
+    pub fn setVertexAttributeDefault(locIndex: i32, value: ?*const anyopaque, attribType: i32, count: i32) void {
+        c.rlSetVertexAttributeDefault(locIndex, value, attribType, count);
+    }
+
+    /// Draw vertex array (currently active vao)
+    pub fn drawVertexArray(offset: i32, count: i32) void {
+        c.rlDrawVertexArray(offset, count);
+    }
+
+    /// Draw vertex array elements
+    pub fn drawVertexArrayElements(offset: i32, count: i32, buffer: ?*const anyopaque) void {
+        c.rlDrawVertexArrayElements(offset, count, buffer);
+    }
+
+    /// Draw vertex array (currently active vao) with instancing
+    pub fn drawVertexArrayInstanced(offset: i32, count: i32, instances: i32) void {
+        c.rlDrawVertexArrayInstanced(offset, count, instances);
+    }
+
+    /// Draw vertex array elements with instancing
+    pub fn drawVertexArrayElementsInstanced(offset: i32, count: i32, buffer: ?*const anyopaque, instances: i32) void {
+        c.rlDrawVertexArrayElementsInstanced(offset, count, buffer, instances);
+    }
+
+    /// Load texture data
+    pub fn loadTexture(data: ?*const anyopaque, width: i32, height: i32, format: i32, mipmapCount: i32) u32 {
+        return c.rlLoadTexture(data, width, height, format, mipmapCount);
+    }
+
+    /// Load depth texture/renderbuffer (to be attached to fbo)
+    pub fn loadTextureDepth(width: i32, height: i32, useRenderBuffer: bool) u32 {
+        return c.rlLoadTextureDepth(width, height, useRenderBuffer);
+    }
+
+    /// Load texture cubemap data
+    pub fn loadTextureCubemap(data: ?*const anyopaque, size: i32, format: i32, mipmapCount: i32) u32 {
+        return c.rlLoadTextureCubemap(data, size, format, mipmapCount);
+    }
+
+    /// Update texture with new data on GPU
+    pub fn updateTexture(id: u32, offsetX: i32, offsetY: i32, width: i32, height: i32, format: i32, data: ?*const anyopaque) void {
+        c.rlUpdateTexture(id, offsetX, offsetY, width, height, format, data);
+    }
+
+    /// Get OpenGL internal formats
+    pub fn getGlTextureFormats(format: i32, glInternalFormat: *c_uint, glFormat: *c_uint, glType: *c_uint) void {
+        c.rlGetGlTextureFormats(format, glInternalFormat, glFormat, glType);
+    }
+
+    /// Get name string for pixel format
+    pub fn getPixelFormatName(format: u32) [:0]const u8 {
+        return std.mem.span(c.rlGetPixelFormatName(format));
+    }
+
+    /// Unload texture from GPU memory
+    pub fn unloadTexture(id: u32) void {
+        c.rlUnloadTexture(id);
+    }
+
+    /// Generate mipmap data for selected texture
+    pub fn genTextureMipmaps(id: u32, width: i32, height: i32, format: i32, mipmaps: *c_int) void {
+        c.rlGenTextureMipmaps(id, width, height, format, mipmaps);
+    }
+
+    /// Read texture pixel data
+    pub fn readTexturePixels(id: u32, width: i32, height: i32, format: i32) ?*anyopaque {
+        return c.rlReadTexturePixels(id, width, height, format);
+    }
+
+    /// Read screen pixel data (color buffer, RGBA). Free with `rl.memFree`.
+    pub fn readScreenPixels(width: i32, height: i32) ?[]u8 {
+        const pixels = c.rlReadScreenPixels(width, height) orelse return null;
+        return pixels[0..@intCast(width * height * 4)];
+    }
+
+    /// Load an empty framebuffer
+    pub fn loadFramebuffer() u32 {
+        return c.rlLoadFramebuffer();
+    }
+
+    /// Attach texture/renderbuffer to a framebuffer
+    pub fn framebufferAttach(id: u32, texId: u32, attachType: i32, texType: i32, mipLevel: i32) void {
+        c.rlFramebufferAttach(id, texId, attachType, texType, mipLevel);
+    }
+
+    /// Verify framebuffer is complete
+    pub fn framebufferComplete(id: u32) bool {
+        return c.rlFramebufferComplete(id);
+    }
+
+    /// Delete framebuffer from GPU
+    pub fn unloadFramebuffer(id: u32) void {
+        c.rlUnloadFramebuffer(id);
+    }
+
+    /// Copy framebuffer pixel data to internal buffer
+    pub fn copyFramebuffer(x: i32, y: i32, width: i32, height: i32, format: i32, pixels: ?*anyopaque) void {
+        c.rlCopyFramebuffer(x, y, width, height, format, pixels);
+    }
+
+    /// Resize internal framebuffer
+    pub fn resizeFramebuffer(width: i32, height: i32) void {
+        c.rlResizeFramebuffer(width, height);
+    }
+
+    /// Load (compile) shader and return shader id (type: RL_VERTEX_SHADER, RL_FRAGMENT_SHADER, RL_COMPUTE_SHADER)
+    pub fn loadShader(code: [:0]const u8, @"type": i32) u32 {
+        return c.rlLoadShader(code.ptr, @"type");
+    }
+
+    /// Load shader from code strings
+    pub fn loadShaderProgram(vsCode: [:0]const u8, fsCode: [:0]const u8) u32 {
+        return c.rlLoadShaderProgram(vsCode.ptr, fsCode.ptr);
+    }
+
+    /// Load shader program, using already loaded shader ids
+    pub fn loadShaderProgramEx(vsId: u32, fsId: u32) u32 {
+        return c.rlLoadShaderProgramEx(vsId, fsId);
+    }
+
+    /// Load compute shader program
+    pub fn loadShaderProgramCompute(csId: u32) u32 {
+        return c.rlLoadShaderProgramCompute(csId);
+    }
+
+    /// Unload shader, loaded with rlLoadShader()
+    pub fn unloadShader(id: u32) void {
+        c.rlUnloadShader(id);
+    }
+
+    /// Unload shader program
+    pub fn unloadShaderProgram(id: u32) void {
+        c.rlUnloadShaderProgram(id);
+    }
+
+    /// Get shader location uniform, requires shader program id
+    pub fn getLocationUniform(id: u32, uniformName: [:0]const u8) i32 {
+        return c.rlGetLocationUniform(id, uniformName.ptr);
+    }
+
+    /// Get shader location attribute, requires shader program id
+    pub fn getLocationAttrib(id: u32, attribName: [:0]const u8) i32 {
+        return c.rlGetLocationAttrib(id, attribName.ptr);
+    }
+
+    /// Set shader value uniform
+    pub fn setUniform(locIndex: i32, value: ?*const anyopaque, uniformType: i32, count: i32) void {
+        c.rlSetUniform(locIndex, value, uniformType, count);
+    }
+
+    /// Set shader value matrix
+    pub fn setUniformMatrix(locIndex: i32, mat: Matrix) void {
+        c.rlSetUniformMatrix(locIndex, mat);
+    }
+
+    /// Set shader value matrices
+    pub fn setUniformMatrices(locIndex: i32, mat: []const Matrix) void {
+        c.rlSetUniformMatrices(locIndex, mat.ptr, @intCast(mat.len));
+    }
+
+    /// Set shader value sampler
+    pub fn setUniformSampler(locIndex: i32, textureId: u32) void {
+        c.rlSetUniformSampler(locIndex, textureId);
+    }
+
+    /// Set shader currently active (id and locations)
+    pub fn setShader(id: u32, locs: [*]i32) void {
+        c.rlSetShader(id, @ptrCast(locs));
+    }
+
+    /// Dispatch compute shader (equivalent to *draw* for graphics pipeline)
+    pub fn computeShaderDispatch(groupX: u32, groupY: u32, groupZ: u32) void {
+        c.rlComputeShaderDispatch(groupX, groupY, groupZ);
+    }
+
+    /// Load shader storage buffer object (SSBO)
+    pub fn loadShaderBuffer(size: u32, data: ?*const anyopaque, usageHint: i32) u32 {
+        return c.rlLoadShaderBuffer(size, data, usageHint);
+    }
+
+    /// Unload shader storage buffer object (SSBO)
+    pub fn unloadShaderBuffer(ssboId: u32) void {
+        c.rlUnloadShaderBuffer(ssboId);
+    }
+
+    /// Update SSBO buffer data
+    pub fn updateShaderBuffer(id: u32, data: []const u8, offset: u32) void {
+        c.rlUpdateShaderBuffer(id, @ptrCast(data.ptr), @intCast(data.len), offset);
+    }
+
+    /// Bind SSBO buffer
+    pub fn bindShaderBuffer(id: u32, index: u32) void {
+        c.rlBindShaderBuffer(id, index);
+    }
+
+    /// Read SSBO buffer data (GPU->CPU)
+    pub fn readShaderBuffer(id: u32, dest: ?*anyopaque, count: u32, offset: u32) void {
+        c.rlReadShaderBuffer(id, dest, count, offset);
+    }
+
+    /// Copy SSBO data between buffers
+    pub fn copyShaderBuffer(destId: u32, srcId: u32, destOffset: u32, srcOffset: u32, count: u32) void {
+        c.rlCopyShaderBuffer(destId, srcId, destOffset, srcOffset, count);
+    }
+
+    /// Get SSBO buffer size
+    pub fn getShaderBufferSize(id: u32) u32 {
+        return c.rlGetShaderBufferSize(id);
+    }
+
+    /// Bind image texture
+    pub fn bindImageTexture(id: u32, index: u32, format: i32, readonly: bool) void {
+        c.rlBindImageTexture(id, index, format, readonly);
+    }
+
+    /// Get internal modelview matrix
+    pub fn getMatrixModelview() Matrix {
+        return c.rlGetMatrixModelview();
+    }
+
+    /// Get internal projection matrix
+    pub fn getMatrixProjection() Matrix {
+        return c.rlGetMatrixProjection();
+    }
+
+    /// Get internal accumulated transform matrix
+    pub fn getMatrixTransform() Matrix {
+        return c.rlGetMatrixTransform();
+    }
+
+    /// Get internal projection matrix for stereo render (selected eye)
+    pub fn getMatrixProjectionStereo(eye: i32) Matrix {
+        return c.rlGetMatrixProjectionStereo(eye);
+    }
+
+    /// Get internal view offset matrix for stereo render (selected eye)
+    pub fn getMatrixViewOffsetStereo(eye: i32) Matrix {
+        return c.rlGetMatrixViewOffsetStereo(eye);
+    }
+
+    /// Set a custom projection matrix (replaces internal projection matrix)
+    pub fn setMatrixProjection(proj: Matrix) void {
+        c.rlSetMatrixProjection(proj);
+    }
+
+    /// Set a custom modelview matrix (replaces internal modelview matrix)
+    pub fn setMatrixModelview(view: Matrix) void {
+        c.rlSetMatrixModelview(view);
+    }
+
+    /// Set eyes projection matrices for stereo rendering
+    pub fn setMatrixProjectionStereo(right: Matrix, left: Matrix) void {
+        c.rlSetMatrixProjectionStereo(right, left);
+    }
+
+    /// Set eyes view offsets matrices for stereo rendering
+    pub fn setMatrixViewOffsetStereo(right: Matrix, left: Matrix) void {
+        c.rlSetMatrixViewOffsetStereo(right, left);
+    }
+
+    /// Load and draw a cube
+    pub fn loadDrawCube() void {
+        c.rlLoadDrawCube();
+    }
+
+    /// Load and draw a quad
+    pub fn loadDrawQuad() void {
+        c.rlLoadDrawQuad();
+    }
+};

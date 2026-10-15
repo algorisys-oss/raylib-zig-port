@@ -19,6 +19,7 @@ import sys
 
 HEADER = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "vendor/raylib/src/raylib.h")
 RAYMATH = HEADER.with_name("raymath.h")
+RLGL = HEADER.with_name("rlgl.h")
 OUT_DIR = pathlib.Path("src/api")
 
 ZIG_KEYWORDS = {
@@ -568,6 +569,92 @@ pub fn unloadRandomSequence(sequence: []i32) void {
 ''',
 }
 
+# rlgl's batch structs carry #if branches per GL backend; this is the pinned
+# GRAPHICS_API_OPENGL_33 layout (checked against translate-c by apitest).
+GL_TYPES = '''
+    pub const VertexBuffer = extern struct {
+        elementCount: c_int, // Number of elements in the buffer (QUADS)
+        vertices: ?[*]f32, // Vertex position (XYZ - 3 components per vertex)
+        texcoords: ?[*]f32, // Vertex texture coordinates (UV - 2 components per vertex)
+        normals: ?[*]f32, // Vertex normal (XYZ - 3 components per vertex)
+        colors: ?[*]u8, // Vertex colors (RGBA - 4 components per vertex)
+        indices: ?[*]c_uint, // Vertex indices (6 indices per quad)
+        vaoId: c_uint, // OpenGL Vertex Array Object id
+        vboId: [5]c_uint, // OpenGL Vertex Buffer Objects id (5 types of vertex data)
+    };
+
+    pub const DrawCall = extern struct {
+        mode: c_int, // Drawing mode: LINES, TRIANGLES, QUADS
+        vertexCount: c_int, // Number of vertex of the draw
+        vertexAlignment: c_int, // Number of vertex required for index alignment (LINES, TRIANGLES)
+        textureId: c_uint, // Texture id to be used on the draw
+    };
+
+    pub const RenderBatch = extern struct {
+        bufferCount: c_int, // Number of vertex buffers (multi-buffering support)
+        currentBuffer: c_int, // Current buffer tracking in case of multi-buffering
+        vertexBuffer: ?[*]VertexBuffer, // Dynamic buffer(s) for vertex data
+        draws: ?[*]DrawCall, // Draw calls array, depends on textureId
+        drawCounter: c_int, // Draw calls counter
+        currentDepth: f32, // Current depth value for next draw
+    };
+'''
+
+# Constants rlgl.h defines per GL backend (#if): the pinned OPENGL_33 value.
+GL_PINNED_CONSTANTS = {"RL_DEFAULT_BATCH_BUFFER_ELEMENTS": 8192}
+
+GL_OVERRIDES = {
+    "rlMultMatrixf": '''
+/// Multiply the current matrix by another matrix (column-major float[16])
+pub fn multMatrixf(matf: *const [16]f32) void {
+    c.rlMultMatrixf(matf);
+}
+''',
+    "rlLoadRenderBatch": '''
+/// Load a render batch system
+pub fn loadRenderBatch(numBuffers: i32, bufferElements: i32) RenderBatch {
+    return c.rlLoadRenderBatch(numBuffers, bufferElements);
+}
+''',
+    "rlUnloadRenderBatch": '''
+/// Unload render batch system
+pub fn unloadRenderBatch(batch: RenderBatch) void {
+    c.rlUnloadRenderBatch(batch);
+}
+''',
+    "rlDrawRenderBatch": '''
+/// Draw render batch data (Update->Draw->Reset)
+pub fn drawRenderBatch(batch: *RenderBatch) void {
+    c.rlDrawRenderBatch(batch);
+}
+''',
+    "rlSetRenderBatchActive": '''
+/// Set the active render batch for rlgl (null for default internal)
+pub fn setRenderBatchActive(batch: ?*RenderBatch) void {
+    c.rlSetRenderBatchActive(batch);
+}
+''',
+    "rlGetShaderLocsDefault": '''
+/// Get default shader locations (RL_MAX_SHADER_LOCATIONS entries)
+pub fn getShaderLocsDefault() [*]i32 {
+    return @ptrCast(c.rlGetShaderLocsDefault());
+}
+''',
+    "rlSetShader": '''
+/// Set shader currently active (id and locations)
+pub fn setShader(id: u32, locs: [*]i32) void {
+    c.rlSetShader(id, @ptrCast(locs));
+}
+''',
+    "rlReadScreenPixels": '''
+/// Read screen pixel data (color buffer, RGBA). Free with `rl.memFree`.
+pub fn readScreenPixels(width: i32, height: i32) ?[]u8 {
+    const pixels = c.rlReadScreenPixels(width, height) orelse return null;
+    return pixels[0..@intCast(width * height * 4)];
+}
+''',
+}
+
 MATH_OVERRIDES = {
     "QuaternionToAxisAngle": '''
 /// Get the rotation angle and axis for a given quaternion
@@ -706,6 +793,14 @@ def camel(name):
     return name[0].lower() + name[1:]
 
 
+def gl_name(fname):
+    """rlPushMatrix -> pushMatrix, rlglInit -> init."""
+    for prefix in ("rlgl", "rl"):
+        if fname.startswith(prefix) and fname[len(prefix)].isupper():
+            return camel(fname[len(prefix):])
+    raise ValueError(f"unexpected rlgl name {fname}")
+
+
 def common_prefix(names):
     prefix = names[0]
     for n in names[1:]:
@@ -730,6 +825,10 @@ class Gen:
         self.math_src = RAYMATH.read_text()
         self.math_funcs = parse_functions(self.math_src, "RMAPI ")
         self.struct_names |= {"float3", "float16"}
+        gl_src = RLGL.read_text()
+        self.gl_src = gl_src[: gl_src.index("#if defined(RLGL_IMPLEMENTATION)")]
+        self.gl_funcs = parse_functions(self.gl_src)
+        self.struct_names |= {"rlVertexBuffer", "rlDrawCall", "rlRenderBatch"}
         self.callbacks = re.findall(r"^typedef (.+?)\(\*(\w+)\)\((.*?)\);", src, re.M)
         self.callback_names = {n for _, n, _ in self.callbacks}
         self.errors = []
@@ -767,8 +866,12 @@ class Gen:
                 return enum
         return None
 
-    def wrap_function(self, fname, ret, params, comment):
-        if fname in OVERRIDES:
+    def wrap_function(self, fname, ret, params, comment, mode="raylib"):
+        """mode "raylib"/"math": the docs/zig-api.md rules. mode "gl" (rlgl):
+        raw GL ints stay i32 (no enum typing, no validated loaders), `void *`
+        is nullable (rlgl routinely takes NULL), scalar `T *` is an out-param."""
+        gl = mode == "gl"
+        if not gl and fname in OVERRIDES:
             return OVERRIDES[fname].strip("\n")
         sig, call = [], []
         i = 0
@@ -780,7 +883,7 @@ class Gen:
                 raise ValueError(f"param '{pn}' shadows a module-level name; add a PARAM_RENAMES entry")
             if p.ctype == "...":
                 raise ValueError("varargs")
-            enum = self.enum_for(fname, p.name)
+            enum = None if gl else self.enum_for(fname, p.name)
             if enum and p.stars == 0:
                 sig.append(f"{pn}: {enum}")
                 call.append(f"@bitCast({pn})" if enum in FLAG_ENUMS else f"@backingInt({pn})")
@@ -813,7 +916,10 @@ class Gen:
                 sig.append(f"{pn}: *{'const ' if p.is_const else ''}{p.base}")
                 call.append(pn)
             elif p.stars == 1 and p.base == "void":
-                sig.append(f"{pn}: *{'const ' if p.is_const else ''}anyopaque")
+                sig.append(f"{pn}: {'?' if gl else ''}*{'const ' if p.is_const else ''}anyopaque")
+                call.append(pn)
+            elif gl and p.stars == 1 and p.base in C_SCALARS and not p.is_const:
+                sig.append(f"{pn}: *{C_SCALARS[p.base][0]}")
                 call.append(pn)
             elif p.stars == 0 and p.base in C_SCALARS:
                 sig.append(f"{pn}: {self.api_scalar(p.base)}")
@@ -825,11 +931,11 @@ class Gen:
                 raise ValueError(f"param {p.ctype} {p.name}")
             i += 1
 
-        name = camel(fname)
+        name = gl_name(fname) if gl else camel(fname)
         args = ", ".join(sig)
         cargs = ", ".join(call)
         doc = f"/// {comment}\n" if comment else ""
-        if fname in VALIDATED_LOADERS:
+        if not gl and fname in VALIDATED_LOADERS:
             if ret.stars != 0:
                 raise ValueError("pointer loader")
             check = VALIDATED_LOADERS[fname]
@@ -852,7 +958,7 @@ class Gen:
                         f"    const result = c.{fname}({cargs}) orelse return null;\n"
                         f"    return std.mem.span(result);\n}}")
             return f"{doc}pub fn {name}({args}) [:0]const u8 {{\n    return std.mem.span(c.{fname}({cargs}));\n}}"
-        if fname in RETURN_ENUMS:
+        if not gl and fname in RETURN_ENUMS:
             enum = RETURN_ENUMS[fname]
             return f"{doc}pub fn {name}({args}) {enum} {{\n    return @enumFromInt(c.{fname}({cargs}));\n}}"
         if ret.stars == 0 and (ret.base in C_SCALARS or ret.base in self.struct_names):
@@ -875,7 +981,7 @@ class Gen:
             r = self.c_type(split_decl(rt.strip() + " x"))
             out.append(f"pub const {name} = ?*const fn ({', '.join(cps)}) callconv(.c) {r};")
         out.append("")
-        for fname, ret, params, _ in self.funcs + self.math_funcs:
+        for fname, ret, params, _ in self.funcs + self.math_funcs + self.gl_funcs:
             cps = []
             for p in params:
                 cps.append("..." if p.ctype == "..." else f"{zig_ident(p.name)}: {self.c_type(p)}")
@@ -957,6 +1063,56 @@ class Gen:
             except ValueError as e:
                 self.errors.append(f"{fname}: {e}")
         out.append(self.emit_math())
+        out.append(self.emit_gl())
+        return "\n".join(out)
+
+    def gl_constants(self):
+        """RL_* numeric #defines plus rlgl enum members, as (name, value, comment)."""
+        consts = []
+        clean_lines = self.gl_src.splitlines()
+        for line in clean_lines:
+            m = re.match(r"^\s*#define (RL_\w+)\s+(0x[0-9A-Fa-f]+|\d+)\b\s*(?://\s*(.*))?$", line)
+            if m:
+                consts.append((m.group(1), int(m.group(2), 0), m.group(3) or ""))
+        for _, members in parse_enums(self.gl_src):
+            consts.extend(members)
+        seen = {}
+        for name, value, _ in consts:
+            if name in seen and seen[name] != value and name not in GL_PINNED_CONSTANTS:
+                raise SystemExit(f"rlgl constant {name} defined twice with different values")
+            seen[name] = value
+        unique = {}
+        for name, value, comment in consts:
+            if name in GL_PINNED_CONSTANTS:
+                value = GL_PINNED_CONSTANTS[name]
+            unique.setdefault(name, (value, comment))
+        return [(n, v, c) for n, (v, c) in unique.items()]
+
+    def emit_gl(self):
+        out = ["",
+               "// " + "-" * 74,
+               "// rlgl — raylib's OpenGL abstraction layer (rlgl.h)",
+               "// " + "-" * 74,
+               "",
+               "/// rlgl: same functions as rlgl.h without the `rl`/`rlgl` prefix",
+               "/// (`rlPushMatrix` -> `rl.gl.pushMatrix`), constants without `RL_`",
+               "/// (`RL_QUADS` -> `rl.gl.quads`). A low-level layer: GL enums stay `i32`.",
+               "pub const gl = struct {",
+               GL_TYPES.strip("\n"),
+               ""]
+        for name, value, comment in self.gl_constants():
+            tail = f" // {comment}" if comment else ""
+            out.append(f"    pub const {zig_ident(name[3:].lower())}: i32 = {value};{tail}")
+        out.append("")
+        for fname, ret, params, comment in self.gl_funcs:
+            try:
+                body = GL_OVERRIDES.get(fname) or self.wrap_function(fname, ret, params, comment, mode="gl")
+            except ValueError as e:
+                self.errors.append(f"rlgl {fname}: {e}")
+                continue
+            out.extend("    " + l if l else "" for l in body.strip("\n").splitlines())
+            out.append("")
+        out.append("};")
         return "\n".join(out)
 
     def emit_math(self):
@@ -1050,6 +1206,9 @@ const AutomationEvent = raylib.AutomationEvent;
 const AutomationEventList = raylib.AutomationEventList;
 const float3 = raylib.math.float3;
 const float16 = raylib.math.float16;
+const rlVertexBuffer = raylib.gl.VertexBuffer;
+const rlDrawCall = raylib.gl.DrawCall;
+const rlRenderBatch = raylib.gl.RenderBatch;
 '''
 
 # Functions the examples gate's determinism shim replaces (tools/exdiff/hooks.c).

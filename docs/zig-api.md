@@ -71,8 +71,17 @@ round-trips.
 
 `raymath.h` is exposed as the `math` namespace with the same rules:
 `Vector2Add(a, b)` → `rl.math.vector2Add(a, b)`, `MatrixRotateY(angle)` →
-`rl.math.matrixRotateY(angle)`. (`rlgl.h` is not wrapped yet — it is raylib's
-low-level GL layer; examples that need it stay C-only for now.)
+`rl.math.matrixRotateY(angle)`.
+
+## rlgl
+
+`rlgl.h` (raylib's OpenGL abstraction) is the `gl` namespace:
+`rlPushMatrix()` → `rl.gl.pushMatrix()`, `rlglInit` → `rl.gl.init`, and
+`RL_QUADS` → `rl.gl.quads`. It is deliberately the low-level layer, so GL
+enums stay `i32` (no enum typing), `void *` buffers are nullable (rlgl takes
+NULL routinely), and scalar out-pointers are `*T`. Its batch structs
+(`rl.gl.RenderBatch`…) are the pinned OpenGL 3.3 layout, checked against
+translate-c by `zig build apitest`.
 
 ## Memory
 
