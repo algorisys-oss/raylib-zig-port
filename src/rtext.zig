@@ -102,6 +102,7 @@ extern fn stbtt_FindGlyphIndex(info: ?*const anyopaque, unicode_codepoint: c_int
 extern fn stbtt_ScaleForPixelHeight(info: ?*const anyopaque, pixels: f32) f32;
 extern fn stbtt_GetFontVMetrics(info: ?*const anyopaque, ascent: [*c]c_int, descent: [*c]c_int, lineGap: [*c]c_int) void;
 extern fn stbtt_GetCodepointHMetrics(info: ?*const anyopaque, codepoint: c_int, advanceWidth: [*c]c_int, leftSideBearing: [*c]c_int) void;
+extern fn stbtt_GetCodepointSDF(info: ?*const anyopaque, scale: f32, codepoint: c_int, padding: c_int, onedge_value: u8, pixel_dist_scale: f32, width: [*c]c_int, height: [*c]c_int, xoff: [*c]c_int, yoff: [*c]c_int) [*c]u8;
 extern fn stbtt_GetCodepointBitmap(info: ?*const anyopaque, scale_x: f32, scale_y: f32, codepoint: c_int, width: [*c]c_int, height: [*c]c_int, xoff: [*c]c_int, yoff: [*c]c_int) [*c]u8;
 
 extern fn stbrp_init_target(context: ?*anyopaque, width: c_int, height: c_int, nodes: ?*anyopaque, num_nodes: c_int) void;
@@ -152,6 +153,11 @@ const LOG_DEBUG: c_int = 2;
 const FONT_DEFAULT: c_int = 0;
 const FONT_BITMAP: c_int = 1;
 const FONT_SDF: c_int = 2;
+
+// SDF font generation parameters (rtext.c defaults)
+const FONT_SDF_CHAR_PADDING: c_int = 4;
+const FONT_SDF_ON_EDGE_VALUE: u8 = 128;
+const FONT_SDF_PIXEL_DIST_SCALE: f32 = 64.0;
 
 // TextureFilter values (raylib.h)
 const TEXTURE_FILTER_POINT: c_int = 0;
@@ -486,7 +492,11 @@ export fn LoadFontFromImage(image: Image, key: Color, firstChar: c_int) callconv
         if (!colorEqual(pixels[@intCast(y * image.width + x)], key)) break;
     }
 
-    if ((x == 0) or (y == 0)) return font; // Security check
+    // Security check
+    if ((x == 0) or (y == 0)) {
+        UnloadImageColors(pixels);
+        return font;
+    }
 
     charSpacing = x;
     lineSpacing = y;
@@ -631,6 +641,21 @@ export fn IsFontValid(font: Font) callconv(.c) bool {
         (font.glyphs != null)); // Validate glyph data is loaded
 }
 
+/// Unicode space characters that get an empty (advance-sized) glyph image.
+fn isUnicodeSpace(cp: c_int) bool {
+    return switch (cp) {
+        0x20, // ASCII space
+        0xA0, // No-break space
+        0x1680, // Ogham Space Mark
+        0x2000...0x200A, // En Quad .. Hair Space
+        0x202F, // Narrow No-break Space
+        0x205F, // Medium Mathematical Space
+        0x3000, // Ideographic Space
+        => true,
+        else => false,
+    };
+}
+
 // Load font data for further use
 // NOTE: Requires TTF font memory data and can generate SDF data
 export fn LoadFontData(fileData: [*c]const u8, dataSize: c_int, fontSize: c_int, codepoints: [*c]const c_int, codepointCount_in: c_int, type_: c_int, glyphCount: [*c]c_int) callconv(.c) [*c]GlyphInfo {
@@ -647,7 +672,6 @@ export fn LoadFontData(fileData: [*c]const u8, dataSize: c_int, fontSize: c_int,
         const fontInfo: ?*anyopaque = fontInfoBuf;
         // NOTE: stbtt_fontinfo is a zeroed opaque buffer (was a local `= {0}` in C).
 
-        // TODO: Should a shallow copy be created to avoid "dealing" with a const user array?
         var requiredCodepoints: [*c]c_int = @constCast(codepoints);
 
         if (stbtt_InitFont(fontInfo, fileData, 0) != 0) { // Initialize font for data reading
@@ -704,7 +728,11 @@ export fn LoadFontData(fileData: [*c]const u8, dataSize: c_int, fontSize: c_int,
                         FONT_DEFAULT, FONT_BITMAP => {
                             glyphs[uk].image.data = stbtt_GetCodepointBitmap(fontInfo, scaleFactor, scaleFactor, cp, &cpWidth, &cpHeight, &glyphs[uk].offsetX, &glyphs[uk].offsetY);
                         },
-                        // FONT_SDF path requires stbtt_GetCodepointSDF; not exercised in this build.
+                        FONT_SDF => {
+                            if (cp != 32) {
+                                glyphs[uk].image.data = stbtt_GetCodepointSDF(fontInfo, scaleFactor, cp, FONT_SDF_CHAR_PADDING, FONT_SDF_ON_EDGE_VALUE, FONT_SDF_PIXEL_DIST_SCALE, &cpWidth, &cpHeight, &glyphs[uk].offsetX, &glyphs[uk].offsetY);
+                            }
+                        },
                         else => {},
                     }
 
@@ -723,8 +751,8 @@ export fn LoadFontData(fileData: [*c]const u8, dataSize: c_int, fontSize: c_int,
                         glyphs[uk].offsetY += @intFromFloat(@as(f32, @floatFromInt(ascent)) * scaleFactor);
                     }
 
-                    // Create an empty image for Space character (0x20), useful for sprite font generation
-                    if ((cp == 0x20) or (cp == 0x3000)) {
+                    // Create an empty image for Unicode space characters, useful for sprite font generation
+                    if (isUnicodeSpace(cp)) {
                         stbtt_GetCodepointHMetrics(fontInfo, cp, &glyphs[uk].advanceX, null);
                         glyphs[uk].advanceX = @intFromFloat(@as(f32, @floatFromInt(glyphs[uk].advanceX)) * scaleFactor);
 
@@ -791,13 +819,11 @@ export fn GenImageFontAtlas(glyphs: [*c]const GlyphInfo, glyphRecs: [*c][*c]Rect
 
     // Calculate image size based on total glyph width and glyph row count
     var totalWidth: c_int = 0;
-    var maxGlyphWidth: c_int = 0;
 
     {
         var i: c_int = 0;
         while (i < glyphCount) : (i += 1) {
             const u: usize = @intCast(i);
-            if (glyphs[u].image.width > maxGlyphWidth) maxGlyphWidth = glyphs[u].image.width;
             totalWidth += glyphs[u].image.width + 2 * padding;
         }
     }
@@ -1438,7 +1464,8 @@ export fn LoadTextLines(text: [*c]const u8, count: [*c]c_int) callconv(.c) [*c][
         while (i <= textLength) : (i += 1) {
             if ((text[@intCast(i)] == '\n') or (text[@intCast(i)] == '\x00')) {
                 lines[@intCast(l)] = @ptrCast(RL_CALLOC(@intCast(lineLen + 1), 1));
-                _ = strncpy(lines[@intCast(l)], ptrAdd(text, i - lineLen), @intCast(lineLen));
+                const len: usize = @intCast(lineLen);
+                @memcpy(lines[@intCast(l)][0..len], ptrAdd(text, i - lineLen)[0..len]);
                 lineLen = 0;
                 l += 1;
             } else lineLen += 1;
@@ -1585,7 +1612,7 @@ export fn TextSubtext(text: [*c]const u8, position: c_int, length_in: c_int) cal
     _ = memset(&S.buffer, 0, MAX_TEXT_BUFFER_LENGTH);
 
     var length = length_in;
-    if (text != null) {
+    if ((text != null) and (position >= 0) and (length > 0)) {
         const textLength: c_int = @intCast(TextLength(text));
 
         if (position < textLength) {
@@ -1641,7 +1668,12 @@ export fn GetTextBetween(text: [*c]const u8, begin: [*c]const u8, end: [*c]const
         if (endIndex > -1) {
             endIndex += (beginIndex + beginLen);
             const len = (endIndex - beginIndex - beginLen);
-            if (len < (MAX_TEXT_BUFFER_LENGTH - 1)) _ = strncpy(&S.buffer, ptrAdd(text, beginIndex + beginLen), @intCast(len)) else _ = strncpy(&S.buffer, ptrAdd(text, beginIndex + beginLen), MAX_TEXT_BUFFER_LENGTH - 1);
+            const src = ptrAdd(text, beginIndex + beginLen);
+            if (len < (MAX_TEXT_BUFFER_LENGTH - 1)) {
+                @memcpy(S.buffer[0..@intCast(len)], src[0..@intCast(len)]);
+            } else {
+                _ = snprintf(&S.buffer, MAX_TEXT_BUFFER_LENGTH, "%s", src);
+            }
         }
     }
 
@@ -1702,7 +1734,7 @@ export fn TextReplace(text: [*c]const u8, search: [*c]const u8, replacement_in: 
             }
 
             // Copy remaind text part after replacement to result
-            _ = strncpy(tempPtr, textp, TextLength(textp));
+            @memcpy(tempPtr[0..TextLength(textp)], textp[0..TextLength(textp)]);
         } else TraceLog(LOG_WARNING, "Text with replacement is longer than internal buffer, use TextReplaceAlloc()");
     }
 
@@ -1764,7 +1796,7 @@ export fn TextReplaceAlloc(text: [*c]const u8, search: [*c]const u8, replacement
             }
 
             // Copy remaind text part after replacement to result
-            _ = strncpy(temp, textp, TextLength(textp));
+            @memcpy(temp[0..TextLength(textp)], textp[0..TextLength(textp)]);
         }
     }
 
@@ -1832,26 +1864,31 @@ export fn TextReplaceBetweenAlloc(text: [*c]const u8, begin: [*c]const u8, end: 
     return result;
 }
 
+/// Write `text` into `dest` with `insert` spliced in at `position` (<= text.len).
+/// `dest.len` must equal `text.len + insert.len`.
+fn spliceInsert(dest: []u8, text: []const u8, insert: []const u8, position: usize) void {
+    @memcpy(dest[0..position], text[0..position]);
+    @memcpy(dest[position..][0..insert.len], insert);
+    @memcpy(dest[position + insert.len ..], text[position..]);
+}
+
 // Insert text in a specific position, moves all text forward
-export fn TextInsert(text: [*c]const u8, insert: [*c]const u8, position: c_int) callconv(.c) [*c]u8 {
+export fn TextInsert(text: [*c]const u8, insert: [*c]const u8, position_in: c_int) callconv(.c) [*c]u8 {
     const S = struct {
         var buffer: [MAX_TEXT_BUFFER_LENGTH]u8 = std.mem.zeroes([MAX_TEXT_BUFFER_LENGTH]u8);
     };
     _ = memset(&S.buffer, 0, MAX_TEXT_BUFFER_LENGTH);
 
-    if ((text != null) and (insert != null)) {
-        const textLen: c_int = @intCast(TextLength(text));
-        const insertLen: c_int = @intCast(TextLength(insert));
+    const textLen: usize = TextLength(text);
+
+    if ((text != null) and (insert != null) and (position_in >= 0)) {
+        const position = @min(@as(usize, @intCast(position_in)), textLen); // Clamp to end of text string
+        const insertLen: usize = TextLength(insert);
 
         if ((textLen + insertLen) < (MAX_TEXT_BUFFER_LENGTH - 1)) {
-            var i: c_int = 0;
-            while (i < position) : (i += 1) S.buffer[@intCast(i)] = text[@intCast(i)];
-            i = position;
-            while (i < insertLen + position) : (i += 1) S.buffer[@intCast(i)] = insert[@intCast(i - position)];
-            i = insertLen + position;
-            while (i < textLen + insertLen) : (i += 1) S.buffer[@intCast(i)] = text[@intCast(i)];
+            spliceInsert(S.buffer[0 .. textLen + insertLen], text[0..textLen], insert[0..insertLen], position);
 
-            S.buffer[@intCast(textLen + insertLen)] = '\x00'; // Add EOL
+            S.buffer[textLen + insertLen] = '\x00'; // Add EOL
         } else TraceLog(LOG_WARNING, "Text with inserted string is longer than internal buffer, use TextInserExt()");
     }
 
@@ -1859,23 +1896,19 @@ export fn TextInsert(text: [*c]const u8, insert: [*c]const u8, position: c_int) 
 }
 
 // Insert text in a specific position, moves all text forward (allocates)
-export fn TextInsertAlloc(text: [*c]const u8, insert: [*c]const u8, position: c_int) callconv(.c) [*c]u8 {
+export fn TextInsertAlloc(text: [*c]const u8, insert: [*c]const u8, position_in: c_int) callconv(.c) [*c]u8 {
     var result: [*c]u8 = null;
+    const textLen: usize = TextLength(text);
 
-    if ((text != null) and (insert != null)) {
-        const textLen: c_int = @intCast(TextLength(text));
-        const insertLen: c_int = @intCast(TextLength(insert));
+    if ((text != null) and (insert != null) and (position_in >= 0)) {
+        const position = @min(@as(usize, @intCast(position_in)), textLen); // Clamp to end of text string
+        const insertLen: usize = TextLength(insert);
 
-        result = @ptrCast(RL_MALLOC(@intCast(textLen + insertLen + 1)));
+        result = @ptrCast(RL_MALLOC(textLen + insertLen + 1));
 
-        var i: c_int = 0;
-        while (i < position) : (i += 1) result[@intCast(i)] = text[@intCast(i)];
-        i = position;
-        while (i < insertLen + position) : (i += 1) result[@intCast(i)] = insert[@intCast(i - position)];
-        i = insertLen + position;
-        while (i < textLen + insertLen) : (i += 1) result[@intCast(i)] = text[@intCast(i)];
+        spliceInsert(result[0 .. textLen + insertLen], text[0..textLen], insert[0..insertLen], position);
 
-        result[@intCast(textLen + insertLen)] = '\x00'; // Add EOL
+        result[textLen + insertLen] = '\x00'; // Add EOL
     }
 
     return result;
@@ -1897,7 +1930,7 @@ export fn TextJoin(textList: [*c][*c]u8, count: c_int, delimiter: [*c]const u8) 
         const textLength: c_int = @intCast(TextLength(textList[@intCast(i)]));
 
         // Make sure joined text could fit inside MAX_TEXT_BUFFER_LENGTH
-        if ((totalLength + textLength) < MAX_TEXT_BUFFER_LENGTH) {
+        if ((totalLength + textLength + delimiterLen) < MAX_TEXT_BUFFER_LENGTH) {
             _ = memcpy(textPtr, textList[@intCast(i)], @intCast(textLength));
             totalLength += textLength;
             textPtr = ptrAdd(textPtr, textLength);
@@ -1928,8 +1961,9 @@ export fn TextSplit(text: [*c]const u8, delimiter: u8, count: [*c]c_int) callcon
         counter = 1;
 
         // Count how many substrings are found on text and set pointers to every one
+        // NOTE: Last buffer byte is reserved to terminate the last substring
         var i: usize = 0;
-        while (i < MAX_TEXT_BUFFER_LENGTH) : (i += 1) {
+        while (i < MAX_TEXT_BUFFER_LENGTH - 1) : (i += 1) {
             S.buffer[i] = text[i];
             if (S.buffer[i] == '\x00') break else if (S.buffer[i] == delimiter) {
                 S.buffer[i] = '\x00'; // Set an end of string at this point
@@ -2007,7 +2041,7 @@ export fn TextToPascal(text: [*c]const u8) callconv(.c) [*c]u8 {
     };
     _ = memset(&S.buffer, 0, MAX_TEXT_BUFFER_LENGTH);
 
-    if (text != null) {
+    if ((text != null) and (text[0] != '\x00')) {
         // Upper case first character
         if ((text[0] >= 'a') and (text[0] <= 'z')) S.buffer[0] = text[0] - 32 else S.buffer[0] = text[0];
 
@@ -2019,8 +2053,10 @@ export fn TextToPascal(text: [*c]const u8) callconv(.c) [*c]u8 {
             j += 1;
         }) {
             if (text[j] != '_') S.buffer[i] = text[j] else {
-                j += 1;
-                if ((text[j] >= 'a') and (text[j] <= 'z')) S.buffer[i] = text[j] - 32 else if ((text[j] >= '0') and (text[j] <= '9')) S.buffer[i] = text[j];
+                while (text[j] == '_') j += 1; // Skip one or more separators
+                if (text[j] == '\x00') break; // Text ends on a separator, nothing left to copy
+
+                S.buffer[i] = std.ascii.toUpper(text[j]); // Non-letters are copied as is
             }
         }
     }
@@ -2036,20 +2072,38 @@ export fn TextToSnake(text: [*c]const u8) callconv(.c) [*c]u8 {
     _ = memset(&S.buffer, 0, MAX_TEXT_BUFFER_LENGTH);
 
     if (text != null) {
-        // Check for next separator to upper case another character
+        // Insert a '_' separator at word boundaries (spaces and case changes)
         var i: usize = 0;
         var j: usize = 0;
-        while ((i < MAX_TEXT_BUFFER_LENGTH - 1) and (text[j] != '\x00')) : ({
-            i += 1;
-            j += 1;
-        }) {
-            if ((text[j] >= 'A') and (text[j] <= 'Z')) {
-                if (i >= 1) {
+        while ((i < MAX_TEXT_BUFFER_LENGTH - 1) and (text[j] != '\x00')) : (j += 1) {
+            const c = text[j];
+            const canSeparate = (i > 0) and (S.buffer[i - 1] != '_');
+
+            if (c == ' ') {
+                if (canSeparate) {
                     S.buffer[i] = '_';
                     i += 1;
                 }
-                S.buffer[i] = text[j] + 32;
-            } else S.buffer[i] = text[j];
+            } else if (std.ascii.isUpper(c)) {
+                if (canSeparate) {
+                    const prev = text[j - 1];
+                    const next = text[j + 1];
+
+                    // Consider consecutive capitals a single word (HTTPRequest --> http_request)
+                    if (std.ascii.isLower(prev) or (std.ascii.isUpper(prev) and std.ascii.isLower(next))) {
+                        if (i < MAX_TEXT_BUFFER_LENGTH - 2) {
+                            S.buffer[i] = '_';
+                            i += 1;
+                        }
+                    }
+                }
+
+                S.buffer[i] = c + 32;
+                i += 1;
+            } else {
+                S.buffer[i] = c;
+                i += 1;
+            }
         }
     }
 
@@ -2063,7 +2117,7 @@ export fn TextToCamel(text: [*c]const u8) callconv(.c) [*c]u8 {
     };
     _ = memset(&S.buffer, 0, MAX_TEXT_BUFFER_LENGTH);
 
-    if (text != null) {
+    if ((text != null) and (text[0] != '\x00')) {
         // Lower case first character
         if ((text[0] >= 'A') and (text[0] <= 'Z')) S.buffer[0] = text[0] + 32 else S.buffer[0] = text[0];
 
@@ -2075,8 +2129,10 @@ export fn TextToCamel(text: [*c]const u8) callconv(.c) [*c]u8 {
             j += 1;
         }) {
             if (text[j] != '_') S.buffer[i] = text[j] else {
-                j += 1;
-                if ((text[j] >= 'a') and (text[j] <= 'z')) S.buffer[i] = text[j] - 32;
+                while (text[j] == '_') j += 1; // Skip one or more separators
+                if (text[j] == '\x00') break; // Text ends on a separator, nothing left to copy
+
+                S.buffer[i] = std.ascii.toUpper(text[j]); // Non-letters are copied as is
             }
         }
     }
