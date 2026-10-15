@@ -245,7 +245,7 @@ const SaveFileTextCallback = ?*const fn (fileName: [*c]const u8, text: [*c]u8) c
 //----------------------------------------------------------------------------------
 // Defines and Macros
 //----------------------------------------------------------------------------------
-const RAYLIB_VERSION = "5.6-dev";
+const RAYLIB_VERSION = "6.2";
 
 const MAX_TRACELOG_MSG_LENGTH: usize = 256;
 const MAX_FILEPATH_CAPACITY: usize = 8192;
@@ -1539,6 +1539,7 @@ export fn SetTargetFPS(fps: c_int) callconv(.c) void {
 }
 
 var fps_index: c_int = 0;
+var fps_capture_frames_counted: c_uint = 0;
 var fps_history: [30]f32 = std.mem.zeroes([30]f32);
 var fps_average: f32 = 0;
 var fps_last: f32 = 0;
@@ -1555,6 +1556,7 @@ export fn GetFPS() callconv(.c) c_int {
         fps_average = 0;
         fps_last = 0;
         fps_index = 0;
+        fps_capture_frames_counted = 0;
         var i: usize = 0;
         while (i < FPS_CAPTURE_FRAMES_COUNT) : (i += 1) fps_history[i] = 0;
     }
@@ -1566,8 +1568,14 @@ export fn GetFPS() callconv(.c) c_int {
             fps_average -= fps_history[@intCast(fps_index)];
             fps_history[@intCast(fps_index)] = fpsFrame / @as(f32, @floatFromInt(FPS_CAPTURE_FRAMES_COUNT));
             fps_average += fps_history[@intCast(fps_index)];
+
+            if (fps_capture_frames_counted < FPS_CAPTURE_FRAMES_COUNT) fps_capture_frames_counted += 1;
         }
-        fps = @intFromFloat(roundf(1.0 / fps_average));
+
+        if (fps_capture_frames_counted > 0) {
+            const counted: f32 = @floatFromInt(fps_capture_frames_counted);
+            fps = @intFromFloat(roundf(counted / (fps_average * @as(f32, @floatFromInt(FPS_CAPTURE_FRAMES_COUNT)))));
+        }
     } else fps = 0;
 
     return fps;
@@ -1637,7 +1645,8 @@ export fn TakeScreenshot(fileName: [*c]const u8) callconv(.c) void {
     const image = Image{ .data = imgData, .width = w, .height = h, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
     var path: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
-    _ = strncpy(&path, TextFormat("%s/%s", CORE.Storage.basePath, fileName), MAX_FILEPATH_LENGTH - 1);
+    const fullPath = if (!IsPathAbsolute(fileName)) TextFormat("%s/%s", CORE.Storage.basePath, fileName) else fileName;
+    _ = strncpy(&path, fullPath, MAX_FILEPATH_LENGTH - 1); // == snprintf("%s") into a zeroed buffer
 
     _ = ExportImage(image, &path);
     RL_FREE(imgData);
@@ -1671,15 +1680,16 @@ export fn TraceLog(logType: c_int, text: [*c]const u8, ...) callconv(.c) void {
 
     var buffer: [MAX_TRACELOG_MSG_LENGTH]u8 = std.mem.zeroes([MAX_TRACELOG_MSG_LENGTH]u8);
 
-    switch (logType) {
-        LOG_TRACE => _ = strncpy(&buffer, "TRACE: ", 8),
-        LOG_DEBUG => _ = strncpy(&buffer, "DEBUG: ", 8),
-        LOG_INFO => _ = strncpy(&buffer, "INFO: ", 7),
-        LOG_WARNING => _ = strncpy(&buffer, "WARNING: ", 10),
-        LOG_ERROR => _ = strncpy(&buffer, "ERROR: ", 8),
-        LOG_FATAL => _ = strncpy(&buffer, "FATAL: ", 8),
-        else => {},
-    }
+    const prefix: []const u8 = switch (logType) {
+        LOG_TRACE => "TRACE: ",
+        LOG_DEBUG => "DEBUG: ",
+        LOG_INFO => "INFO: ",
+        LOG_WARNING => "WARNING: ",
+        LOG_ERROR => "ERROR: ",
+        LOG_FATAL => "FATAL: ",
+        else => "",
+    };
+    @memcpy(buffer[0..prefix.len], prefix);
 
     const textLength: c_uint = @intCast(strlen(text));
     const blen = strlen(&buffer);
@@ -1936,9 +1946,11 @@ export fn FileTextReplace(fileName: [*c]const u8, search: [*c]const u8, replacem
     if (FileExists(fileName)) {
         const fileText = LoadFileText(fileName);
         const fileTextUpdated = TextReplaceAlloc(fileText, search, replacement);
-        const saved = SaveFileText(fileName, fileTextUpdated);
-        if (saved) result = 0;
-        MemFree(@ptrCast(fileTextUpdated));
+        if (fileTextUpdated != null) {
+            const saved = SaveFileText(fileName, fileTextUpdated);
+            if (saved) result = 0;
+            MemFree(@ptrCast(fileTextUpdated));
+        }
         UnloadFileText(fileText);
     }
 
@@ -1949,9 +1961,11 @@ export fn FileTextFindIndex(fileName: [*c]const u8, search: [*c]const u8) callco
     var result: c_int = -1;
     if (FileExists(fileName)) {
         const fileText = LoadFileText(fileName);
-        const ptr = strstr(fileText, search);
-        if (ptr != null) result = @intCast(@intFromPtr(ptr) - @intFromPtr(fileText));
-        UnloadFileText(fileText);
+        if (fileText != null) {
+            const ptr = strstr(fileText, search);
+            if (ptr != null) result = @intCast(@intFromPtr(ptr) - @intFromPtr(fileText));
+            UnloadFileText(fileText);
+        }
     }
     return result;
 }
@@ -2008,6 +2022,16 @@ export fn IsFileExtension(fileName: [*c]const u8, ext: [*c]const u8) callconv(.c
     }
 
     return result;
+}
+
+/// POSIX rule: a file or directory is hidden when its base name starts with '.'
+/// (the "." and ".." entries excepted).
+export fn IsFileHidden(filePath: [*c]const u8) callconv(.c) bool {
+    const path = std.mem.span(filePath);
+    const baseName = if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| path[slash + 1 ..] else path;
+
+    return std.mem.startsWith(u8, baseName, ".") and
+        !std.mem.eql(u8, baseName, ".") and !std.mem.eql(u8, baseName, "..");
 }
 
 export fn DirectoryExists(dirPath: [*c]const u8) callconv(.c) bool {
@@ -2114,18 +2138,28 @@ export fn GetDirectoryPath(filePath: [*c]const u8) callconv(.c) [*c]const u8 {
 
 var gpdp_prevDirPath: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
 export fn GetPrevDirectoryPath(dirPath: [*c]const u8) callconv(.c) [*c]const u8 {
-    _ = memset(@ptrCast(&gpdp_prevDirPath), 0, MAX_FILEPATH_LENGTH);
-    const dirPathLength: c_int = @intCast(strlen(dirPath));
+    @memset(&gpdp_prevDirPath, 0);
 
-    if (dirPathLength <= 3) _ = strncpy(&gpdp_prevDirPath, dirPath, MAX_FILEPATH_LENGTH - 1);
+    const path = std.mem.span(dirPath);
+    // A file path first drops its file name, then its last directory
+    var isFile = IsPathFile(dirPath);
+    var i: isize = @as(isize, @intCast(path.len)) - 1;
+    while (i >= 0) : (i -= 1) {
+        const idx: usize = @intCast(i);
+        if ((path[idx] != '\\') and (path[idx] != '/')) continue;
 
-    var i: c_int = dirPathLength - 1;
-    while ((i >= 0) and (dirPathLength > 3)) : (i -= 1) {
-        if ((dirPath[@intCast(i)] == '\\') or (dirPath[@intCast(i)] == '/')) {
-            if (((i == 2) and (dirPath[1] == ':')) or (i == 0)) i += 1;
-            _ = strncpy(&gpdp_prevDirPath, dirPath, @intCast(i));
+        // A leading '/' ("/usr") or a drive root ("C:\\") is kept in the result;
+        // a trailing separator ("/usr/bin/") is skipped
+        if ((idx == 0) or ((idx == 2) and (path[1] == ':'))) {
+            i += 1;
+        } else if (idx == path.len - 1) continue;
+
+        if (!isFile) {
+            const len: usize = @intCast(i);
+            @memcpy(gpdp_prevDirPath[0..len], path[0..len]);
             break;
         }
+        isFile = false;
     }
 
     return &gpdp_prevDirPath;
@@ -2230,9 +2264,20 @@ export fn ChangeDirectory(dirPath: [*c]const u8) callconv(.c) c_int {
 }
 
 export fn IsPathFile(path: [*c]const u8) callconv(.c) bool {
-    var result = std.mem.zeroes(stat_t);
-    _ = stat(path, &result);
-    return (result.st_mode & S_IFMT) == S_IFREG;
+    var info = std.mem.zeroes(stat_t);
+    _ = stat(path, &info);
+    return (info.st_mode & S_IFMT) == S_IFREG;
+}
+
+/// NOTE: Mirrors raylib 6.2 exactly: any path that is not a regular file
+/// (including a nonexistent one) is reported as a directory.
+export fn IsPathDirectory(path: [*c]const u8) callconv(.c) bool {
+    return !IsPathFile(path);
+}
+
+/// POSIX rule: an absolute path starts with '/'.
+export fn IsPathAbsolute(path: [*c]const u8) callconv(.c) bool {
+    return (path != null) and (path[0] == '/');
 }
 
 export fn IsFileNameValid(fileName: [*c]const u8) callconv(.c) bool {
@@ -2707,7 +2752,7 @@ export fn ComputeSHA256(data: [*c]const u8, dataSize: c_int) callconv(.c) [*c]c_
     hash[7] = 0x5be0cd19;
 
     const bitLen: u64 = 8 *% @as(u64, @intCast(dataSize));
-    var paddedSize: u64 = @as(u64, @intCast(dataSize)) + @sizeOf(c_int);
+    var paddedSize: u64 = @as(u64, @intCast(dataSize)) + @sizeOf(u64); // room for the 64-bit message length
     paddedSize += (64 - (paddedSize % 64));
     const buffer: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(paddedSize), 1)));
 
@@ -2796,10 +2841,10 @@ export fn LoadAutomationEventList(fileName: [*c]const u8) callconv(.c) Automatio
             while (feof(raeFile) == 0) {
                 switch (buffer[0]) {
                     'c' => _ = sscanf(&buffer, "c %i", &list.count),
-                    'e' => {
-                        _ = sscanf(&buffer, "e %d %d %d %d %d %d %[^\n]s", &list.events[counter].frame, &list.events[counter].type, &list.events[counter].params[0], &list.events[counter].params[1], &list.events[counter].params[2], &list.events[counter].params[3], &eventDesc);
+                    'e' => if (counter < list.capacity) {
+                        _ = sscanf(&buffer, "e %d %d %d %d %d %d %63[^\n]s", &list.events[counter].frame, &list.events[counter].type, &list.events[counter].params[0], &list.events[counter].params[1], &list.events[counter].params[2], &list.events[counter].params[3], &eventDesc);
                         counter += 1;
-                    },
+                    } else TraceLog(LOG_WARNING, "AUTOMATION: Event goes beyond automated list capacity (MAX: %u): %s", list.capacity, &buffer),
                     else => {},
                 }
                 result = fgets(&buffer, 256, raeFile);
@@ -3517,11 +3562,13 @@ export fn ToggleBorderlessWindowed() callconv(.c) void {
                 glfwFocusWindow(platform.handle);
                 flagSet(&CORE.Window.flags, FLAG_BORDERLESS_WINDOWED_MODE);
             } else {
-                CORE.Window.position = CORE.Window.previousPosition;
-                CORE.Window.screen = CORE.Window.previousScreen;
-
+                // Decorating resizes the window and fires FramebufferSizeCallback(), which
+                // overwrites screen size and position: decorate before restoring them
                 glfwSetWindowAttrib(platform.handle, GLFW_DECORATED, GLFW_TRUE);
                 flagClear(&CORE.Window.flags, FLAG_WINDOW_UNDECORATED);
+
+                CORE.Window.position = CORE.Window.previousPosition;
+                CORE.Window.screen = CORE.Window.previousScreen;
 
                 if (flagIsSet(CORE.Window.flags, FLAG_WINDOW_HIGHDPI)) {
                     const scaleDpi = GetWindowScaleDPI();
@@ -3935,6 +3982,8 @@ export fn GetMonitorName(monitor: c_int) callconv(.c) [*c]const u8 {
 }
 
 export fn GetWindowPosition() callconv(.c) Vector2 {
+    glfwGetWindowPos(platform.handle, &CORE.Window.position.x, &CORE.Window.position.y);
+
     return .{ .x = @floatFromInt(CORE.Window.position.x), .y = @floatFromInt(CORE.Window.position.y) };
 }
 
@@ -3994,10 +4043,13 @@ export fn GetTime() callconv(.c) f64 {
 }
 
 export fn OpenURL(url: [*c]const u8) callconv(.c) void {
-    if (strchr(url, '\'') != null) {
-        TraceLog(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid ['] character");
+    const urlText = std.mem.span(url);
+    if (std.mem.indexOfAny(u8, urlText, "'\"") != null) {
+        TraceLog(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid ['\"] characters");
+    } else if (!std.mem.startsWith(u8, urlText, "http://") and !std.mem.startsWith(u8, urlText, "https://")) {
+        TraceLog(LOG_WARNING, "SYSTEM: Provided URL must start with 'http://' or 'https://' protocols");
     } else {
-        const cmd: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(strlen(url) + 32, 1)));
+        const cmd: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(urlText.len + 16, 1)));
         _ = sprintf(cmd, "xdg-open '%s'", url);
         const result = system(cmd);
         if (result == -1) TraceLog(LOG_WARNING, "OpenURL() child process could not be created");
@@ -4023,7 +4075,6 @@ export fn SetGamepadVibration(gamepad: c_int, leftMotor: f32, rightMotor: f32, d
 
 export fn SetMousePosition(x: c_int, y: c_int) callconv(.c) void {
     CORE.Input.Mouse.currentPosition = .{ .x = @floatFromInt(x), .y = @floatFromInt(y) };
-    CORE.Input.Mouse.previousPosition = CORE.Input.Mouse.currentPosition;
     glfwSetCursorPos(platform.handle, CORE.Input.Mouse.currentPosition.x, CORE.Input.Mouse.currentPosition.y);
 }
 
@@ -4247,7 +4298,7 @@ fn WindowDropCallback(window: ?*GLFWwindow, count: c_int, paths: [*c][*c]const u
 fn KeyCallback(window: ?*GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.c) void {
     _ = window;
     _ = scancode;
-    if (key < 0) return;
+    if ((key < 0) or (key >= MAX_KEYBOARD_KEYS)) return; // macOS fn key generates -1
 
     if (action == GLFW_RELEASE) CORE.Input.Keyboard.currentKeyState[@intCast(key)] = 0 else if (action == GLFW_PRESS) CORE.Input.Keyboard.currentKeyState[@intCast(key)] = 1 else if (action == GLFW_REPEAT) CORE.Input.Keyboard.keyRepeatInFrame[@intCast(key)] = 1;
 
@@ -4401,13 +4452,14 @@ export fn InitPlatform() callconv(.c) c_int {
 
     if ((CORE.Window.screen.width == 0) or (CORE.Window.screen.height == 0)) flagSet(&CORE.Window.flags, FLAG_FULLSCREEN_MODE);
 
-    if (flagIsSet(CORE.Window.flags, FLAG_FULLSCREEN_MODE)) {
-        const monitor = glfwGetPrimaryMonitor();
-        if (monitor == null) {
-            TraceLog(LOG_WARNING, "GLFW: Failed to get primary monitor");
-            return -1;
-        }
+    // NOTE: Fullscreen applications default to the primary monitor
+    const monitor = glfwGetPrimaryMonitor();
+    if (monitor == null) {
+        TraceLog(LOG_WARNING, "GLFW: Failed to get primary monitor");
+        return -1;
+    }
 
+    if (flagIsSet(CORE.Window.flags, FLAG_FULLSCREEN_MODE)) {
         const mode = glfwGetVideoMode(monitor).?;
         CORE.Window.display.width = @intCast(mode.width);
         CORE.Window.display.height = @intCast(mode.height);
@@ -4435,6 +4487,17 @@ export fn InitPlatform() callconv(.c) c_int {
         if (CORE.Window.screen.width == 0) CORE.Window.screen.width = 1;
         if (CORE.Window.screen.height == 0) CORE.Window.screen.height = 1;
 
+        // GLFW won't show a non-fullscreen window larger than the monitor work area
+        // (screen minus taskbar/docks), so clamp the requested size to it.
+        // C compares unsigned against (unsigned int)work size: replicate the bitcast.
+        var workX: c_int = 0;
+        var workY: c_int = 0;
+        var workWidth: c_int = 0;
+        var workHeight: c_int = 0;
+        glfwGetMonitorWorkarea(monitor, &workX, &workY, &workWidth, &workHeight);
+        CORE.Window.screen.width = @min(CORE.Window.screen.width, @as(c_uint, @bitCast(workWidth)));
+        CORE.Window.screen.height = @min(CORE.Window.screen.height, @as(c_uint, @bitCast(workHeight)));
+
         platform.handle = glfwCreateWindow(@intCast(CORE.Window.screen.width), @intCast(CORE.Window.screen.height), if (CORE.Window.title != null) CORE.Window.title else " ", null, null);
         if (platform.handle == null) {
             glfwTerminate();
@@ -4447,8 +4510,8 @@ export fn InitPlatform() callconv(.c) c_int {
         const monitors = glfwGetMonitors(&monitorCount);
 
         if (monitorIndex < monitorCount) {
-            const monitor = monitors.?[@intCast(monitorIndex)];
-            const mode = glfwGetVideoMode(monitor).?;
+            const current = monitors.?[@intCast(monitorIndex)];
+            const mode = glfwGetVideoMode(current).?;
 
             CORE.Window.display.width = @intCast(mode.width);
             CORE.Window.display.height = @intCast(mode.height);
@@ -4510,13 +4573,13 @@ export fn InitPlatform() callconv(.c) c_int {
         var monitorCount: c_int = 0;
         const monitorIndex = GetCurrentMonitor();
         const monitors = glfwGetMonitors(&monitorCount);
-        const monitor = monitors.?[@intCast(monitorIndex)];
+        const current = monitors.?[@intCast(monitorIndex)];
 
         var monitorX: c_int = 0;
         var monitorY: c_int = 0;
         var monitorWidth: c_int = 0;
         var monitorHeight: c_int = 0;
-        glfwGetMonitorWorkarea(monitor, &monitorX, &monitorY, &monitorWidth, &monitorHeight);
+        glfwGetMonitorWorkarea(current, &monitorX, &monitorY, &monitorWidth, &monitorHeight);
 
         CORE.Window.position.x = monitorX + @divTrunc(monitorWidth - @as(c_int, @intCast(CORE.Window.render.width)), 2);
         CORE.Window.position.y = monitorY + @divTrunc(monitorHeight - @as(c_int, @intCast(CORE.Window.render.height)), 2);
