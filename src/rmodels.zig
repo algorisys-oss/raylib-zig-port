@@ -57,7 +57,12 @@ const EPSILON: f32 = 0.000001;
 // Defines and Macros
 //----------------------------------------------------------------------------------
 const MAX_MATERIAL_MAPS: c_int = 12;
-const MAX_MESH_VERTEX_BUFFERS: c_int = 7; // SUPPORT_GPU_SKINNING is off in this build
+/// Mirrors config.h `SUPPORT_GPU_SKINNING` (on by default since raylib 6.2): bone
+/// indices/weights get their own VBOs and are bound to the shader on draw.
+const SUPPORT_GPU_SKINNING = true;
+
+// NOTE: GPU skinning needs two additional vertex buffers (bone indices and weights)
+const MAX_MESH_VERTEX_BUFFERS: c_int = if (SUPPORT_GPU_SKINNING) 9 else 7;
 const MAX_FILEPATH_LENGTH: usize = 4096;
 
 // Default shader vertex attribute locations (from rlgl.h)
@@ -68,6 +73,8 @@ const RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR: c_uint = 3;
 const RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT: c_uint = 4;
 const RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2: c_uint = 5;
 const RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES: c_uint = 6;
+const RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES: c_uint = 7;
+const RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS: c_uint = 8;
 
 // rlgl data types
 const RL_UNSIGNED_BYTE: c_int = 0x1401;
@@ -238,7 +245,7 @@ pub const Mesh = extern struct {
 pub const ModelAnimPose = [*c]Transform;
 
 pub const ModelSkeleton = extern struct {
-    boneCount: c_int,
+    boneCount: c_uint,
     bones: [*c]BoneInfo,
     bindPose: ModelAnimPose,
 };
@@ -260,7 +267,7 @@ pub const Model = extern struct {
 
 pub const ModelAnimation = extern struct {
     name: [32]u8,
-    boneCount: c_int,
+    boneCount: c_uint,
     keyframeCount: c_int,
     keyframePoses: [*c]ModelAnimPose,
 };
@@ -308,6 +315,7 @@ extern fn GetDirectoryPath(filePath: [*c]const u8) [*c]const u8;
 extern fn GetWorkingDirectory() [*c]const u8;
 extern fn IsFileExtension(fileName: [*c]const u8, ext: [*c]const u8) bool;
 extern fn TextFormat(text: [*c]const u8, ...) [*c]const u8;
+extern fn TextLength(text: [*c]const u8) c_uint;
 extern fn MemAlloc(size: c_uint) ?*anyopaque;
 extern fn MemFree(ptr: ?*anyopaque) void;
 
@@ -663,6 +671,16 @@ export fn DrawSphere(centerPos: Vector3, radius: f32, color: Color) callconv(.c)
     DrawSphereEx(centerPos, radius, 16, 16, color);
 }
 
+// Rotation of a sphere vertex around the y axis by the slice angle
+fn rotateSlice(v: Vector3, cosslice: f32, sinslice: f32) Vector3 {
+    return .{ .x = cosslice * v.x - sinslice * v.z, .y = v.y, .z = sinslice * v.x + cosslice * v.z };
+}
+
+// Rotation of a sphere vertex around the z axis by the ring angle
+fn rotateRing(v: Vector3, cosring: f32, sinring: f32) Vector3 {
+    return .{ .x = cosring * v.x + sinring * v.y, .y = -sinring * v.x + cosring * v.y, .z = v.z };
+}
+
 // Draw sphere with defined rings and slices
 export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_int, color: Color) callconv(.c) void {
     rlPushMatrix();
@@ -672,7 +690,7 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
     rlBegin(RL_TRIANGLES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    const ringangle = DEG2RAD * (180.0 / @as(f32, @floatFromInt(rings + 1))); // Angle between latitudinal parallels
+    const ringangle = DEG2RAD * (180.0 / @as(f32, @floatFromInt(rings))); // Angle between latitudinal parallels
     const sliceangle = DEG2RAD * (360.0 / @as(f32, @floatFromInt(slices))); // Angle between longitudinal meridians
 
     const cosring = cosf(ringangle);
@@ -688,17 +706,13 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
     };
 
     var i: c_int = 0;
-    while (i < rings + 1) : (i += 1) {
+    while (i < rings) : (i += 1) {
         var j: c_int = 0;
         while (j < slices) : (j += 1) {
             vertices[0] = vertices[2]; // Rotate around y axis to set up vertices for next face
             vertices[1] = vertices[3];
-            // Snapshot before rebuilding: `vertices[n] = .{ ... }` writes fields in
-            // place (result location), so the .z init would read the new .x.
-            const v2 = vertices[2];
-            const v3 = vertices[3];
-            vertices[2] = .{ .x = cosslice * v2.x - sinslice * v2.z, .y = v2.y, .z = sinslice * v2.x + cosslice * v2.z };
-            vertices[3] = .{ .x = cosslice * v3.x - sinslice * v3.z, .y = v3.y, .z = sinslice * v3.x + cosslice * v3.z };
+            vertices[2] = rotateSlice(vertices[2], cosslice, sinslice);
+            vertices[3] = rotateSlice(vertices[3], cosslice, sinslice);
 
             rlNormal3f(vertices[0].x, vertices[0].y, vertices[0].z);
             rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
@@ -716,8 +730,7 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
         }
 
         vertices[2] = vertices[3]; // Rotate around z axis to set up starting vertices for next ring
-        const v3ring = vertices[3];
-        vertices[3] = .{ .x = cosring * v3ring.x + sinring * v3ring.y, .y = -sinring * v3ring.x + cosring * v3ring.y, .z = v3ring.z };
+        vertices[3] = rotateRing(vertices[3], cosring, sinring);
     }
     rlEnd();
     rlPopMatrix();
@@ -732,25 +745,45 @@ export fn DrawSphereWires(centerPos: Vector3, radius: f32, rings: c_int, slices:
     rlBegin(RL_LINES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    const fr = @as(f32, @floatFromInt(rings + 1));
-    const fs = @as(f32, @floatFromInt(slices));
+    const ringangle = DEG2RAD * (180.0 / @as(f32, @floatFromInt(rings))); // Angle between latitudinal parallels
+    const sliceangle = DEG2RAD * (360.0 / @as(f32, @floatFromInt(slices))); // Angle between longitudinal meridians
+
+    const cosring = cosf(ringangle);
+    const sinring = sinf(ringangle);
+    const cosslice = cosf(sliceangle);
+    const sinslice = sinf(sliceangle);
+
+    var vertices = [4]Vector3{
+        .{ .x = 0, .y = 0, .z = 0 },
+        .{ .x = 0, .y = 0, .z = 0 },
+        .{ .x = 0, .y = 1, .z = 0 },
+        .{ .x = sinring, .y = cosring, .z = 0 },
+    };
+
     var i: c_int = 0;
-    while (i < (rings + 2)) : (i += 1) {
-        const fi = @as(f32, @floatFromInt(i));
-        const fi1 = @as(f32, @floatFromInt(i + 1));
+    while (i < rings) : (i += 1) {
         var j: c_int = 0;
         while (j < slices) : (j += 1) {
-            const fj = @as(f32, @floatFromInt(j));
-            const fj1 = @as(f32, @floatFromInt(j + 1));
-            rlVertex3f(cosf(DEG2RAD * (270 + (180.0 / fr) * fi)) * sinf(DEG2RAD * (360.0 * fj / fs)), sinf(DEG2RAD * (270 + (180.0 / fr) * fi)), cosf(DEG2RAD * (270 + (180.0 / fr) * fi)) * cosf(DEG2RAD * (360.0 * fj / fs)));
-            rlVertex3f(cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * sinf(DEG2RAD * (360.0 * fj1 / fs)), sinf(DEG2RAD * (270 + (180.0 / fr) * fi1)), cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * cosf(DEG2RAD * (360.0 * fj1 / fs)));
+            vertices[0] = vertices[2]; // Rotate around y axis to set up vertices for next face
+            vertices[1] = vertices[3];
+            vertices[2] = rotateSlice(vertices[2], cosslice, sinslice);
+            vertices[3] = rotateSlice(vertices[3], cosslice, sinslice);
 
-            rlVertex3f(cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * sinf(DEG2RAD * (360.0 * fj1 / fs)), sinf(DEG2RAD * (270 + (180.0 / fr) * fi1)), cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * cosf(DEG2RAD * (360.0 * fj1 / fs)));
-            rlVertex3f(cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * sinf(DEG2RAD * (360.0 * fj / fs)), sinf(DEG2RAD * (270 + (180.0 / fr) * fi1)), cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * cosf(DEG2RAD * (360.0 * fj / fs)));
+            // Longitude lines
+            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
+            rlVertex3f(vertices[1].x, vertices[1].y, vertices[1].z);
 
-            rlVertex3f(cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * sinf(DEG2RAD * (360.0 * fj / fs)), sinf(DEG2RAD * (270 + (180.0 / fr) * fi1)), cosf(DEG2RAD * (270 + (180.0 / fr) * fi1)) * cosf(DEG2RAD * (360.0 * fj / fs)));
-            rlVertex3f(cosf(DEG2RAD * (270 + (180.0 / fr) * fi)) * sinf(DEG2RAD * (360.0 * fj / fs)), sinf(DEG2RAD * (270 + (180.0 / fr) * fi)), cosf(DEG2RAD * (270 + (180.0 / fr) * fi)) * cosf(DEG2RAD * (360.0 * fj / fs)));
+            // Latitude lines
+            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
+            rlVertex3f(vertices[2].x, vertices[2].y, vertices[2].z);
+
+            // Diagonal lines
+            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
+            rlVertex3f(vertices[3].x, vertices[3].y, vertices[3].z);
         }
+
+        vertices[2] = vertices[3]; // Rotate around z axis to set up starting vertices for next ring
+        vertices[3] = rotateRing(vertices[3], cosring, sinring);
     }
     rlEnd();
     rlPopMatrix();
@@ -2157,6 +2190,16 @@ export fn IsModelValid(model: Model) callconv(.c) bool {
             result = false;
             break;
         }
+        if (SUPPORT_GPU_SKINNING) {
+            if ((m.boneIndices != null) and (m.vboId[7] == 0)) {
+                result = false;
+                break;
+            }
+            if ((m.boneWeights != null) and (m.vboId[8] == 0)) {
+                result = false;
+                break;
+            }
+        }
     }
 
     return result;
@@ -2229,6 +2272,10 @@ export fn UploadMesh(mesh: [*c]Mesh, dynamic: bool) callconv(.c) void {
     mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT] = 0;
     mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2] = 0;
     mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES] = 0;
+    if (SUPPORT_GPU_SKINNING) {
+        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES] = 0;
+        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS] = 0;
+    }
 
     mesh.*.vaoId = rlLoadVertexArray();
 
@@ -2292,6 +2339,29 @@ export fn UploadMesh(mesh: [*c]Mesh, dynamic: bool) callconv(.c) void {
         rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2);
     }
 
+    if (SUPPORT_GPU_SKINNING) {
+        if (mesh.*.boneIndices != null) {
+            mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES] = rlLoadVertexBuffer(mesh.*.boneIndices, mesh.*.vertexCount * 4 * @sizeOf(u8), dynamic);
+            rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES, 4, RL_UNSIGNED_BYTE, false, 0, 0);
+            rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES);
+        } else {
+            const value = [4]f32{ 0.0, 0.0, 0.0, 0.0 };
+            rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES), &value, SHADER_ATTRIB_VEC4, 4);
+            rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES);
+        }
+
+        if (mesh.*.boneWeights != null) {
+            mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS] = rlLoadVertexBuffer(mesh.*.boneWeights, mesh.*.vertexCount * 4 * @sizeOf(f32), dynamic);
+            rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS, 4, RL_FLOAT, false, 0, 0);
+            rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS);
+        } else {
+            // NOTE: Component count 2 (not 4) matches upstream rmodels.c exactly
+            const value = [4]f32{ 0.0, 0.0, 0.0, 0.0 };
+            rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS), &value, SHADER_ATTRIB_VEC4, 2);
+            rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS);
+        }
+    }
+
     if (mesh.*.indices != null) {
         mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES] = rlLoadVertexBufferElement(mesh.*.indices, mesh.*.triangleCount * 3 * @sizeOf(c_ushort), dynamic);
     }
@@ -2329,6 +2399,21 @@ export fn UnloadMesh(mesh: Mesh) callconv(.c) void {
 
     RL_FREE(mesh.animVertices);
     RL_FREE(mesh.animNormals);
+}
+
+// Bind mesh bone ids and bone weights VBOs to the shader attributes, if the shader uses them
+fn bindBoneVertexBuffers(mesh: Mesh, shader: Shader) void {
+    if (shader.locs[SHADER_LOC_VERTEX_BONEIDS] != -1) {
+        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES]);
+        rlSetVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEIDS]), 4, RL_UNSIGNED_BYTE, false, 0, 0);
+        rlEnableVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEIDS]));
+    }
+
+    if (shader.locs[SHADER_LOC_VERTEX_BONEWEIGHTS] != -1) {
+        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS]);
+        rlSetVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEWEIGHTS]), 4, RL_FLOAT, false, 0, 0);
+        rlEnableVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEWEIGHTS]));
+    }
 }
 
 // Draw a 3d mesh with material and transform
@@ -2427,6 +2512,8 @@ export fn DrawMesh(mesh: Mesh, material: Material, transform: Matrix) callconv(.
             rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]), 2, RL_FLOAT, false, 0, 0);
             rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]));
         }
+
+        if (SUPPORT_GPU_SKINNING) bindBoneVertexBuffers(mesh, material.shader);
 
         if (mesh.indices != null) rlEnableVertexBufferElement(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES]);
     }
@@ -2578,6 +2665,8 @@ export fn DrawMeshInstanced(mesh: Mesh, material: Material, transforms: [*c]cons
             rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]), 2, RL_FLOAT, false, 0, 0);
             rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]));
         }
+
+        if (SUPPORT_GPU_SKINNING) bindBoneVertexBuffers(mesh, material.shader);
 
         if (mesh.indices != null) rlEnableVertexBufferElement(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES]);
     }
@@ -2921,8 +3010,10 @@ export fn LoadModelAnimations(fileName: [*c]const u8, animCount: [*c]c_int) call
     return animations;
 }
 
-// Update model animation data (vertex buffers / bone matrices) for a specific pose
-export fn UpdateModelAnimation(model: Model, anim: ModelAnimation, frame: f32) callconv(.c) void {
+// Update model animation data (bone matrices) for a specific pose
+// NOTE: Request frame could be fractional, using a lerp interpolation between two frames
+// NOTE: Not declared in raylib.h, but a public (non-static) symbol of upstream rmodels.c
+export fn UpdateModelAnimationBones(model: Model, anim: ModelAnimation, frame: f32) callconv(.c) void {
     if (model.boneMatrices == null) return;
 
     if ((anim.keyframeCount > 0) and (model.skeleton.bones != null) and (anim.keyframePoses != null)) {
@@ -2936,9 +3027,8 @@ export fn UpdateModelAnimation(model: Model, anim: ModelAnimation, frame: f32) c
         var bindPoseMatrix = std.mem.zeroes(Matrix);
         var currentPoseMatrix = std.mem.zeroes(Matrix);
 
-        var boneIndex: c_int = 0;
-        while (boneIndex < model.skeleton.boneCount) : (boneIndex += 1) {
-            const bi: usize = @intCast(boneIndex);
+        var bi: usize = 0;
+        while (bi < model.skeleton.boneCount) : (bi += 1) {
             const cf: usize = @intCast(currentFrame);
             const nf: usize = @intCast(nextFrame);
             model.currentPose[bi].translation = Vector3Lerp(anim.keyframePoses[cf][bi].translation, anim.keyframePoses[nf][bi].translation, blend);
@@ -2953,13 +3043,22 @@ export fn UpdateModelAnimation(model: Model, anim: ModelAnimation, frame: f32) c
 
             model.boneMatrices[bi] = MatrixMultiply(MatrixInvert(bindPoseMatrix), currentPoseMatrix);
         }
+    }
+}
 
+// Update model animation data (vertex buffers / bone matrices) for a specific pose
+// NOTE: Animated vertex data is uploaded to GPU in case of CPU skinning; for GPU
+// skinning, bone matrices are uploaded to the shader on DrawModelEx()
+export fn UpdateModelAnimation(model: Model, anim: ModelAnimation, frame: f32) callconv(.c) void {
+    if ((anim.keyframeCount > 0) and (model.skeleton.bones != null) and (anim.keyframePoses != null)) {
+        UpdateModelAnimationBones(model, anim, frame);
         UpdateModelAnimationVertexBuffers(model);
     }
 }
 
-// Update model animation data for a pose defined by two animations blended together
-export fn UpdateModelAnimationEx(model: Model, animA: ModelAnimation, frameA: f32, animB: ModelAnimation, frameB: f32, blend: f32) callconv(.c) void {
+// Update model animation data (bone matrices) for a pose defined by two animations blended together
+// NOTE: Not declared in raylib.h, but a public (non-static) symbol of upstream rmodels.c
+export fn UpdateModelAnimationBonesEx(model: Model, animA: ModelAnimation, frameA: f32, animB: ModelAnimation, frameB: f32, blend: f32) callconv(.c) void {
     if (model.boneMatrices == null) return;
 
     if ((animA.keyframeCount > 0) and (animA.keyframePoses != null) and
@@ -2983,9 +3082,8 @@ export fn UpdateModelAnimationEx(model: Model, animA: ModelAnimation, frameA: f3
         var bindPoseMatrix = std.mem.zeroes(Matrix);
         var currentPoseMatrix = std.mem.zeroes(Matrix);
 
-        var boneIndex: c_int = 0;
-        while (boneIndex < model.skeleton.boneCount) : (boneIndex += 1) {
-            const bi: usize = @intCast(boneIndex);
+        var bi: usize = 0;
+        while (bi < model.skeleton.boneCount) : (bi += 1) {
             const cfa: usize = @intCast(currentFrameA);
             const nfa: usize = @intCast(nextFrameA);
             const cfb: usize = @intCast(currentFrameB);
@@ -3011,16 +3109,32 @@ export fn UpdateModelAnimationEx(model: Model, animA: ModelAnimation, frameA: f3
 
             model.boneMatrices[bi] = MatrixMultiply(MatrixInvert(bindPoseMatrix), currentPoseMatrix);
         }
+    }
+}
 
+// Update model animation data (vertex buffers / bone matrices) for a pose defined by
+// two animations blended together
+export fn UpdateModelAnimationEx(model: Model, animA: ModelAnimation, frameA: f32, animB: ModelAnimation, frameB: f32, blend: f32) callconv(.c) void {
+    if (model.boneMatrices == null) return;
+
+    if ((animA.keyframeCount > 0) and (animA.keyframePoses != null) and
+        (animB.keyframeCount > 0) and (animB.keyframePoses != null) and
+        (blend >= 0.0) and (blend <= 1.0))
+    {
+        UpdateModelAnimationBonesEx(model, animA, frameA, animB, frameB, blend);
         UpdateModelAnimationVertexBuffers(model);
     }
 }
 
 // Update model vertex animation buffers (positions and normals)
+// NOTE: Required for CPU skinning, uploads animated vertex buffers to GPU
+// NOTE: Upstream 6.2 also precomputes a per-bone normal matrix table here that it never
+// reads (normals still use the per-vertex MatrixTranspose(MatrixInvert(...))); that dead
+// computation has no observable effect and is not ported
 fn UpdateModelAnimationVertexBuffers(model: Model) void {
     var m: c_int = 0;
     while (m < model.meshCount) : (m += 1) {
-        const mesh = model.meshes[@intCast(m)];
+        const mesh = &model.meshes[@intCast(m)]; // Not a copy: CPU buffers may be allocated below
         var animVertex = std.mem.zeroes(Vector3);
         var animNormal = std.mem.zeroes(Vector3);
         const vertexValuesCount = mesh.vertexCount * 3;
@@ -3030,7 +3144,24 @@ fn UpdateModelAnimationVertexBuffers(model: Model) void {
         var boneWeight: f32 = 0.0;
         var bufferUpdateRequired = false;
 
-        if ((mesh.boneWeights == null) or (mesh.boneIndices == null) or (mesh.animVertices == null) or (mesh.animNormals == null)) continue;
+        if ((mesh.boneWeights == null) or (mesh.boneIndices == null)) continue;
+
+        // Skip if the shader is using the bones directly
+        if (SUPPORT_GPU_SKINNING) {
+            const material = model.materials[@intCast(model.meshMaterial[@intCast(m)])];
+            if ((material.shader.locs != null) and (material.shader.locs[SHADER_LOC_VERTEX_BONEIDS] != -1)) continue;
+        }
+
+        // Lazy allocation of CPU animation buffers (positions and normals) for software skinning
+        const valuesSize: usize = @as(usize, @intCast(mesh.vertexCount * 3)) * @sizeOf(f32);
+        if (mesh.animVertices == null) {
+            mesh.animVertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(mesh.vertexCount * 3), @sizeOf(f32))));
+            _ = memcpy(mesh.animVertices, mesh.vertices, valuesSize);
+        }
+        if ((mesh.normals != null) and (mesh.animNormals == null)) {
+            mesh.animNormals = @ptrCast(@alignCast(RL_CALLOC(@intCast(mesh.vertexCount * 3), @sizeOf(f32))));
+            _ = memcpy(mesh.animNormals, mesh.normals, valuesSize);
+        }
 
         var vCounter: c_int = 0;
         while (vCounter < vertexValuesCount) : (vCounter += 3) {
@@ -3072,8 +3203,8 @@ fn UpdateModelAnimationVertexBuffers(model: Model) void {
         }
 
         if (bufferUpdateRequired) {
-            rlUpdateVertexBuffer(mesh.vboId[SHADER_LOC_VERTEX_POSITION], mesh.animVertices, mesh.vertexCount * 3 * @sizeOf(f32), 0);
-            if (mesh.normals != null) rlUpdateVertexBuffer(mesh.vboId[SHADER_LOC_VERTEX_NORMAL], mesh.animNormals, mesh.vertexCount * 3 * @sizeOf(f32), 0);
+            rlUpdateVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION], mesh.animVertices, mesh.vertexCount * 3 * @sizeOf(f32), 0);
+            if (mesh.normals != null) rlUpdateVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL], mesh.animNormals, mesh.vertexCount * 3 * @sizeOf(f32), 0);
         }
     }
 }
@@ -4200,7 +4331,7 @@ export fn DrawModelEx(model_in: Model, position: Vector3, rotationAxis: Vector3,
 
         if ((mat.shader.locs != null) and (mat.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS] != -1) and (model.boneMatrices != null)) {
             rlEnableShader(mat.shader.id);
-            rlSetUniformMatrices(mat.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS], model.boneMatrices, model.skeleton.boneCount);
+            rlSetUniformMatrices(mat.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS], model.boneMatrices, @bitCast(model.skeleton.boneCount));
         }
 
         DrawMesh(model.meshes[@intCast(i)], mat, model.transform);
@@ -4361,19 +4492,25 @@ export fn GetRayCollisionSphere(ray: Ray, center: Vector3, radius: f32) callconv
 
     const raySpherePos = Vector3Subtract(center, ray.position);
     const vector = Vector3DotProduct(raySpherePos, ray.direction);
-    const distance = Vector3Length(raySpherePos);
-    const d = radius * radius - (distance * distance - vector * vector);
+    const distanceToCenter = Vector3Length(raySpherePos);
+    const d = radius * radius - (distanceToCenter * distanceToCenter - vector * vector);
 
-    collision.hit = d >= 0.0;
+    // Check if the ray's line intersects with the sphere
+    if (d >= 0.0) {
+        // Ray origin inside the sphere: the hit is on the far side, normal points outwards
+        const inside = distanceToCenter < radius;
+        const hitDistance = if (inside) vector + sqrtf(d) else vector - sqrtf(d);
+        const point = Vector3Add(ray.position, Vector3Scale(ray.direction, hitDistance));
+        const surfaceNormal = Vector3Normalize(Vector3Subtract(point, center));
+        const normal = if (inside) Vector3Negate(surfaceNormal) else surfaceNormal;
 
-    if (distance < radius) {
-        collision.distance = vector + sqrtf(d);
-        collision.point = Vector3Add(ray.position, Vector3Scale(ray.direction, collision.distance));
-        collision.normal = Vector3Negate(Vector3Normalize(Vector3Subtract(collision.point, center)));
-    } else {
-        collision.distance = vector - sqrtf(d);
-        collision.point = Vector3Add(ray.position, Vector3Scale(ray.direction, collision.distance));
-        collision.normal = Vector3Normalize(Vector3Subtract(collision.point, center));
+        // Only hits in front of the ray origin count
+        if (hitDistance >= 0.0) {
+            collision.hit = true;
+            collision.point = point;
+            collision.normal = normal;
+            collision.distance = hitDistance;
+        }
     }
 
     return collision;
@@ -4705,16 +4842,19 @@ fn LoadOBJ(fileName: [*c]const u8) Model {
             const mi: usize = @intCast(meshIndex);
             const lc: usize = @intCast(localMeshVertexCount);
 
+            // NOTE: Out-of-range indices from malformed files are skipped, keeping zeroed values
             var i: usize = 0;
-            while (i < 3) : (i += 1) model.meshes[mi].vertices[lc * 3 + i] = objAttributes.vertices[@as(usize, @intCast(vertIndex)) * 3 + i];
+            if ((vertIndex >= 0) and (vertIndex < @as(c_int, @bitCast(objAttributes.num_vertices)))) {
+                while (i < 3) : (i += 1) model.meshes[mi].vertices[lc * 3 + i] = objAttributes.vertices[@as(usize, @intCast(vertIndex)) * 3 + i];
+            }
 
-            if ((objAttributes.texcoords != null) and (texcordIndex != TINYOBJ_INVALID_INDEX) and (texcordIndex >= 0) and (model.meshes[mi].texcoords != null)) {
+            if ((objAttributes.texcoords != null) and (texcordIndex != TINYOBJ_INVALID_INDEX) and (texcordIndex >= 0) and (texcordIndex < @as(c_int, @bitCast(objAttributes.num_texcoords))) and (model.meshes[mi].texcoords != null)) {
                 i = 0;
                 while (i < 2) : (i += 1) model.meshes[mi].texcoords[lc * 2 + i] = objAttributes.texcoords[@as(usize, @intCast(texcordIndex)) * 2 + i];
                 model.meshes[mi].texcoords[lc * 2 + 1] = 1.0 - model.meshes[mi].texcoords[lc * 2 + 1];
             }
 
-            if ((objAttributes.normals != null) and (normalIndex != TINYOBJ_INVALID_INDEX) and (normalIndex >= 0)) {
+            if ((objAttributes.normals != null) and (normalIndex != TINYOBJ_INVALID_INDEX) and (normalIndex >= 0) and (normalIndex < @as(c_int, @bitCast(objAttributes.num_normals)))) {
                 i = 0;
                 while (i < 3) : (i += 1) model.meshes[mi].normals[lc * 3 + i] = objAttributes.normals[@as(usize, @intCast(normalIndex)) * 3 + i];
             } else {
@@ -4885,7 +5025,7 @@ fn LoadIQM(fileName: [*c]const u8) Model {
             _ = memcpy(&material, fileDataPtr + iqmHeader.ofs_text + imesh[ui].material, MATERIAL_NAME_LENGTH);
 
             model.materials[ui] = LoadMaterialDefault();
-            model.materials[ui].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture(TextFormat("%s/%s", basePath, &material));
+            if (TextLength(&material) > 0) model.materials[ui].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture(TextFormat("%s/%s", basePath, &material));
 
             model.meshMaterial[ui] = i;
 
@@ -4900,9 +5040,6 @@ fn LoadIQM(fileName: [*c]const u8) Model {
 
             model.meshes[ui].triangleCount = @intCast(imesh[ui].num_triangles);
             model.meshes[ui].indices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].triangleCount * 3), @sizeOf(c_ushort))));
-
-            model.meshes[ui].animVertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 3), @sizeOf(f32))));
-            model.meshes[ui].animNormals = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 3), @sizeOf(f32))));
         }
     }
 
@@ -5052,7 +5189,7 @@ fn LoadIQM(fileName: [*c]const u8) Model {
         }
     }
 
-    BuildPoseFromParentJoints(model.skeleton.bones, model.skeleton.boneCount, model.skeleton.bindPose);
+    BuildPoseFromParentJoints(model.skeleton.bones, @bitCast(model.skeleton.boneCount), model.skeleton.bindPose);
 
     model.currentPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
     model.boneMatrices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Matrix))));
@@ -5347,8 +5484,8 @@ fn LoadImageFromCgltfImage(cgltfImage: [*c]cgltf_image, texPath: [*c]const u8) I
 }
 
 // Load bone info from GLTF skin data
-fn LoadBoneInfoGLTF(skin: cgltf_skin, boneCount: [*c]c_int) [*c]BoneInfo {
-    boneCount.* = @intCast(skin.joints_count);
+fn LoadBoneInfoGLTF(skin: cgltf_skin, boneCount: [*c]c_uint) [*c]BoneInfo {
+    boneCount.* = @truncate(skin.joints_count);
     const bones: [*c]BoneInfo = @ptrCast(@alignCast(RL_CALLOC(skin.joints_count, @sizeOf(BoneInfo))));
 
     var i: c_uint = 0;
@@ -5913,12 +6050,7 @@ fn LoadGLTF(fileName: [*c]const u8) Model {
                     }
                 }
 
-                model.meshes[meshIndex].animVertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 3), @sizeOf(f32))));
-                _ = memcpy(model.meshes[meshIndex].animVertices, model.meshes[meshIndex].vertices, @intCast(model.meshes[meshIndex].vertexCount * 3 * @sizeOf(f32)));
-                model.meshes[meshIndex].animNormals = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 3), @sizeOf(f32))));
-                if (model.meshes[meshIndex].normals != null) _ = memcpy(model.meshes[meshIndex].animNormals, model.meshes[meshIndex].normals, @intCast(model.meshes[meshIndex].vertexCount * 3 * @sizeOf(f32)));
-
-                model.meshes[meshIndex].boneCount = model.skeleton.boneCount;
+                model.meshes[meshIndex].boneCount = @bitCast(model.skeleton.boneCount);
 
                 meshIndex += 1;
             }
@@ -5965,10 +6097,12 @@ fn GetPoseAtTimeGLTF(interpolationType_in: cgltf_interpolation_type, input: [*c]
 
     var tstart: f32 = 0.0;
     var tend: f32 = 0.0;
-    var keyframe: c_int = 0;
+    var keyframe: c_int = 0; // Defaults to first pose
+    var found = false;
 
+    const keyCount: c_int = @intCast(input.*.count);
     var i: c_int = 0;
-    while (i < @as(c_int, @intCast(input.*.count)) - 1) : (i += 1) {
+    while (i < keyCount - 1) : (i += 1) {
         const r1 = cgltf_accessor_read_float(input, @intCast(i), &tstart, 1);
         if (r1 == 0) return false;
 
@@ -5977,8 +6111,23 @@ fn GetPoseAtTimeGLTF(interpolationType_in: cgltf_interpolation_type, input: [*c]
 
         if ((tstart <= time) and (time < tend)) {
             keyframe = i;
+            found = true;
             break;
         }
+    }
+
+    // No interval contains a time at (or past) the last keyframe, because the search
+    // above requires time < tend: clamp to the edge interval instead of falling back
+    // to keyframe 0, which would return a pose from the start
+    if (!found and (keyCount >= 2)) {
+        keyframe = keyCount - 2;
+
+        var tfirst: f32 = 0.0;
+        if (cgltf_accessor_read_float(input, 0, &tfirst, 1) == 0) return false;
+        if (time < tfirst) keyframe = 0;
+
+        if (cgltf_accessor_read_float(input, @intCast(keyframe), &tstart, 1) == 0) return false;
+        if (cgltf_accessor_read_float(input, @intCast(keyframe + 1), &tend, 1) == 0) return false;
     }
 
     if (FloatEquals(tend, tstart) != 0) {
@@ -6074,7 +6223,6 @@ const ChannelsGLTF = extern struct {
     translate: [*c]cgltf_animation_channel,
     rotate: [*c]cgltf_animation_channel,
     scale: [*c]cgltf_animation_channel,
-    interpolationType: cgltf_interpolation_type,
 };
 
 fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
@@ -6171,7 +6319,6 @@ fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
                     if (boneIndex == -1) continue;
 
                     const ubi: usize = @intCast(boneIndex);
-                    boneChannels[ubi].interpolationType = animData.channels[j].sampler.*.interpolation;
 
                     if (animData.channels[j].sampler.*.interpolation != cgltf_interpolation_type_max_enum) {
                         if (channel.target_path == cgltf_animation_path_type_translation) {
@@ -6218,19 +6365,19 @@ fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
                         var scale = Vector3{ .x = jsc[0], .y = jsc[1], .z = jsc[2] };
 
                         if (boneChannels[ukb].translate != null) {
-                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].interpolationType, boneChannels[ukb].translate.*.sampler.*.input, boneChannels[ukb].translate.*.sampler.*.output, time, &translation)) {
+                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].translate.*.sampler.*.interpolation, boneChannels[ukb].translate.*.sampler.*.input, boneChannels[ukb].translate.*.sampler.*.output, time, &translation)) {
                                 TraceLog(LOG_INFO, "MODEL: [%s] Failed to load translate pose data for bone %s", fileName, &bones[ukb].name);
                             }
                         }
 
                         if (boneChannels[ukb].rotate != null) {
-                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].interpolationType, boneChannels[ukb].rotate.*.sampler.*.input, boneChannels[ukb].rotate.*.sampler.*.output, time, &rotation)) {
+                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].rotate.*.sampler.*.interpolation, boneChannels[ukb].rotate.*.sampler.*.input, boneChannels[ukb].rotate.*.sampler.*.output, time, &rotation)) {
                                 TraceLog(LOG_INFO, "MODEL: [%s] Failed to load rotate pose data for bone %s", fileName, &bones[ukb].name);
                             }
                         }
 
                         if (boneChannels[ukb].scale != null) {
-                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].interpolationType, boneChannels[ukb].scale.*.sampler.*.input, boneChannels[ukb].scale.*.sampler.*.output, time, &scale)) {
+                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].scale.*.sampler.*.interpolation, boneChannels[ukb].scale.*.sampler.*.input, boneChannels[ukb].scale.*.sampler.*.output, time, &scale)) {
                                 TraceLog(LOG_INFO, "MODEL: [%s] Failed to load scale pose data for bone %s", fileName, &bones[ukb].name);
                             }
                         }
@@ -6246,7 +6393,7 @@ fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
                         animations[a].keyframePoses[ujf][ukb] = tr;
                     }
 
-                    BuildPoseFromParentJoints(bones, animations[a].boneCount, animations[a].keyframePoses[ujf]);
+                    BuildPoseFromParentJoints(bones, @bitCast(animations[a].boneCount), animations[a].keyframePoses[ujf]);
                 }
 
                 TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Duration: %fs", fileName, if (animData.name != null) @as([*c]const u8, animData.name) else @as([*c]const u8, "NULL"), animations[a].keyframeCount, animDuration);
@@ -6480,8 +6627,6 @@ fn LoadM3D(fileName: [*c]const u8) Model {
                 if ((m3d.*.numbone != 0) and (m3d.*.numskin != 0)) {
                     model.meshes[uk].boneIndices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 4), @sizeOf(u8))));
                     model.meshes[uk].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 4), @sizeOf(f32))));
-                    model.meshes[uk].animVertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 3), @sizeOf(f32))));
-                    model.meshes[uk].animNormals = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 3), @sizeOf(f32))));
                 }
 
                 model.meshMaterial[uk] = mi + 1;
@@ -6616,7 +6761,7 @@ fn LoadM3D(fileName: [*c]const u8) Model {
 
         // Load bones
         if (m3d.*.numbone != 0) {
-            model.skeleton.boneCount = @as(c_int, @intCast(m3d.*.numbone)) + 1;
+            model.skeleton.boneCount = m3d.*.numbone +% 1;
             model.skeleton.bones = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(BoneInfo))));
             model.skeleton.bindPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
 
@@ -6667,9 +6812,7 @@ fn LoadM3D(fileName: [*c]const u8) Model {
             i = 0;
             while (i < model.meshCount) : (i += 1) {
                 const ui: usize = @intCast(i);
-                model.meshes[ui].boneCount = model.skeleton.boneCount;
-                _ = memcpy(model.meshes[ui].animVertices, model.meshes[ui].vertices, @intCast(model.meshes[ui].vertexCount * 3 * @sizeOf(f32)));
-                _ = memcpy(model.meshes[ui].animNormals, model.meshes[ui].normals, @intCast(model.meshes[ui].vertexCount * 3 * @sizeOf(f32)));
+                model.meshes[ui].boneCount = @bitCast(model.skeleton.boneCount);
             }
 
             model.currentPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
@@ -6717,7 +6860,7 @@ fn LoadModelAnimationsM3D(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mode
 
         var a: c_uint = 0;
         while (a < m3d.*.numaction) : (a += 1) {
-            animations[a].boneCount = @as(c_int, @intCast(m3d.*.numbone)) + 1;
+            animations[a].boneCount = m3d.*.numbone +% 1;
             const bones: [*c]BoneInfo = @ptrCast(@alignCast(RL_CALLOC(m3d.*.numbone + 1, @sizeOf(BoneInfo))));
 
             animations[a].keyframeCount = @intCast(m3d.*.action[a].durationmsec / M3D_ANIMDELAY);
