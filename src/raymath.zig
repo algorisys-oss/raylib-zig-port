@@ -1827,26 +1827,12 @@ export fn MatrixLookAt(eye: Vector3, target: Vector3, up: Vector3) callconv(.c) 
 
 /// Get float array of matrix data
 export fn MatrixToFloatV(mat: Matrix) callconv(.c) float16 {
-    var result = std.mem.zeroes(float16);
-
-    result.v[0] = mat.m0;
-    result.v[1] = mat.m1;
-    result.v[2] = mat.m2;
-    result.v[3] = mat.m3;
-    result.v[4] = mat.m4;
-    result.v[5] = mat.m5;
-    result.v[6] = mat.m6;
-    result.v[7] = mat.m7;
-    result.v[8] = mat.m8;
-    result.v[9] = mat.m9;
-    result.v[10] = mat.m10;
-    result.v[11] = mat.m11;
-    result.v[12] = mat.m12;
-    result.v[13] = mat.m13;
-    result.v[14] = mat.m14;
-    result.v[15] = mat.m15;
-
-    return result;
+    return .{ .v = .{
+        mat.m0,  mat.m1,  mat.m2,  mat.m3,
+        mat.m4,  mat.m5,  mat.m6,  mat.m7,
+        mat.m8,  mat.m9,  mat.m10, mat.m11,
+        mat.m12, mat.m13, mat.m14, mat.m15,
+    } };
 }
 
 //----------------------------------------------------------------------------------
@@ -2408,11 +2394,10 @@ export fn MatrixDecompose(mat: Matrix, translation: *Vector3, rotation: *Quatern
 
     // Max-Normalizing helps numerical stability
     var stabilizer = eps;
-    var i: usize = 0;
-    while (i < 3) : (i += 1) {
-        stabilizer = fmaxf(stabilizer, fabsf(matColumns[i].x));
-        stabilizer = fmaxf(stabilizer, fabsf(matColumns[i].y));
-        stabilizer = fmaxf(stabilizer, fabsf(matColumns[i].z));
+    for (matColumns) |column| {
+        stabilizer = fmaxf(stabilizer, fabsf(column.x));
+        stabilizer = fmaxf(stabilizer, fabsf(column.y));
+        stabilizer = fmaxf(stabilizer, fabsf(column.z));
     }
     matColumns[0] = Vector3Scale(matColumns[0], 1.0 / stabilizer);
     matColumns[1] = Vector3Scale(matColumns[1], 1.0 / stabilizer);
