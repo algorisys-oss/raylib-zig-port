@@ -826,6 +826,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "shapes_sweep", .args = &.{} },
             .{ .name = "rlgl_paths", .args = &.{} },
             .{ .name = "shapes_paths", .args = &.{} },
+            .{ .name = "audio_wave", .args = &.{} },
             .{ .name = "font_data", .args = &.{
                 fonts_dir ++ "/anonymous_pro_bold.ttf",
                 fonts_dir ++ "/pixantiqua.ttf",
