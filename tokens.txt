@@ -192,3 +192,14 @@
 3	2026-10-16	19:21:50	19:41:14	344	529511	36109886	282850	36922591	37829234	core_fileio cdiff; idiomaudit ratchet; src/fs.zig + rcore wrappers
 4	2026-10-16	19:46:12	19:55:00+	22	7747	2799991	5304	2813064	40642298	(in progress at record) gates: cdiff 5/5, pixel 12/12, exdiff 217/217, web 46/46; docs; commit
 # Session total so far ~40.6M main-loop (incl. cache reads).
+# --- refresh 22:27 (same session): round 2 complete (all modules idiomatic, merged, gated)
+4	2026-10-16	19:46:12	19:54:01	38	22191	5080687	17609	5120525	42949759	round 2.1 gates (217/217, web 46/46); commit eb8fff9
+5	2026-10-16	19:54:17	20:14:27	262	395947	46543575	280601	47220385	90170144	rest of rcore + automation; agents spawned
+6	2026-10-16	20:27:27	20:27:35	12	1506	2090967	1037	2093522	92263666	rcore examples 217/217
+7	2026-10-16	20:51:05	21:02:03	132	101830	27684626	43437	27830025	120093691	merge rlgl+raudio; rlColor4f fix; InitWindow log
+8	2026-10-16	21:13:30	21:13:52	18	4349	3670539	2576	3677482	123771173	merge rtextures+rtext; cscan.zig; examples 217/217
+9	2026-10-16	21:26:52	21:46:17	230	157283	54942713	100259	55200485	178971658	merge rmodels; ReleaseFast libm finding + pin
+10	2026-10-16	22:05:15	22:05:33	8	1856	2076792	2838	2081494	181053152	status
+11	2026-10-16	22:07:25	22:08:18	30	14443	7321763	12851	7349087	188402239	apiexamples 217, browser 46/46
+12	2026-10-16	22:22:17	22:26:03	18	4978	4230250	3584	4238830	192641069	(in progress at record) pinned examples Debug+ReleaseFast 217/217; site e2e; docs; handoff
+# Session total so far ~192.1M main-loop (incl. cache reads) + ~1.98M in 5 module agents (rtext 0.32M, rtextures 0.42M, rmodels 0.67M, raudio 0.28M, rlgl 0.30M).

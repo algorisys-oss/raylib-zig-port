@@ -1,58 +1,49 @@
-# handoff.md — fresh-session bootstrap (written 2026-10-16 19:56 IST)
+# handoff.md — fresh-session bootstrap (written 2026-10-16 22:30 IST)
 
 > Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
 ## 1. State right now
 
-- All gates green after round 2.1: pixel 12/12 · exdiff **217/217** · cdiff
-  **5/5** (Debug + ReleaseFast) · audio 43/43 · datacheck · math/cam/gest ·
-  apitest · constaudit 0 · idiomaudit OK · browser gate **46/46**.
-- Committed locally at the end of this run (see git log); **not pushed**
-  (pushing needs the owner's go-ahead). origin/main had no new commits at 19:50.
-- Two workstreams are live: **Round 2 idiomatic internals** (this run; plan in
-  IMPLEMENT-idiomatic-zig.md) and **Phase W web target** (driven from the
-  raylib-zig-web session; resume list in §3b).
+- **Round 2 (idiomatic Zig internals) is complete** and merged on local
+  `main`; **not pushed** (needs the owner's go-ahead). Worktrees and the
+  `idiom/*` branches are removed (all merged).
+- idiomaudit: libc externs / calls / `[*c]` = **6 / 9 / 1517** (start of day
+  90 / 978 / 2136). Remaining C is documented: vprintf/vsnprintf (C printf
+  formats), snprintf for float output, fflush, src/cmem.zig (C heap boundary).
+- Gates on main (all measured after the last merge): examples **217/217**
+  Debug and ReleaseFast · apiexamples 217/217 · cdiff **12/12** Debug and
+  ReleaseFast · pixel 12/12 · audio 43/43 · math 93,000 / cam / gest
+  bit-exact · apitest · datacheck · constaudit 0 · idiomaudit OK · browser
+  46/46 · raylib-zig-web site e2e 46/46 (public/examples rebuilt locally).
 
 ## 2. What this run did
 
-- Review feedback ("C with Zig keywords") accepted; reply drafted for the reviewer.
-- `tools/idiomaudit.py` + baseline: ratchet on libc externs / calls / `[*c]`
-  (HEAD e73f1c0: 90 / 978 / 2136 → now 70 / 875 / 2101).
-- `test/cdiff/core_fileio.c`: C-vs-Zig file I/O differential (real file tree,
-  every TraceLog line); green before and after the rewrite.
-- `src/fs.zig` (std-only, 9 leak-checked tests) + rcore.zig file system
-  section rewritten as thin `export fn` wrappers.
-- docs/idioms.md (lessons), docs/compatibility.md (§3 cdiff 5/5, §5 file
-  system misuse cases), CLAUDE.md gotcha, CHANGELOG.md, PROGRESS.md.
+- Review "C with Zig keywords" accepted; reply drafted for the reviewer.
+- rcore (+ both platform backends) rewritten by hand: fs.zig, automation.zig,
+  cmem.zig, std hashes/base64/CRC; OpenURL without a shell.
+- rtext, rtextures, rmodels, raudio, rlgl rewritten by 5 agents in worktrees
+  from one brief; merged and re-verified serially. New std-only helpers with
+  tests: cscan, rtext_strings, rtext_bmfont, rtextures_encode, rmodels_iqm,
+  raudio_wave, rlgl_buffers.
+- 8 new cdiff programs; 14 port bugs fixed (list in PROGRESS.md).
+- Found: gates could compare two libms (compiler_rt vs glibc) depending on
+  optimization level; now pinned (build.zig pinCompilerRtMath, exdiff.sh).
+- Found upstream: raylib 6.2 multi-page BMFont use-after-free.
+- docs/idioms.md (13 lessons), docs/compatibility.md, CLAUDE.md gotchas.
 
 ## 3. Next step on resume
 
-1. Check the raylib-zig-web pushes the owner mentioned (2026-10-16 ~19:45):
-   pull there, run its sync (`npm run sync`) against this repo, confirm nothing
-   in `zig build webdemos` / the site broke.
-2. Round 2.1b: rcore automation events file (LoadAutomationEventList /
-   ExportAutomationEventList) into fs.zig-style code. Write a cdiff driver
-   first; C's loop has fgets 255-byte chunking, a last line without '\n' that
-   is never processed, an "Issue reading line" warning at EOF, and `%i`
-   (accepts 0x hex and leading-0 octal). Then delete FILE/fopen/fgets/feof/sscanf.
-3. Round 2.2+: rtext, rtextures, rmodels, raudio, rlgl — same pattern
-   (cdiff first, std-only file, thin wrappers, `idiomaudit.py --update`).
+1. Owner: send the reviewer reply (drafted in the session), decide on pushing
+   main, and whether to report the BMFont use-after-free upstream.
+2. Phase W (web) resume list: textures, then text in `web_examples`; GLSL
+   version constant then shaders; per-example .data; example manifest;
+   Asyncify vs frame callback.
+3. Optional: idiomaudit `[*c]` count is dominated by export signatures and
+   the generated src/api/c*.zig bindings; nothing actionable there.
 
-### 3b. Phase W (web) resume list, unchanged
+## 4. Open issues / gotchas
 
-1. Grow `web_examples` in build.zig category by category (textures next, then text).
-2. GLSL version as one comptime constant for the web, then shaders.
-3. Per-example .data with only the files an example loads.
-4. Example manifest for the site (phase W step 7).
-5. Measure Asyncify vs a frame callback.
-
-## 4. Open issues / gotchas hit
-
-- The browser gate does not yet exercise file I/O on the web (no gated web
-  example loads files): fs.zig on emscripten is proven to compile and link,
-  not to run. The textures category (step 3b.1) will exercise it.
-- `std.Io` in a C-ABI library: wrappers use
-  `std.Io.Threaded.global_single_threaded.io()`; fs.zig takes `io` as a parameter.
-- Zig 0.18: `**` array repetition is gone (`@splat`); a multiline `\\` literal's
-  last line has no trailing newline; cross-file `anytype` visitors need `pub` decls.
-- Run concurrent builds with a private `--cache-dir` (used for web + ReleaseFast here).
+- Allocation-failure paths now log warnings raylib has no wording for
+  (rmodels/rtextures); documented in compatibility.md §5.
+- New gate executables must go through `linkExe` (or pass -u __multi3).
+- Concurrent builds: private `--cache-dir` (webcache/relcache were used).

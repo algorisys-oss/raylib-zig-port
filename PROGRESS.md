@@ -4,24 +4,36 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
-## Round 2 — idiomatic Zig internals — in progress (started 2026-10-16)
+## Round 2 — idiomatic Zig internals — ✅ (2026-10-16)
 
-External review: the ported modules read as "C with Zig keywords". Fixing the
-internals module by module behind the same C ABI; plan and contract in
-[IMPLEMENT-idiomatic-zig.md](IMPLEMENT-idiomatic-zig.md), lessons in
+External review: the ported modules read as "C with Zig keywords". Every
+module's internals rewritten as idiomatic Zig behind the unchanged C ABI;
+plan in [IMPLEMENT-idiomatic-zig.md](IMPLEMENT-idiomatic-zig.md), lessons in
 [docs/idioms.md](docs/idioms.md).
 
-- `tools/idiomaudit.py`: ratchet on libc externs / libc+RL_* calls / `[*c]`
-  per file (baseline at HEAD e73f1c0: 90 / 978 / 2136).
-- **2.1 rcore file system ✅** — `src/fs.zig` (std-only: slices, error unions,
-  `std.Io`, `Allocator`, 9 leak-checked tests) + thin wrappers in rcore.zig.
-  rcore: externs 39→19, calls 176→73, `[*c]` 204→169. Total now 70 / 875 / 2101.
-  New gate `test/cdiff/core_fileio.c` (353 lines, passed before and after the
-  rewrite; caught a one-blank-line header bug in the first draft).
-  Gates: cdiff 5/5 (Debug + ReleaseFast), pixel 12/12, exdiff 217/217,
-  audio 43/43, data, math/cam/gest, apitest, constaudit 0, web 46/46.
-- Next: 2.1b automation events file I/O (last fopen/fgets/sscanf in rcore),
-  then rtext, rtextures, rmodels, raudio, rlgl.
+- `tools/idiomaudit.py` ratchet (libc externs / libc+RL_* calls / `[*c]`):
+  **90 / 978 / 2136 → 6 / 9 / 1517**. What remains is documented C: vprintf/
+  vsnprintf (C printf formats), snprintf for float output (printf tie
+  rounding), fflush, and src/cmem.zig (the C heap for memory C callers free).
+- Shared std-only files with leak-checked tests: fs.zig, automation.zig,
+  cmem.zig, cscan.zig, rtext_strings.zig, rtext_bmfont.zig,
+  rtextures_encode.zig, rmodels_iqm.zig, raudio_wave.zig, rlgl_buffers.zig.
+- cdiff 4 → **12** programs (core_fileio, core_automation, audio_wave,
+  image_ops, text_fonts, models_data, rlgl_paths, shapes_paths new); math
+  grid adds cubic Hermite (93,000 values).
+- **14 port bugs found and fixed** by the new differentials, e.g.
+  GetRayCollisionBox crash on axis-aligned rays, TextToInteger overflow
+  panic, ImageDither 0-bit channel crash, FloatToHalf/HalfToFloat shift
+  traps, R5G6B5 color scaling, rlVertex3f writing to a stale buffer in
+  multi-buffer batches, -1 attrib locations panicking, rlColor4f panics,
+  glTF/IQM missing log lines, InitWindow's module list.
+- Upstream finds: raylib 6.2 multi-page BMFont use-after-free (rtext.c
+  2714/2727); C's libm choice depended on optimization level under Zig's
+  linker (now pinned, see CLAUDE.md).
+- Gates (main, after all merges): examples 217/217 (Debug and ReleaseFast),
+  apiexamples 217/217, cdiff 12/12 (Debug and ReleaseFast), pixel 12/12,
+  audio 43/43, math/cam/gest bit-exact, apitest, datacheck, constaudit 0,
+  browser 46/46, site e2e 46/46.
 
 ## Phase W — web target (for raylib-zig-web) — in progress (started 2026-10-16)
 

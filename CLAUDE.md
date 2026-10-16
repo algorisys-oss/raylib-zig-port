@@ -298,6 +298,13 @@ before claiming a module done.
   from a caller-mutable struct field, and safe builds write over that many
   bytes. Memory crossing the C ABI goes through `src/cmem.zig` (alloc/realloc/
   free on the C heap); scratch memory uses an `Allocator` with `defer`.
+- **"Same libm" is a link-time accident unless pinned.** (Found 2026-10-16:
+  models_data diverged only in ReleaseFast.) compiler_rt is ONE archive member
+  that also defines weak sinf/cosf/expf/...; once anything pulls it in (Zig
+  code always does) its math replaces glibc's. A pure-C oracle pulled it in at
+  Debug but not at ReleaseFast, so the gate compared two libms. Every gate exe
+  forces `__multi3` (build.zig `pinCompilerRtMath`, exdiff.sh `-Wl,-u,__multi3`).
+  New gate executables must go through `linkExe` or do the same.
 - **Keep the process clock on libc.** tools/exdiff/fakeclock.c freezes time by
   preloading libc `clock_gettime`/`time`; a std.Io clock that skips libc would
   make the examples gate nondeterministic.

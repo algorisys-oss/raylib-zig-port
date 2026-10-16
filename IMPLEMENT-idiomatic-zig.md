@@ -54,10 +54,10 @@ Done when ALL hold:
 
 ## Status
 
-- [x] 2.1 rcore file system (2026-10-16): all six contract items met; see PROGRESS.md
-- [ ] 2.1b rcore automation events file (fopen/fgets/feof/sscanf; keep fgets chunking + %i semantics)
-- [ ] 2.2 rtext strings
-- [ ] 2.3 rtextures loaders
-- [ ] 2.4 rmodels loaders
-- [ ] 2.5 raudio
-- [ ] 2.6 rlgl
+- [x] 2.1 rcore file system (fs.zig) — 2026-10-16
+- [x] 2.1b rcore automation events (automation.zig) and the rest of rcore,
+      platform backends, cmem.zig — 2026-10-16
+- [x] 2.2 rtext · 2.3 rtextures · 2.4 rmodels · 2.5 raudio · 2.6 rlgl —
+      2026-10-16, one agent per module in its own worktree (shared brief),
+      merged and re-verified serially on main
+- Result: idiomaudit 90/978/2136 → 6/9/1517; all gates green (PROGRESS.md)

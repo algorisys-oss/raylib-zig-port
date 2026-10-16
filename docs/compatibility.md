@@ -46,11 +46,11 @@ Zig output **byte-for-byte** — no tolerances.
 |---|---|---|
 | `zig build test` | 12 scenes (2D, text, textures, image ops, 3D shapes/meshes) rendered headless under mesa llvmpipe | **12/12** framebuffers identical |
 | `tools/exdiff.sh` (examples) | every upstream example (unmodified), final frame after 240 frames, deterministic shim (fixed clock, hidden window, fixed RNG seed) | **217/217** automated identical; 10 excluded (§4) = all 227 accounted for |
-| `zig build mathtest` | 146 raymath functions over a pseudo-random grid incl. edge cases (opposite vectors, TRS round-trips) | **90,200** values bit-identical |
+| `zig build mathtest` | 148 raymath functions over a pseudo-random grid incl. edge cases (opposite vectors, TRS round-trips, cubic Hermite) | **93,000** values bit-identical |
 | `zig build camtest` / `gesttest` | rcamera functions over an input grid / rgestures over scripted touch events | **7,500** / **3,200** values bit-identical |
 | `zig build audiocheck` | decoded PCM (WAV/OGG/MP3/QOA/XM/MOD), Wave ops, export round-trips, stream/music metadata | **43/43** identical |
 | `zig build datacheck` | compression, base64, file/data helpers | 0 failures |
-| `zig build cdiff` | paths examples can't reach: Text* edge cases, LoadFontData default/bitmap/SDF over 5 TTFs, SHA256/SHA1/MD5 for lengths 0..200, path predicates, 720-frame rshapes thickness/angle/segment sweep, file system I/O on a real file tree (load/save/export, copy/move/rename/remove, directory scans with every filter, callbacks, every TraceLog line) | **5/5** programs identical |
+| `zig build cdiff` | paths examples can't reach, 12 programs: Text* and font loading (TTF/BMFont/image fonts, crafted .fnt files, ExportFontAsCode), hashes for lengths 0..200, path predicates, file system I/O on a real file tree, the automation events file (glibc fgets/sscanf edge cases), image ops across all 13 formats plus export/load, every model format and animation plus ExportMesh/AsCode and GenMesh*, wave export/format/crop, rlgl batches/shaders/readback, rshapes point lists and a 720-frame thickness/angle sweep; every TraceLog line compared | **12/12** programs identical (Debug and ReleaseFast) |
 | Real GPU spot check (`EXDIFF_GPU=1`) | examples on Intel Iris Xe (Mesa 25.2.8, GL 4.6) instead of llvmpipe | **219/219** identical (run before the last two audio exclusions) |
 | ReleaseFast | all non-example gates at `-Doptimize=ReleaseFast` | pixel 12/12, math, cam, gest, data, audio 43/43, cdiff 4/4 identical |
 | ReleaseFast examples sweep | full examples gate, optimized Zig library vs optimized C oracle | **217/217** identical |
@@ -87,6 +87,13 @@ These are limits of the evidence, not known incompatibilities:
   `-ffp-contract=off`. C raylib built by clang with its default FMA
   contraction differs (in the last bit, sometimes in pixels) from this port —
   and from GCC builds of C raylib — on rotated/scaled geometry.
+- **libm.** A program linked by Zig takes `sinf`/`cosf`/... from Zig's
+  compiler_rt (one archive member that carries weak libm functions and
+  replaces glibc's once anything pulls it in, which Zig code always does).
+  The gates pin both sides to it (`pinCompilerRtMath` in build.zig,
+  `-Wl,-u,__multi3` in tools/exdiff.sh). C raylib linked against glibc's
+  libm can differ in the last bit of trigonometric results (found in glTF
+  animation poses).
 - **Undefined behavior in C.** Where upstream C has UB (e.g. out-of-range
   float→int casts, misaligned reads in bundled parsers), the Zig port picks
   the result C gives on x86-64 and is gated against it; it does not trap.
@@ -99,6 +106,8 @@ These are limits of the evidence, not known incompatibilities:
 | Other platforms / GL versions | Not compiled (see §1, not-migrated.md). |
 | Shared library | Only a static archive is built. |
 | File system misuse | Where C raylib's result depends on undefined behaviour or on the filesystem, the Zig port picks one documented answer: `LoadFileText` on a directory returns NULL ("Failed to read text file"); C's answer varies by filesystem (on ext4 it returns ""). `LoadFileData`/`GetFileLength` on a directory match C on ext4. `ExportDataAsCode` with `dataSize <= 0` returns false (C reads `data[-1]`). NULL paths return NULL/false/0 where C would crash, and `SaveFileText(f, NULL)` writes an empty file (glibc writes "(null)"). A failed write makes `SaveFileData`/`SaveFileText` return false. `LoadDirectoryFilesEx` with no matches returns `paths == NULL` (C returns a `calloc(0)` pointer); `count` is 0 either way and `UnloadDirectoryFiles` accepts both. |
+| Multi-page BMFont | raylib 6.2 unloads atlas pages 1..n before drawing them into the merged atlas (rtext.c lines 2714/2727: a use-after-free, so its pixels are undefined). The port draws the pages, then unloads them. Page metadata is gated; the merged pixels can't be. |
+| Other misuse and allocation failure | Where C crashes or reads out of bounds the port returns raylib's failure result instead: a NULL file type in `LoadWaveFromMemory`, `ExportImageAsCode`/`ExportWaveAsCode` on empty data, NULL text arguments to Text* functions, malformed IQM/glTF offsets (read as zeros), negative `GenImage*` sizes, a failed allocation (logs a warning; raylib has no wording for it). `rlGetShaderLocsDefault()` after `rlglClose` returns NULL (C returns freed memory). `LoadImageColors` on a compressed format returns zeroed memory (C: uninitialized). |
 
 There are **no known behavioral differences** for valid inputs within the configuration of §1.
 
