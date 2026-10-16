@@ -80,6 +80,7 @@ PARAM_ENUMS = [
     (r"IsGestureDetected", "gesture", "Gesture"),
     (r"TraceLog|SetTraceLogLevel", "logLevel", "TraceLogLevel"),
     (r"ConfigFlags|WindowState", "flags", "ConfigFlags"),
+    (r"IsWindowState", "flag", "ConfigFlags"),
     (r".", "format", "PixelFormat"),
     (r".", "newFormat", "PixelFormat"),
     (r"SetTextureFilter", "filter", "TextureFilter"),
@@ -125,6 +126,7 @@ NO_SLICE = {
 NULLABLE_STRINGS = {
     ("LoadShader", "vsFileName"), ("LoadShader", "fsFileName"),
     ("LoadShaderFromMemory", "vsCode"), ("LoadShaderFromMemory", "fsCode"),
+    ("LoadAutomationEventList", "fileName"),  # NULL: new empty list to record into
 }
 
 # `T *p, int count` slice params that raylib documents as accepting NULL
@@ -163,10 +165,11 @@ COLOR_NAMES = {
     "DARKBROWN": "dark_brown", "RAYWHITE": "ray_white",
 }
 
-# Typed accessors for raylib's enum-indexed arrays: C indexes `shader.locs[]`
-# and `material.maps[]` with int constants (SHADER_LOC_*, MATERIAL_MAP_*); the
-# API indexes them with the enum. They return pointers, so they read and write
-# like the C lvalue: `shader.loc(.vector_view).* = loc`.
+# Methods appended inside generated structs (decls only; ABI unaffected):
+# - typed accessors for raylib's enum-indexed arrays (`shader.locs[]`,
+#   `material.maps[]`), returning pointers so they read and write like the C
+#   lvalue: `shader.loc(.vector_view).* = loc`;
+# - slice views of raylib's "pointer + count" list structs.
 STRUCT_METHODS = {
     "Shader": '''
 /// `shader.locs[index]`: the location bound to a standard shader slot.
@@ -178,6 +181,20 @@ pub fn loc(shader: Shader, index: ShaderLocationIndex) *c_int {
 /// `material.maps[index]`: one of the material's standard maps.
 pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
     return &material.maps.?[@intCast(@backingInt(index))];
+}
+''',
+    "FilePathList": '''
+/// The paths as a slice of strings (valid until the list is unloaded).
+pub fn slice(list: FilePathList) []const [*:0]const u8 {
+    const paths = list.paths orelse return &.{};
+    return @ptrCast(paths[0..list.count]);
+}
+''',
+    "AutomationEventList": '''
+/// The recorded events as a slice (valid until the list is unloaded).
+pub fn slice(list: AutomationEventList) []AutomationEvent {
+    const events = list.events orelse return &.{};
+    return events[0..list.count];
 }
 ''',
 }
@@ -217,10 +234,24 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
 }
 ''',
     # ---- callbacks: raw C function pointers --------------------------------
+    # The C callback receives printf-style `text` + a va_list, which Zig code
+    # cannot format portably; a comptime trampoline formats it (vsnprintf) and
+    # hands the callback the finished message. Raw: c.SetTraceLogCallback.
     "SetTraceLogCallback": '''
-/// Set custom trace log callback (raw C callback; `args` is a C va_list).
-pub fn setTraceLogCallback(callback: TraceLogCallback) void {
-    c.SetTraceLogCallback(callback);
+/// Set custom trace log callback. The callback receives each message already
+/// formatted (truncated at 1023 bytes); `null` restores raylib's default logger.
+pub fn setTraceLogCallback(comptime callback: ?fn (logLevel: TraceLogLevel, text: [:0]const u8) void) void {
+    const callback_fn = callback orelse return c.SetTraceLogCallback(null);
+    const Trampoline = struct {
+        extern "c" fn vsnprintf(buffer: [*]u8, size: usize, format: [*:0]const u8, args: ?*anyopaque) c_int;
+
+        fn log(logLevel: c_int, format: [*c]const u8, args: ?*anyopaque) callconv(.c) void {
+            var buffer: [1024]u8 = undefined;
+            _ = vsnprintf(&buffer, buffer.len, format, args); // always NUL-terminates
+            callback_fn(@enumFromInt(logLevel), std.mem.span(@as([*:0]const u8, @ptrCast(&buffer))));
+        }
+    };
+    c.SetTraceLogCallback(Trampoline.log);
 }
 ''',
     "SetLoadFileDataCallback": '''
@@ -275,6 +306,13 @@ pub fn attachAudioMixedProcessor(processor: AudioCallback) void {
 /// Detach audio stream processor from the entire audio pipeline.
 pub fn detachAudioMixedProcessor(processor: AudioCallback) void {
     c.DetachAudioMixedProcessor(processor);
+}
+''',
+    # ---- memory: `size` is the new size, not the length of `ptr` ------------
+    "MemRealloc": '''
+/// Internal memory reallocator (`ptr` may be null; `size` is the new size in bytes).
+pub fn memRealloc(ptr: ?*anyopaque, size: u32) ?*anyopaque {
+    return c.MemRealloc(ptr, size);
 }
 ''',
     # ---- file data: owned buffers as slices --------------------------------
@@ -1084,7 +1122,8 @@ class Gen:
                     zname = COLOR_NAMES.get(cname, cname.lower())
                     out.append(f"    pub const {zname}: Color = .{{ .r = {r}, .g = {g}, .b = {b}, .a = {a} }}; // {comment.strip()}")
             if sname in STRUCT_METHODS:
-                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].splitlines())
+                out.append("")
+                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].strip("\n").splitlines())
             out.append("};\n")
         for target, alias in self.aliases:
             out.append(f"pub const {alias} = {target};")

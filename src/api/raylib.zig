@@ -349,6 +349,12 @@ pub const VrStereoConfig = extern struct {
 pub const FilePathList = extern struct {
     count: c_uint,
     paths: ?[*][*:0]u8,
+
+    /// The paths as a slice of strings (valid until the list is unloaded).
+    pub fn slice(list: FilePathList) []const [*:0]const u8 {
+        const paths = list.paths orelse return &.{};
+        return @ptrCast(paths[0..list.count]);
+    }
 };
 
 pub const AutomationEvent = extern struct {
@@ -361,6 +367,12 @@ pub const AutomationEventList = extern struct {
     capacity: c_uint,
     count: c_uint,
     events: ?[*]AutomationEvent,
+
+    /// The recorded events as a slice (valid until the list is unloaded).
+    pub fn slice(list: AutomationEventList) []AutomationEvent {
+        const events = list.events orelse return &.{};
+        return events[0..list.count];
+    }
 };
 
 pub const Quaternion = Vector4;
@@ -834,8 +846,8 @@ pub fn isWindowResized() bool {
 }
 
 /// Check if one specific window flag is enabled
-pub fn isWindowState(flag: u32) bool {
-    return c.IsWindowState(flag);
+pub fn isWindowState(flag: ConfigFlags) bool {
+    return c.IsWindowState(@bitCast(flag));
 }
 
 /// Set window configuration state using flags
@@ -1335,9 +1347,20 @@ pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anyt
     c.TraceLog(@backingInt(logLevel), "%s", text.ptr);
 }
 
-/// Set custom trace log callback (raw C callback; `args` is a C va_list).
-pub fn setTraceLogCallback(callback: TraceLogCallback) void {
-    c.SetTraceLogCallback(callback);
+/// Set custom trace log callback. The callback receives each message already
+/// formatted (truncated at 1023 bytes); `null` restores raylib's default logger.
+pub fn setTraceLogCallback(comptime callback: ?fn (logLevel: TraceLogLevel, text: [:0]const u8) void) void {
+    const callback_fn = callback orelse return c.SetTraceLogCallback(null);
+    const Trampoline = struct {
+        extern "c" fn vsnprintf(buffer: [*]u8, size: usize, format: [*:0]const u8, args: ?*anyopaque) c_int;
+
+        fn log(logLevel: c_int, format: [*c]const u8, args: ?*anyopaque) callconv(.c) void {
+            var buffer: [1024]u8 = undefined;
+            _ = vsnprintf(&buffer, buffer.len, format, args); // always NUL-terminates
+            callback_fn(@fromBackingInt(@intCast(logLevel)), std.mem.span(@as([*:0]const u8, @ptrCast(&buffer))));
+        }
+    };
+    c.SetTraceLogCallback(Trampoline.log);
 }
 
 /// Internal memory allocator
@@ -1345,8 +1368,8 @@ pub fn memAlloc(size: u32) ?*anyopaque {
     return c.MemAlloc(size);
 }
 
-/// Internal memory reallocator
-pub fn memRealloc(ptr: *anyopaque, size: u32) ?*anyopaque {
+/// Internal memory reallocator (`ptr` may be null; `size` is the new size in bytes).
+pub fn memRealloc(ptr: ?*anyopaque, size: u32) ?*anyopaque {
     return c.MemRealloc(ptr, size);
 }
 
@@ -1627,8 +1650,8 @@ pub fn computeSHA256(data: []const u8) *const [8]u32 {
 }
 
 /// Load automation events list from file, NULL for empty list, capacity = MAX_AUTOMATION_EVENTS
-pub fn loadAutomationEventList(fileName: [:0]const u8) AutomationEventList {
-    return c.LoadAutomationEventList(fileName.ptr);
+pub fn loadAutomationEventList(fileName: ?[:0]const u8) AutomationEventList {
+    return c.LoadAutomationEventList(if (fileName) |s| s.ptr else null);
 }
 
 /// Unload automation events list from file
