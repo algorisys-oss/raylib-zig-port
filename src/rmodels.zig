@@ -15,6 +15,7 @@
 const std = @import("std");
 const Io = std.Io;
 const cmem = @import("cmem.zig");
+const iqm = @import("rmodels_iqm.zig");
 
 //----------------------------------------------------------------------------------
 // libc / libm functions, called directly so results are bit-identical to the C source.
@@ -35,7 +36,6 @@ extern fn snprintf(noalias [*c]u8, usize, noalias [*c]const u8, ...) c_int;
 extern fn sinf(f32) f32;
 extern fn cosf(f32) f32;
 extern fn sqrtf(f32) f32;
-extern fn fabsf(f32) f32;
 extern fn fmaxf(f32, f32) f32;
 extern fn fmin(f64, f64) f64;
 extern fn fmax(f64, f64) f64;
@@ -2168,7 +2168,7 @@ export fn LoadModel(fileName: [*c]const u8) callconv(.c) Model {
     var model = if (IsFileExtension(fileName, ".obj"))
         loadObj(fileName)
     else if (IsFileExtension(fileName, ".iqm"))
-        LoadIQM(fileName)
+        loadIqm(fileName)
     else if (IsFileExtension(fileName, ".gltf") or IsFileExtension(fileName, ".glb"))
         LoadGLTF(fileName)
     else if (IsFileExtension(fileName, ".vox"))
@@ -2959,7 +2959,7 @@ export fn SetModelMeshMaterial(model: [*c]Model, meshId: c_int, materialId: c_in
 export fn LoadModelAnimations(fileName: [*c]const u8, animCount: [*c]c_int) callconv(.c) [*c]ModelAnimation {
     var animations: [*c]ModelAnimation = null;
 
-    if (IsFileExtension(fileName, ".iqm")) animations = LoadModelAnimationsIQM(fileName, animCount);
+    if (IsFileExtension(fileName, ".iqm")) animations = loadModelAnimationsIqm(fileName, animCount);
     if (IsFileExtension(fileName, ".m3d")) animations = LoadModelAnimationsM3D(fileName, animCount);
     if (IsFileExtension(fileName, ".gltf;.glb")) animations = LoadModelAnimationsGLTF(fileName, animCount);
 
@@ -3944,7 +3944,7 @@ export fn DrawModelWiresEx(model: Model, position: Vector3, rotationAxis: Vector
 export fn DrawBillboard(camera: Camera, texture: Texture2D, position: Vector3, scale: f32, tint: Color) callconv(.c) void {
     const rec = Rectangle{ .x = 0.0, .y = 0.0, .width = @floatFromInt(texture.width), .height = @floatFromInt(texture.height) };
 
-    DrawBillboardRec(camera, texture, rec, position, .{ .x = scale * fabsf(rec.width / rec.height), .y = scale }, tint);
+    DrawBillboardRec(camera, texture, rec, position, .{ .x = scale * @abs(rec.width / rec.height), .y = scale }, tint);
 }
 
 // Draw a billboard (part of a texture defined by a rectangle)
@@ -4022,9 +4022,9 @@ export fn DrawBillboardPro(camera: Camera, texture: Texture2D, rec_in: Rectangle
 export fn DrawBoundingBox(box: BoundingBox, color: Color) callconv(.c) void {
     var size = std.mem.zeroes(Vector3);
 
-    size.x = fabsf(box.max.x - box.min.x);
-    size.y = fabsf(box.max.y - box.min.y);
-    size.z = fabsf(box.max.z - box.min.z);
+    size.x = @abs(box.max.x - box.min.x);
+    size.y = @abs(box.max.y - box.min.y);
+    size.z = @abs(box.max.z - box.min.z);
 
     const center = Vector3{ .x = box.min.x + size.x / 2.0, .y = box.min.y + size.y / 2.0, .z = box.min.z + size.z / 2.0 };
 
@@ -4085,7 +4085,7 @@ export fn GetRayCollisionSphere(ray: Ray, center: Vector3, radius: f32) callconv
     if (d >= 0.0) {
         // Ray origin inside the sphere: the hit is on the far side, normal points outwards
         const inside = distanceToCenter < radius;
-        const hitDistance = if (inside) vector + sqrtf(d) else vector - sqrtf(d);
+        const hitDistance = if (inside) vector + @sqrt(d) else vector - @sqrt(d);
         const point = Vector3Add(ray.position, Vector3Scale(ray.direction, hitDistance));
         const surfaceNormal = Vector3Normalize(Vector3Subtract(point, center));
         const normal = if (inside) Vector3Negate(surfaceNormal) else surfaceNormal;
@@ -4103,47 +4103,47 @@ export fn GetRayCollisionSphere(ray: Ray, center: Vector3, radius: f32) callconv
 }
 
 // Get collision info between ray and box
-export fn GetRayCollisionBox(ray_in: Ray, box: BoundingBox) callconv(.c) RayCollision {
-    var ray = ray_in;
+export fn GetRayCollisionBox(ray: Ray, box: BoundingBox) callconv(.c) RayCollision {
     var collision = std.mem.zeroes(RayCollision);
 
+    // NOTE: If the ray starts inside the box, the distance is negative (as if the
+    // ray was reversed): reversing ray.direction gives the right result
     const insideBox = (ray.position.x > box.min.x) and (ray.position.x < box.max.x) and
         (ray.position.y > box.min.y) and (ray.position.y < box.max.y) and
         (ray.position.z > box.min.z) and (ray.position.z < box.max.z);
 
-    if (insideBox) ray.direction = Vector3Negate(ray.direction);
+    const direction = if (insideBox) Vector3Negate(ray.direction) else ray.direction;
 
-    var t = std.mem.zeroes([11]f32);
+    // Slab intersection: entry and exit distances along each axis
+    const inverse = Vector3{ .x = 1.0 / direction.x, .y = 1.0 / direction.y, .z = 1.0 / direction.z };
+    const minX = (box.min.x - ray.position.x) * inverse.x;
+    const maxX = (box.max.x - ray.position.x) * inverse.x;
+    const minY = (box.min.y - ray.position.y) * inverse.y;
+    const maxY = (box.max.y - ray.position.y) * inverse.y;
+    const minZ = (box.min.z - ray.position.z) * inverse.z;
+    const maxZ = (box.max.z - ray.position.z) * inverse.z;
+    // C's fmin/fmax are LLVM minnum/maxnum, as @min/@max are (NaN loses)
+    const entry = @max(@max(@min(minX, maxX), @min(minY, maxY)), @min(minZ, maxZ));
+    const exit = @min(@min(@max(minX, maxX), @max(minY, maxY)), @max(minZ, maxZ));
 
-    t[8] = 1.0 / ray.direction.x;
-    t[9] = 1.0 / ray.direction.y;
-    t[10] = 1.0 / ray.direction.z;
+    collision.hit = !((exit < 0) or (entry > exit));
+    collision.distance = entry;
+    collision.point = Vector3Add(ray.position, Vector3Scale(direction, collision.distance));
 
-    t[0] = (box.min.x - ray.position.x) * t[8];
-    t[1] = (box.max.x - ray.position.x) * t[8];
-    t[2] = (box.min.y - ray.position.y) * t[9];
-    t[3] = (box.max.y - ray.position.y) * t[9];
-    t[4] = (box.min.z - ray.position.z) * t[10];
-    t[5] = (box.max.z - ray.position.z) * t[10];
-    t[6] = @floatCast(fmax(fmax(fmin(t[0], t[1]), fmin(t[2], t[3])), fmin(t[4], t[5])));
-    t[7] = @floatCast(fmin(fmin(fmax(t[0], t[1]), fmax(t[2], t[3])), fmax(t[4], t[5])));
-
-    collision.hit = !((t[7] < 0) or (t[6] > t[7]));
-    collision.distance = t[6];
-    collision.point = Vector3Add(ray.position, Vector3Scale(ray.direction, collision.distance));
-
-    collision.normal = Vector3Lerp(box.min, box.max, 0.5);
-    collision.normal = Vector3Subtract(collision.point, collision.normal);
-    collision.normal = Vector3Scale(collision.normal, 2.01);
-    collision.normal = Vector3Divide(collision.normal, Vector3Subtract(box.max, box.min));
-    collision.normal.x = @floatFromInt(cInt(collision.normal.x));
-    collision.normal.y = @floatFromInt(cInt(collision.normal.y));
-    collision.normal.z = @floatFromInt(cInt(collision.normal.z));
-
-    collision.normal = Vector3Normalize(collision.normal);
+    // Vector from the box center to the hit point, scaled to the unit cube.
+    // The extra .01 fixes numerical errors: the relevant component is now
+    // slightly beyond +-1 and the others within, so truncating to int gives
+    // the normal
+    var normal = Vector3Subtract(collision.point, Vector3Lerp(box.min, box.max, 0.5));
+    normal = Vector3Divide(Vector3Scale(normal, 2.01), Vector3Subtract(box.max, box.min));
+    normal = .{
+        .x = @floatFromInt(cInt(normal.x)),
+        .y = @floatFromInt(cInt(normal.y)),
+        .z = @floatFromInt(cInt(normal.z)),
+    };
+    collision.normal = Vector3Normalize(normal);
 
     if (insideBox) {
-        ray.direction = Vector3Negate(ray.direction);
         collision.distance *= -1.0;
         collision.normal = Vector3Negate(collision.normal);
     }
@@ -4155,36 +4155,21 @@ export fn GetRayCollisionBox(ray_in: Ray, box: BoundingBox) callconv(.c) RayColl
 export fn GetRayCollisionMesh(ray: Ray, mesh: Mesh, transform: Matrix) callconv(.c) RayCollision {
     var collision = std.mem.zeroes(RayCollision);
 
-    if (mesh.vertices != null) {
-        const triangleCount = mesh.triangleCount;
+    // Check if mesh vertex data on CPU for testing
+    if (mesh.vertices == null) return collision;
 
-        var i: c_int = 0;
-        while (i < triangleCount) : (i += 1) {
-            var a = std.mem.zeroes(Vector3);
-            var b = std.mem.zeroes(Vector3);
-            var c = std.mem.zeroes(Vector3);
-            const vertdata: [*c]Vector3 = @ptrCast(@alignCast(mesh.vertices));
-
-            if (mesh.indices != null) {
-                a = vertdata[mesh.indices[@intCast(i * 3 + 0)]];
-                b = vertdata[mesh.indices[@intCast(i * 3 + 1)]];
-                c = vertdata[mesh.indices[@intCast(i * 3 + 2)]];
-            } else {
-                a = vertdata[@intCast(i * 3 + 0)];
-                b = vertdata[@intCast(i * 3 + 1)];
-                c = vertdata[@intCast(i * 3 + 2)];
-            }
-
-            a = Vector3Transform(a, transform);
-            b = Vector3Transform(b, transform);
-            c = Vector3Transform(c, transform);
-
-            const triHitInfo = GetRayCollisionTriangle(ray, a, b, c);
-
-            if (triHitInfo.hit) {
-                if ((!collision.hit) or (collision.distance > triHitInfo.distance)) collision = triHitInfo;
-            }
+    const positions = vector3s(mesh.vertices[0 .. count(mesh.vertexCount) * 3]);
+    for (0..count(mesh.triangleCount)) |t| {
+        var triangle: [3]Vector3 = undefined;
+        for (&triangle, 0..) |*vertex, k| {
+            const index = if (mesh.indices != null) mesh.indices[t * 3 + k] else t * 3 + k;
+            vertex.* = Vector3Transform(positions[index], transform);
         }
+
+        const triHitInfo = GetRayCollisionTriangle(ray, triangle[0], triangle[1], triangle[2]);
+
+        // Keep the closest hit
+        if (triHitInfo.hit and ((!collision.hit) or (collision.distance > triHitInfo.distance))) collision = triHitInfo;
     }
 
     return collision;
@@ -4243,22 +4228,21 @@ export fn GetRayCollisionQuad(ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3, p
 //----------------------------------------------------------------------------------
 
 // Build pose from parent joints (required by IQM and GLTF)
-fn BuildPoseFromParentJoints(bones: [*c]BoneInfo, boneCount: c_int, transforms: [*c]Transform) void {
-    var i: c_int = 0;
-    while (i < boneCount) : (i += 1) {
-        const ui: usize = @intCast(i);
-        if (bones[ui].parent >= 0) {
-            if (bones[ui].parent > i) {
-                TraceLog(LOG_WARNING, "Skipping bone not topologically sorted: Bone %d has parent %d", i, bones[ui].parent);
-                continue;
-            }
-            const pp: usize = @intCast(bones[ui].parent);
-            transforms[ui].rotation = QuaternionMultiply(transforms[pp].rotation, transforms[ui].rotation);
-            transforms[ui].scale = Vector3Multiply(transforms[ui].scale, transforms[pp].scale);
-            transforms[ui].translation = Vector3Multiply(transforms[ui].translation, transforms[pp].scale);
-            transforms[ui].translation = Vector3RotateByQuaternion(transforms[ui].translation, transforms[pp].rotation);
-            transforms[ui].translation = Vector3Add(transforms[ui].translation, transforms[pp].translation);
+fn buildPoseFromParentJoints(bones: []const BoneInfo, transforms: []Transform) void {
+    for (bones, transforms, 0..) |bone, *transform, i| {
+        if (bone.parent < 0) continue;
+        if (bone.parent > i) {
+            TraceLog(LOG_WARNING, "Skipping bone not topologically sorted: Bone %d has parent %d", @as(c_int, @intCast(i)), bone.parent);
+            continue;
         }
+
+        // NOTE: Sequential, as in C: a bone that is its own parent sees its updates
+        const parent = &transforms[@intCast(bone.parent)];
+        transform.rotation = QuaternionMultiply(parent.rotation, transform.rotation);
+        transform.scale = Vector3Multiply(transform.scale, parent.scale);
+        transform.translation = Vector3Multiply(transform.translation, parent.scale);
+        transform.translation = Vector3RotateByQuaternion(transform.translation, parent.rotation);
+        transform.translation = Vector3Add(transform.translation, parent.translation);
     }
 }
 
@@ -4443,483 +4427,236 @@ fn objIndex(index: c_int, limit: c_uint) ?usize {
     return @intCast(index);
 }
 
-// IQM file structs (read via memcpy from file data)
-const IQMHeader = extern struct {
-    magic: [16]u8,
-    version: c_uint,
-    dataSize: c_uint,
-    flags: c_uint,
-    num_text: c_uint,
-    ofs_text: c_uint,
-    num_meshes: c_uint,
-    ofs_meshes: c_uint,
-    num_vertexarrays: c_uint,
-    num_vertexes: c_uint,
-    ofs_vertexarrays: c_uint,
-    num_triangles: c_uint,
-    ofs_triangles: c_uint,
-    ofs_adjacency: c_uint,
-    num_joints: c_uint,
-    ofs_joints: c_uint,
-    num_poses: c_uint,
-    ofs_poses: c_uint,
-    num_anims: c_uint,
-    ofs_anims: c_uint,
-    num_frames: c_uint,
-    num_framechannels: c_uint,
-    ofs_frames: c_uint,
-    ofs_bounds: c_uint,
-    num_comment: c_uint,
-    ofs_comment: c_uint,
-    num_extensions: c_uint,
-    ofs_extensions: c_uint,
-};
-const IQMMesh = extern struct {
-    name: c_uint,
-    material: c_uint,
-    first_vertex: c_uint,
-    num_vertexes: c_uint,
-    first_triangle: c_uint,
-    num_triangles: c_uint,
-};
-const IQMTriangle = extern struct { vertex: [3]c_uint };
-const IQMJoint = extern struct {
-    name: c_uint,
-    parent: c_int,
-    translate: [3]f32,
-    rotate: [4]f32,
-    scale: [3]f32,
-};
-const IQMVertexArray = extern struct {
-    type: c_uint,
-    flags: c_uint,
-    format: c_uint,
-    size: c_uint,
-    offset: c_uint,
-};
-const IQMPose = extern struct {
-    parent: c_int,
-    mask: c_uint,
-    channeloffset: [10]f32,
-    channelscale: [10]f32,
-};
-const IQMAnim = extern struct {
-    name: c_uint,
-    first_frame: c_uint,
-    num_frames: c_uint,
-    framerate: f32,
-    flags: c_uint,
-};
-
-const IQM_MAGIC = "INTERQUAKEMODEL";
-const IQM_VERSION: c_uint = 2;
-const BONE_NAME_LENGTH: usize = 32;
-const MESH_NAME_LENGTH: usize = 32;
-const MATERIAL_NAME_LENGTH: usize = 32;
-
-// IQM vertex data types
-const IQM_POSITION: c_uint = 0;
-const IQM_TEXCOORD: c_uint = 1;
-const IQM_NORMAL: c_uint = 2;
-const IQM_TANGENT: c_uint = 3;
-const IQM_BLENDINDEXES: c_uint = 4;
-const IQM_BLENDWEIGHTS: c_uint = 5;
-const IQM_COLOR: c_uint = 6;
-
-// Load IQM mesh data
-fn LoadIQM(fileName: [*c]const u8) Model {
+/// Loads a model file's bytes, checks the IQM header and logs why it can't
+/// be used. The caller releases the data with UnloadFileData.
+fn openIqm(fileName: [*c]const u8) ?iqm.File {
     var dataSize: c_int = 0;
     const fileData = LoadFileData(fileName, &dataSize);
-    const fileDataPtr = fileData;
+    if (fileData == null) return null;
 
-    var model = std.mem.zeroes(Model);
+    const file: iqm.File = .init(fileData[0..count(dataSize)]);
+    file.check() catch |err| {
+        switch (err) {
+            error.NotIqm => TraceLog(LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName),
+            error.UnsupportedVersion => TraceLog(LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, file.header.version),
+        }
+        UnloadFileData(fileData);
+        return null;
+    };
+    return file;
+}
 
-    var imesh: [*c]IQMMesh = null;
-    var tri: [*c]IQMTriangle = null;
-    var va: [*c]IQMVertexArray = null;
-    var ijoint: [*c]IQMJoint = null;
+fn unloadIqm(file: iqm.File) void {
+    UnloadFileData(@constCast(file.data.ptr));
+}
 
-    var vertex: [*c]f32 = null;
-    var normal: [*c]f32 = null;
-    var text: [*c]f32 = null;
-    var blendi: [*c]u8 = null;
-    var blendw: [*c]u8 = null;
-    var color: [*c]u8 = null;
+// Load IQM mesh data
+fn loadIqm(fileName: [*c]const u8) Model {
+    const file = openIqm(fileName) orelse return empty_model;
+    defer unloadIqm(file);
 
-    if (fileDataPtr == null) return model;
+    return iqmModel(fileName, file) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for IQM data", fileName);
+        return empty_model;
+    };
+}
 
+/// A 32-byte IQM name as a C string: the extra byte keeps it terminated
+fn iqmCString(name: iqm.Name) [33]u8 {
+    return name ++ [_]u8{0};
+}
+
+fn iqmModel(fileName: [*c]const u8, file: iqm.File) error{OutOfMemory}!Model {
+    const header = file.header;
     const basePath = GetDirectoryPath(fileName);
 
-    const iqmHeader: *IQMHeader = @ptrCast(@alignCast(fileDataPtr));
+    var model = empty_model;
+    errdefer freeModelData(model);
 
-    if (memcmp(&iqmHeader.magic, IQM_MAGIC, IQM_MAGIC.len + 1) != 0) {
-        TraceLog(LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName);
-        UnloadFileData(fileData);
-        return model;
-    }
-
-    if (iqmHeader.version != IQM_VERSION) {
-        TraceLog(LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, iqmHeader.version);
-        UnloadFileData(fileData);
-        return model;
-    }
-
-    imesh = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_meshes * @sizeOf(IQMMesh))));
-    _ = memcpy(imesh, fileDataPtr + iqmHeader.ofs_meshes, iqmHeader.num_meshes * @sizeOf(IQMMesh));
-
-    model.meshCount = @intCast(iqmHeader.num_meshes);
-    model.meshes = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
-
+    // Meshes, each with its own default material
+    model.meshCount = @intCast(header.num_meshes);
+    model.meshes = (try cmem.alloc(Mesh, header.num_meshes)).ptr;
     model.materialCount = model.meshCount;
-    model.materials = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.materialCount), @sizeOf(Material))));
-    model.meshMaterial = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
+    model.materials = (try cmem.alloc(Material, header.num_meshes)).ptr;
+    model.meshMaterial = (try cmem.alloc(c_int, header.num_meshes)).ptr;
 
-    var name = std.mem.zeroes([MESH_NAME_LENGTH]u8);
-    var material = std.mem.zeroes([MATERIAL_NAME_LENGTH]u8);
+    for (modelMeshes(model), 0..) |*mesh, i| {
+        const imesh = file.read(iqm.Mesh, header.ofs_meshes, i);
+        const name = iqmCString(file.name(imesh.name));
+        const material = iqmCString(file.name(imesh.material));
 
-    {
-        var i: c_int = 0;
-        while (i < model.meshCount) : (i += 1) {
-            const ui: usize = @intCast(i);
-            _ = memcpy(&name, fileDataPtr + iqmHeader.ofs_text + imesh[ui].name, MESH_NAME_LENGTH);
-            _ = memcpy(&material, fileDataPtr + iqmHeader.ofs_text + imesh[ui].material, MATERIAL_NAME_LENGTH);
+        model.materials[i] = LoadMaterialDefault();
+        if (material[0] != 0) model.materials[i].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture(TextFormat("%s/%s", basePath, &material));
 
-            model.materials[ui] = LoadMaterialDefault();
-            if (TextLength(&material) > 0) model.materials[ui].maps[MATERIAL_MAP_ALBEDO].texture = LoadTexture(TextFormat("%s/%s", basePath, &material));
+        model.meshMaterial[i] = @intCast(i);
 
-            model.meshMaterial[ui] = i;
+        TraceLog(LOG_DEBUG, "MODEL: [%s] mesh name (%s), material (%s)", fileName, &name, &material);
 
-            TraceLog(LOG_DEBUG, "MODEL: [%s] mesh name (%s), material (%s)", fileName, &name, &material);
+        const vertexCount = imesh.num_vertexes;
+        mesh.vertexCount = @intCast(vertexCount);
+        mesh.vertices = (try cmem.alloc(f32, vertexCount * 3)).ptr;
+        mesh.normals = (try cmem.alloc(f32, vertexCount * 3)).ptr;
+        mesh.texcoords = (try cmem.alloc(f32, vertexCount * 2)).ptr;
+        // Up to 4 bones per vertex
+        mesh.boneIndices = (try cmem.alloc(u8, vertexCount * 4)).ptr;
+        mesh.boneWeights = (try cmem.alloc(f32, vertexCount * 4)).ptr;
 
-            model.meshes[ui].vertexCount = @intCast(imesh[ui].num_vertexes);
+        mesh.triangleCount = @intCast(imesh.num_triangles);
+        mesh.indices = (try cmem.alloc(c_ushort, imesh.num_triangles * 3)).ptr;
+    }
 
-            model.meshes[ui].vertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 3), @sizeOf(f32))));
-            model.meshes[ui].normals = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 3), @sizeOf(f32))));
-            model.meshes[ui].texcoords = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 2), @sizeOf(f32))));
-
-            model.meshes[ui].boneIndices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 4), @sizeOf(u8))));
-            model.meshes[ui].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 4), @sizeOf(f32))));
-
-            model.meshes[ui].triangleCount = @intCast(imesh[ui].num_triangles);
-            model.meshes[ui].indices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].triangleCount * 3), @sizeOf(c_ushort))));
+    // Triangles
+    for (modelMeshes(model), 0..) |mesh, m| {
+        const imesh = file.read(iqm.Mesh, header.ofs_meshes, m);
+        for (0..imesh.num_triangles) |t| {
+            const triangle = file.read(iqm.Triangle, header.ofs_triangles, imesh.first_triangle + t);
+            // IQM triangles are clockwise: reversed for raylib's counter-clockwise order
+            // NOTE: C stores the unsigned difference into unsigned short, truncating
+            for (mesh.indices[t * 3 ..][0..3], 0..) |*index, k| index.* = @truncate(triangle.vertex[2 - k] -% imesh.first_vertex);
         }
     }
 
-    tri = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_triangles * @sizeOf(IQMTriangle))));
-    _ = memcpy(tri, fileDataPtr + iqmHeader.ofs_triangles, iqmHeader.num_triangles * @sizeOf(IQMTriangle));
-
-    {
-        var m: c_int = 0;
-        while (m < model.meshCount) : (m += 1) {
-            const um: usize = @intCast(m);
-            var tcounter: usize = 0;
-            var i: c_uint = imesh[um].first_triangle;
-            while (i < (imesh[um].first_triangle + imesh[um].num_triangles)) : (i += 1) {
-                model.meshes[um].indices[tcounter + 2] = @intCast(tri[i].vertex[0] - imesh[um].first_vertex);
-                model.meshes[um].indices[tcounter + 1] = @intCast(tri[i].vertex[1] - imesh[um].first_vertex);
-                model.meshes[um].indices[tcounter] = @intCast(tri[i].vertex[2] - imesh[um].first_vertex);
-                tcounter += 3;
-            }
+    // Vertex arrays
+    for (0..header.num_vertexarrays) |a| {
+        const vertexArray = file.read(iqm.VertexArray, header.ofs_vertexarrays, a);
+        for (modelMeshes(model), 0..) |*mesh, m| {
+            const imesh = file.read(iqm.Mesh, header.ofs_meshes, m);
+            try readIqmVertexArray(file, vertexArray, imesh, mesh);
         }
     }
 
-    va = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexarrays * @sizeOf(IQMVertexArray))));
-    _ = memcpy(va, fileDataPtr + iqmHeader.ofs_vertexarrays, iqmHeader.num_vertexarrays * @sizeOf(IQMVertexArray));
+    // Bones (joints) and their bind pose (base pose)
+    const boneCount = header.num_joints;
+    model.skeleton.boneCount = boneCount;
+    const bones = try cmem.alloc(BoneInfo, boneCount);
+    model.skeleton.bones = bones.ptr;
+    const bindPose = try cmem.alloc(Transform, boneCount);
+    model.skeleton.bindPose = bindPose.ptr;
 
-    {
-        var i: c_uint = 0;
-        while (i < iqmHeader.num_vertexarrays) : (i += 1) {
-            switch (va[i].type) {
-                IQM_POSITION => {
-                    vertex = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexes * 3 * @sizeOf(f32))));
-                    _ = memcpy(vertex, fileDataPtr + va[i].offset, iqmHeader.num_vertexes * 3 * @sizeOf(f32));
-
-                    var m: c_uint = 0;
-                    while (m < iqmHeader.num_meshes) : (m += 1) {
-                        var vCounter: usize = 0;
-                        var ii: c_uint = imesh[m].first_vertex * 3;
-                        while (ii < (imesh[m].first_vertex + imesh[m].num_vertexes) * 3) : (ii += 1) {
-                            model.meshes[m].vertices[vCounter] = vertex[ii];
-                            if (model.meshes[m].animVertices != null) model.meshes[m].animVertices[vCounter] = vertex[ii];
-                            vCounter += 1;
-                        }
-                    }
-                },
-                IQM_NORMAL => {
-                    normal = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexes * 3 * @sizeOf(f32))));
-                    _ = memcpy(normal, fileDataPtr + va[i].offset, iqmHeader.num_vertexes * 3 * @sizeOf(f32));
-
-                    var m: c_uint = 0;
-                    while (m < iqmHeader.num_meshes) : (m += 1) {
-                        var vCounter: usize = 0;
-                        var ii: c_uint = imesh[m].first_vertex * 3;
-                        while (ii < (imesh[m].first_vertex + imesh[m].num_vertexes) * 3) : (ii += 1) {
-                            model.meshes[m].normals[vCounter] = normal[ii];
-                            if (model.meshes[m].animNormals != null) model.meshes[m].animNormals[vCounter] = normal[ii];
-                            vCounter += 1;
-                        }
-                    }
-                },
-                IQM_TEXCOORD => {
-                    text = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexes * 2 * @sizeOf(f32))));
-                    _ = memcpy(text, fileDataPtr + va[i].offset, iqmHeader.num_vertexes * 2 * @sizeOf(f32));
-
-                    var m: c_uint = 0;
-                    while (m < iqmHeader.num_meshes) : (m += 1) {
-                        var vCounter: usize = 0;
-                        var ii: c_uint = imesh[m].first_vertex * 2;
-                        while (ii < (imesh[m].first_vertex + imesh[m].num_vertexes) * 2) : (ii += 1) {
-                            model.meshes[m].texcoords[vCounter] = text[ii];
-                            vCounter += 1;
-                        }
-                    }
-                },
-                IQM_BLENDINDEXES => {
-                    blendi = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexes * 4 * @sizeOf(u8))));
-                    _ = memcpy(blendi, fileDataPtr + va[i].offset, iqmHeader.num_vertexes * 4 * @sizeOf(u8));
-
-                    var m: c_uint = 0;
-                    while (m < iqmHeader.num_meshes) : (m += 1) {
-                        var boneCounter: usize = 0;
-                        var ii: c_uint = imesh[m].first_vertex * 4;
-                        while (ii < (imesh[m].first_vertex + imesh[m].num_vertexes) * 4) : (ii += 1) {
-                            model.meshes[m].boneIndices[boneCounter] = blendi[ii];
-                            boneCounter += 1;
-                        }
-                    }
-                },
-                IQM_BLENDWEIGHTS => {
-                    blendw = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexes * 4 * @sizeOf(u8))));
-                    _ = memcpy(blendw, fileDataPtr + va[i].offset, iqmHeader.num_vertexes * 4 * @sizeOf(u8));
-
-                    var m: c_uint = 0;
-                    while (m < iqmHeader.num_meshes) : (m += 1) {
-                        var boneCounter: usize = 0;
-                        var ii: c_uint = imesh[m].first_vertex * 4;
-                        while (ii < (imesh[m].first_vertex + imesh[m].num_vertexes) * 4) : (ii += 1) {
-                            model.meshes[m].boneWeights[boneCounter] = @as(f32, @floatFromInt(blendw[ii])) / 255.0;
-                            boneCounter += 1;
-                        }
-                    }
-                },
-                IQM_COLOR => {
-                    color = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_vertexes * 4 * @sizeOf(u8))));
-                    _ = memcpy(color, fileDataPtr + va[i].offset, iqmHeader.num_vertexes * 4 * @sizeOf(u8));
-
-                    var m: c_uint = 0;
-                    while (m < iqmHeader.num_meshes) : (m += 1) {
-                        model.meshes[m].colors = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[m].vertexCount * 4), @sizeOf(u8))));
-
-                        var vCounter: usize = 0;
-                        var ii: c_uint = imesh[m].first_vertex * 4;
-                        while (ii < (imesh[m].first_vertex + imesh[m].num_vertexes) * 4) : (ii += 1) {
-                            model.meshes[m].colors[vCounter] = color[ii];
-                            vCounter += 1;
-                        }
-                    }
-                },
-                else => {},
-            }
-        }
+    for (bones, bindPose, 0..) |*bone, *pose, j| {
+        const joint = file.read(iqm.Joint, header.ofs_joints, j);
+        bone.parent = joint.parent;
+        bone.name = file.name(joint.name);
+        pose.* = .{
+            .translation = .{ .x = joint.translate[0], .y = joint.translate[1], .z = joint.translate[2] },
+            .rotation = .{ .x = joint.rotate[0], .y = joint.rotate[1], .z = joint.rotate[2], .w = joint.rotate[3] },
+            .scale = .{ .x = joint.scale[0], .y = joint.scale[1], .z = joint.scale[2] },
+        };
     }
 
-    ijoint = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_joints * @sizeOf(IQMJoint))));
-    _ = memcpy(ijoint, fileDataPtr + iqmHeader.ofs_joints, iqmHeader.num_joints * @sizeOf(IQMJoint));
+    buildPoseFromParentJoints(bones, bindPose);
 
-    model.skeleton.boneCount = @intCast(iqmHeader.num_joints);
-    model.skeleton.bones = @ptrCast(@alignCast(RL_CALLOC(iqmHeader.num_joints, @sizeOf(BoneInfo))));
-    model.skeleton.bindPose = @ptrCast(@alignCast(RL_CALLOC(iqmHeader.num_joints, @sizeOf(Transform))));
-
-    {
-        var i: c_uint = 0;
-        while (i < iqmHeader.num_joints) : (i += 1) {
-            model.skeleton.bones[i].parent = ijoint[i].parent;
-            _ = memcpy(&model.skeleton.bones[i].name, fileDataPtr + iqmHeader.ofs_text + ijoint[i].name, BONE_NAME_LENGTH);
-
-            model.skeleton.bindPose[i].translation.x = ijoint[i].translate[0];
-            model.skeleton.bindPose[i].translation.y = ijoint[i].translate[1];
-            model.skeleton.bindPose[i].translation.z = ijoint[i].translate[2];
-
-            model.skeleton.bindPose[i].rotation.x = ijoint[i].rotate[0];
-            model.skeleton.bindPose[i].rotation.y = ijoint[i].rotate[1];
-            model.skeleton.bindPose[i].rotation.z = ijoint[i].rotate[2];
-            model.skeleton.bindPose[i].rotation.w = ijoint[i].rotate[3];
-
-            model.skeleton.bindPose[i].scale.x = ijoint[i].scale[0];
-            model.skeleton.bindPose[i].scale.y = ijoint[i].scale[1];
-            model.skeleton.bindPose[i].scale.z = ijoint[i].scale[2];
-        }
-    }
-
-    BuildPoseFromParentJoints(model.skeleton.bones, @bitCast(model.skeleton.boneCount), model.skeleton.bindPose);
-
-    model.currentPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
-    model.boneMatrices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Matrix))));
-    {
-        var j: c_int = 0;
-        while (j < model.skeleton.boneCount) : (j += 1) model.boneMatrices[@intCast(j)] = MatrixIdentity();
-    }
-
-    UnloadFileData(fileData);
-
-    RL_FREE(imesh);
-    RL_FREE(tri);
-    RL_FREE(va);
-    RL_FREE(vertex);
-    RL_FREE(normal);
-    RL_FREE(text);
-    RL_FREE(blendi);
-    RL_FREE(blendw);
-    RL_FREE(ijoint);
-    RL_FREE(color);
+    try initAnimationState(&model);
 
     return model;
 }
 
+/// Copies the vertex data of one IQM vertex array into one mesh
+fn readIqmVertexArray(file: iqm.File, vertexArray: iqm.VertexArray, imesh: iqm.Mesh, mesh: *Mesh) error{OutOfMemory}!void {
+    const first: usize = imesh.first_vertex;
+    const vertexCount = imesh.num_vertexes;
+    switch (@as(iqm.VertexArrayType, @fromBackingInt(@intCast(vertexArray.type)))) {
+        .position => for (mesh.vertices[0 .. vertexCount * 3], first * 3..) |*value, i| {
+            value.* = file.read(f32, vertexArray.offset, i);
+        },
+        .normal => for (mesh.normals[0 .. vertexCount * 3], first * 3..) |*value, i| {
+            value.* = file.read(f32, vertexArray.offset, i);
+        },
+        .texcoord => for (mesh.texcoords[0 .. vertexCount * 2], first * 2..) |*value, i| {
+            value.* = file.read(f32, vertexArray.offset, i);
+        },
+        .blendindexes => for (mesh.boneIndices[0 .. vertexCount * 4], first * 4..) |*value, i| {
+            value.* = file.read(u8, vertexArray.offset, i);
+        },
+        .blendweights => for (mesh.boneWeights[0 .. vertexCount * 4], first * 4..) |*value, i| {
+            value.* = @as(f32, @floatFromInt(file.read(u8, vertexArray.offset, i))) / 255.0;
+        },
+        .color => {
+            const colors = try cmem.alloc(u8, vertexCount * 4);
+            cmem.free(mesh.colors);
+            mesh.colors = colors.ptr;
+            for (colors, first * 4..) |*value, i| value.* = file.read(u8, vertexArray.offset, i);
+        },
+        .tangent, _ => {},
+    }
+}
+
+/// Allocates the model's current pose and its bone matrices, set to identity
+fn initAnimationState(model: *Model) error{OutOfMemory}!void {
+    const boneCount = model.skeleton.boneCount;
+    model.currentPose = (try cmem.alloc(Transform, boneCount)).ptr;
+    const boneMatrices = try cmem.alloc(Matrix, boneCount);
+    @memset(boneMatrices, MatrixIdentity());
+    model.boneMatrices = boneMatrices.ptr;
+}
+
 // Load IQM animation data
-fn LoadModelAnimationsIQM(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
-    var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
-    const fileDataPtr = fileData;
+fn loadModelAnimationsIqm(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
+    const file = openIqm(fileName) orelse return null;
+    defer unloadIqm(file);
 
-    if (fileDataPtr == null) return null;
-
-    const iqmHeader: *IQMHeader = @ptrCast(@alignCast(fileDataPtr));
-
-    if (memcmp(&iqmHeader.magic, IQM_MAGIC, IQM_MAGIC.len + 1) != 0) {
-        TraceLog(LOG_WARNING, "MODEL: [%s] IQM file is not a valid model", fileName);
-        UnloadFileData(fileData);
+    animCount.* = @intCast(file.header.num_anims);
+    const animations = iqmAnimations(fileName, file) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for IQM animations", fileName);
+        animCount.* = 0;
         return null;
-    }
+    };
+    return animations.ptr;
+}
 
-    if (iqmHeader.version != IQM_VERSION) {
-        TraceLog(LOG_WARNING, "MODEL: [%s] IQM file version not supported (%i)", fileName, iqmHeader.version);
-        UnloadFileData(fileData);
-        return null;
-    }
+fn iqmAnimations(fileName: [*c]const u8, file: iqm.File) error{OutOfMemory}![]ModelAnimation {
+    const header = file.header;
+    const animations = try cmem.alloc(ModelAnimation, header.num_anims);
+    errdefer UnloadModelAnimations(animations.ptr, @intCast(animations.len));
 
-    const poses: [*c]IQMPose = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_poses * @sizeOf(IQMPose))));
-    _ = memcpy(poses, fileDataPtr + iqmHeader.ofs_poses, iqmHeader.num_poses * @sizeOf(IQMPose));
+    for (animations, 0..) |*animation, a| {
+        const anim = file.read(iqm.Anim, header.ofs_anims, a);
+        animation.boneCount = header.num_poses;
+        const keyframePoses = try cmem.alloc(ModelAnimPose, anim.num_frames);
+        animation.keyframePoses = keyframePoses.ptr;
+        animation.keyframeCount = @intCast(anim.num_frames);
+        animation.name = file.name(anim.name);
+        // TODO (upstream): store the animation framerate?
 
-    animCount.* = @intCast(iqmHeader.num_anims);
-    const anim: [*c]IQMAnim = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_anims * @sizeOf(IQMAnim))));
-    _ = memcpy(anim, fileDataPtr + iqmHeader.ofs_anims, iqmHeader.num_anims * @sizeOf(IQMAnim));
+        TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Framerate: %f", fileName, &animation.name, animation.keyframeCount, @as(f64, anim.framerate));
 
-    const animations: [*c]ModelAnimation = @ptrCast(@alignCast(RL_CALLOC(iqmHeader.num_anims, @sizeOf(ModelAnimation))));
+        for (keyframePoses) |*pose| pose.* = (try cmem.alloc(Transform, header.num_poses)).ptr;
 
-    const framedata: [*c]c_ushort = @ptrCast(@alignCast(RL_CALLOC(iqmHeader.num_frames * iqmHeader.num_framechannels, @sizeOf(c_ushort))));
-    _ = memcpy(framedata, fileDataPtr + iqmHeader.ofs_frames, iqmHeader.num_frames * iqmHeader.num_framechannels * @sizeOf(c_ushort));
-
-    const joints: [*c]IQMJoint = @ptrCast(@alignCast(RL_CALLOC(iqmHeader.num_joints, @sizeOf(IQMJoint))));
-    _ = memcpy(joints, fileDataPtr + iqmHeader.ofs_joints, iqmHeader.num_joints * @sizeOf(IQMJoint));
-
-    var a: c_uint = 0;
-    while (a < iqmHeader.num_anims) : (a += 1) {
-        animations[a].boneCount = @intCast(iqmHeader.num_poses);
-        const bones: [*c]BoneInfo = @ptrCast(@alignCast(RL_CALLOC(iqmHeader.num_poses, @sizeOf(BoneInfo))));
-
-        animations[a].keyframeCount = @intCast(anim[a].num_frames);
-        animations[a].keyframePoses = @ptrCast(@alignCast(RL_CALLOC(anim[a].num_frames, @sizeOf(ModelAnimPose))));
-        _ = memcpy(&animations[a].name, fileDataPtr + iqmHeader.ofs_text + anim[a].name, 32);
-
-        TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Framerate: %f", fileName, &animations[a].name, animations[a].keyframeCount, @as(f64, anim[a].framerate));
-
-        var j: c_uint = 0;
-        while (j < iqmHeader.num_poses) : (j += 1) {
-            bones[j].parent = poses[j].parent;
-        }
-
-        j = 0;
-        while (j < anim[a].num_frames) : (j += 1) {
-            animations[a].keyframePoses[j] = @ptrCast(@alignCast(RL_MALLOC(iqmHeader.num_poses * @sizeOf(Transform))));
-        }
-
-        var dcounter: usize = @intCast(anim[a].first_frame * iqmHeader.num_framechannels);
-
-        var frame: c_uint = 0;
-        while (frame < anim[a].num_frames) : (frame += 1) {
-            var i: c_uint = 0;
-            while (i < iqmHeader.num_poses) : (i += 1) {
-                const kp = &animations[a].keyframePoses[frame][i];
-                kp.translation.x = poses[i].channeloffset[0];
-                if (poses[i].mask & 0x01 != 0) {
-                    kp.translation.x += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[0];
-                    dcounter += 1;
+        // Each frame stores the animated channels of every pose, in order
+        var channel: usize = @as(usize, anim.first_frame) * header.num_framechannels;
+        for (keyframePoses) |pose| {
+            for (pose[0..header.num_poses], 0..) |*transform, i| {
+                const ipose = file.read(iqm.Pose, header.ofs_poses, i);
+                var values: [10]f32 = undefined;
+                for (&values, ipose.channeloffset, ipose.channelscale, 0..) |*value, offset, scale, c| {
+                    value.* = offset;
+                    if ((ipose.mask >> @intCast(c)) & 1 != 0) {
+                        value.* += @as(f32, @floatFromInt(file.read(u16, header.ofs_frames, channel))) * scale;
+                        channel += 1;
+                    }
                 }
-                kp.translation.y = poses[i].channeloffset[1];
-                if (poses[i].mask & 0x02 != 0) {
-                    kp.translation.y += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[1];
-                    dcounter += 1;
-                }
-                kp.translation.z = poses[i].channeloffset[2];
-                if (poses[i].mask & 0x04 != 0) {
-                    kp.translation.z += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[2];
-                    dcounter += 1;
-                }
-                kp.rotation.x = poses[i].channeloffset[3];
-                if (poses[i].mask & 0x08 != 0) {
-                    kp.rotation.x += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[3];
-                    dcounter += 1;
-                }
-                kp.rotation.y = poses[i].channeloffset[4];
-                if (poses[i].mask & 0x10 != 0) {
-                    kp.rotation.y += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[4];
-                    dcounter += 1;
-                }
-                kp.rotation.z = poses[i].channeloffset[5];
-                if (poses[i].mask & 0x20 != 0) {
-                    kp.rotation.z += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[5];
-                    dcounter += 1;
-                }
-                kp.rotation.w = poses[i].channeloffset[6];
-                if (poses[i].mask & 0x40 != 0) {
-                    kp.rotation.w += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[6];
-                    dcounter += 1;
-                }
-                kp.scale.x = poses[i].channeloffset[7];
-                if (poses[i].mask & 0x80 != 0) {
-                    kp.scale.x += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[7];
-                    dcounter += 1;
-                }
-                kp.scale.y = poses[i].channeloffset[8];
-                if (poses[i].mask & 0x100 != 0) {
-                    kp.scale.y += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[8];
-                    dcounter += 1;
-                }
-                kp.scale.z = poses[i].channeloffset[9];
-                if (poses[i].mask & 0x200 != 0) {
-                    kp.scale.z += @as(f32, @floatFromInt(framedata[dcounter])) * poses[i].channelscale[9];
-                    dcounter += 1;
-                }
-
-                kp.rotation = QuaternionNormalize(kp.rotation);
+                transform.* = .{
+                    .translation = .{ .x = values[0], .y = values[1], .z = values[2] },
+                    .rotation = QuaternionNormalize(.{ .x = values[3], .y = values[4], .z = values[5], .w = values[6] }),
+                    .scale = .{ .x = values[7], .y = values[8], .z = values[9] },
+                };
             }
         }
 
-        frame = 0;
-        while (frame < anim[a].num_frames) : (frame += 1) {
-            var i: c_int = 0;
-            while (i < animations[a].boneCount) : (i += 1) {
-                const ui: usize = @intCast(i);
-                if (bones[ui].parent >= 0) {
-                    const pp: usize = @intCast(bones[ui].parent);
-                    animations[a].keyframePoses[frame][ui].rotation = QuaternionMultiply(animations[a].keyframePoses[frame][pp].rotation, animations[a].keyframePoses[frame][ui].rotation);
-                    animations[a].keyframePoses[frame][ui].translation = Vector3RotateByQuaternion(animations[a].keyframePoses[frame][ui].translation, animations[a].keyframePoses[frame][pp].rotation);
-                    animations[a].keyframePoses[frame][ui].translation = Vector3Add(animations[a].keyframePoses[frame][ui].translation, animations[a].keyframePoses[frame][pp].translation);
-                    animations[a].keyframePoses[frame][ui].scale = Vector3Multiply(animations[a].keyframePoses[frame][ui].scale, animations[a].keyframePoses[frame][pp].scale);
-                }
+        // Build frame poses: each bone relative to its parent
+        for (keyframePoses) |pose| {
+            for (0..animation.boneCount) |i| {
+                const parent = file.read(iqm.Pose, header.ofs_poses, i).parent;
+                if (parent < 0) continue;
+                const transform = &pose[i];
+                const parentTransform = &pose[@intCast(parent)];
+                transform.rotation = QuaternionMultiply(parentTransform.rotation, transform.rotation);
+                transform.translation = Vector3RotateByQuaternion(transform.translation, parentTransform.rotation);
+                transform.translation = Vector3Add(transform.translation, parentTransform.translation);
+                transform.scale = Vector3Multiply(transform.scale, parentTransform.scale);
             }
         }
-
-        RL_FREE(bones);
     }
-
-    UnloadFileData(fileData);
-
-    RL_FREE(joints);
-    RL_FREE(framedata);
-    RL_FREE(poses);
-    RL_FREE(anim);
 
     return animations;
 }
@@ -5965,7 +5702,7 @@ fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
                         animations[a].keyframePoses[ujf][ukb] = tr;
                     }
 
-                    BuildPoseFromParentJoints(bones, @bitCast(animations[a].boneCount), animations[a].keyframePoses[ujf]);
+                    buildPoseFromParentJoints(bones[0..animations[a].boneCount], animations[a].keyframePoses[ujf][0..animations[a].boneCount]);
                 }
 
                 TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Duration: %fs", fileName, if (animData.name != null) @as([*c]const u8, animData.name) else @as([*c]const u8, "NULL"), animations[a].keyframeCount, animDuration);
