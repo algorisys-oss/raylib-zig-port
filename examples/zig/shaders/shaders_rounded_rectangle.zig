@@ -69,11 +69,11 @@ const RoundedRectangle = struct {
 
     /// Update rounded rectangle uniforms
     fn update(rec: RoundedRectangle, shader: rl.Shader) void {
-        rl.setShaderValue(shader, rec.radius_loc, &rec.corner_radius, .vec4);
-        rl.setShaderValue(shader, rec.shadow_radius_loc, &rec.shadow_radius, .float);
-        rl.setShaderValue(shader, rec.shadow_offset_loc, &rec.shadow_offset, .vec2);
-        rl.setShaderValue(shader, rec.shadow_scale_loc, &rec.shadow_scale, .float);
-        rl.setShaderValue(shader, rec.border_thickness_loc, &rec.border_thickness, .float);
+        rl.setShaderValue(shader, rec.radius_loc, rec.corner_radius);
+        rl.setShaderValue(shader, rec.shadow_radius_loc, rec.shadow_radius);
+        rl.setShaderValue(shader, rec.shadow_offset_loc, rec.shadow_offset);
+        rl.setShaderValue(shader, rec.shadow_scale_loc, rec.shadow_scale);
+        rl.setShaderValue(shader, rec.border_thickness_loc, rec.border_thickness);
     }
 
     /// Draw `rec` (framed and labelled, `margin` pixels around it) with the
@@ -97,11 +97,11 @@ const RoundedRectangle = struct {
 
         // Flip Y axis to match shader coordinate system
         const flipped: rl.Vector4 = .{ .x = rec.x, .y = screen_height - rec.y - rec.height, .z = rec.width, .w = rec.height };
-        rl.setShaderValue(shader, self.rectangle_loc, &flipped, .vec4);
+        rl.setShaderValue(shader, self.rectangle_loc, flipped);
 
-        rl.setShaderValue(shader, self.color_loc, &rl.colorNormalize(color), .vec4);
-        rl.setShaderValue(shader, self.shadow_color_loc, &rl.colorNormalize(shadow_color), .vec4);
-        rl.setShaderValue(shader, self.border_color_loc, &rl.colorNormalize(border_color), .vec4);
+        rl.setShaderValue(shader, self.color_loc, rl.colorNormalize(color));
+        rl.setShaderValue(shader, self.shadow_color_loc, rl.colorNormalize(shadow_color));
+        rl.setShaderValue(shader, self.border_color_loc, rl.colorNormalize(border_color));
 
         rl.beginShaderMode(shader);
         defer rl.endShaderMode();

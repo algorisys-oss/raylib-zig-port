@@ -53,9 +53,9 @@ pub fn main() !void {
     const brightness_loc = rl.getShaderLocation(shdr_color_correction, "brightness");
 
     // Set shader values (they can be changed later)
-    rl.setShaderValue(shdr_color_correction, contrast_loc, &contrast, .float);
-    rl.setShaderValue(shdr_color_correction, saturation_loc, &saturation, .float);
-    rl.setShaderValue(shdr_color_correction, brightness_loc, &brightness, .float);
+    rl.setShaderValue(shdr_color_correction, contrast_loc, contrast);
+    rl.setShaderValue(shdr_color_correction, saturation_loc, saturation);
+    rl.setShaderValue(shdr_color_correction, brightness_loc, brightness);
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
 
@@ -81,9 +81,9 @@ pub fn main() !void {
         }
 
         // Send the values to the shader
-        rl.setShaderValue(shdr_color_correction, contrast_loc, &contrast, .float);
-        rl.setShaderValue(shdr_color_correction, saturation_loc, &saturation, .float);
-        rl.setShaderValue(shdr_color_correction, brightness_loc, &brightness, .float);
+        rl.setShaderValue(shdr_color_correction, contrast_loc, contrast);
+        rl.setShaderValue(shdr_color_correction, saturation_loc, saturation);
+        rl.setShaderValue(shdr_color_correction, brightness_loc, brightness);
 
         // Draw
         rl.beginDrawing();

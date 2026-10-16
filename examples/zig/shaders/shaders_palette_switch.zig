@@ -17,39 +17,39 @@ const values_per_color = 3;
 
 const Palette = struct {
     name: [:0]const u8,
-    colors: [colors_per_palette * values_per_color]i32,
+    colors: [colors_per_palette][values_per_color]i32, // RGB, one ivec3 per color
 };
 
 const palettes = [_]Palette{
     .{ .name = "3-BIT RGB", .colors = .{
-        0,   0,   0,
-        255, 0,   0,
-        0,   255, 0,
-        0,   0,   255,
-        0,   255, 255,
-        255, 0,   255,
-        255, 255, 0,
-        255, 255, 255,
+        .{ 0, 0, 0 },
+        .{ 255, 0, 0 },
+        .{ 0, 255, 0 },
+        .{ 0, 0, 255 },
+        .{ 0, 255, 255 },
+        .{ 255, 0, 255 },
+        .{ 255, 255, 0 },
+        .{ 255, 255, 255 },
     } },
     .{ .name = "AMMO-8 (GameBoy-like)", .colors = .{
-        4,   12,  6,
-        17,  35,  24,
-        30,  58,  41,
-        48,  93,  66,
-        77,  128, 97,
-        137, 162, 87,
-        190, 220, 127,
-        238, 255, 204,
+        .{ 4, 12, 6 },
+        .{ 17, 35, 24 },
+        .{ 30, 58, 41 },
+        .{ 48, 93, 66 },
+        .{ 77, 128, 97 },
+        .{ 137, 162, 87 },
+        .{ 190, 220, 127 },
+        .{ 238, 255, 204 },
     } },
     .{ .name = "RKBV (2-strip film)", .colors = .{
-        21,  25,  26,
-        138, 76,  88,
-        217, 98,  117,
-        230, 184, 193,
-        69,  107, 115,
-        75,  151, 166,
-        165, 189, 194,
-        255, 245, 247,
+        .{ 21, 25, 26 },
+        .{ 138, 76, 88 },
+        .{ 217, 98, 117 },
+        .{ 230, 184, 193 },
+        .{ 69, 107, 115 },
+        .{ 75, 151, 166 },
+        .{ 165, 189, 194 },
+        .{ 255, 245, 247 },
     } },
 };
 
@@ -86,7 +86,7 @@ pub fn main() !void {
 
         // Send palette data to the shader to be used on drawing
         // NOTE: We are sending RGB triplets w/o the alpha channel
-        rl.setShaderValueV(shader, palette_loc, &palettes[current_palette].colors, .ivec3, colors_per_palette);
+        rl.setShaderValueV(shader, palette_loc, &palettes[current_palette].colors);
 
         // Draw
         rl.beginDrawing();

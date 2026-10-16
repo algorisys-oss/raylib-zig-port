@@ -39,7 +39,7 @@ pub fn main() !void {
 
     // Send the updated values to the shader
     const resolution = [2]f32{ screen_width, screen_height };
-    rl.setShaderValue(shader, resolution_loc, &resolution, .vec2);
+    rl.setShaderValue(shader, resolution_loc, resolution);
 
     var circle_pos: rl.Vector2 = .{ .x = 40.0, .y = @as(f32, screen_height) * 0.5 };
     var circle_speed: f32 = 1.0;
@@ -60,7 +60,7 @@ pub fn main() !void {
         if (rl.isKeyPressed(.right) and font_size < 15.0) font_size += 1; // Increase fontSize
 
         // Set fontsize for the shader
-        rl.setShaderValue(shader, font_size_loc, &font_size, .float);
+        rl.setShaderValue(shader, font_size_loc, font_size);
 
         // Draw
         {

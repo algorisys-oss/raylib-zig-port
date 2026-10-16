@@ -45,9 +45,9 @@ pub fn main() !void {
     defer rl.unloadShader(material.shader);
 
     const gamma: i32 = @intFromBool(use_hdr);
-    rl.setShaderValue(material.shader, rl.getShaderLocation(material.shader, "environmentMap"), &@as(i32, @backingInt(rl.MaterialMapIndex.cubemap)), .int);
-    rl.setShaderValue(material.shader, rl.getShaderLocation(material.shader, "doGamma"), &gamma, .int);
-    rl.setShaderValue(material.shader, rl.getShaderLocation(material.shader, "vflipped"), &gamma, .int);
+    rl.setShaderValue(material.shader, rl.getShaderLocation(material.shader, "environmentMap"), @as(i32, @backingInt(rl.MaterialMapIndex.cubemap)));
+    rl.setShaderValue(material.shader, rl.getShaderLocation(material.shader, "doGamma"), gamma);
+    rl.setShaderValue(material.shader, rl.getShaderLocation(material.shader, "vflipped"), gamma);
 
     // Load cubemap shader and setup required shader locations
     const shdr_cubemap = try rl.loadShader(
@@ -56,7 +56,7 @@ pub fn main() !void {
     );
     defer rl.unloadShader(shdr_cubemap);
 
-    rl.setShaderValue(shdr_cubemap, rl.getShaderLocation(shdr_cubemap, "equirectangularMap"), &@as(i32, 0), .int);
+    rl.setShaderValue(shdr_cubemap, rl.getShaderLocation(shdr_cubemap, "equirectangularMap"), 0);
 
     var skybox_file_name = std.mem.zeroes([256:0]u8);
 

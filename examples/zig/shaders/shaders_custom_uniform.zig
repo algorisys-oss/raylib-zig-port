@@ -66,7 +66,7 @@ pub fn main() !void {
         swirl_center[1] = screen_height - mouse_position.y;
 
         // Send new value to the shader to be used on drawing
-        rl.setShaderValue(shader, swirl_center_loc, &swirl_center, .vec2);
+        rl.setShaderValue(shader, swirl_center_loc, swirl_center);
 
         // Draw
         {

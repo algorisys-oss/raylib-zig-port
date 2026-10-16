@@ -51,7 +51,7 @@ pub fn main() !void {
     var locs: ShaderLocs = .init(shader);
 
     const resolution = [2]f32{ screen_width, screen_height };
-    rl.setShaderValue(shader, locs.resolution, &resolution, .vec2);
+    rl.setShaderValue(shader, locs.resolution, resolution);
 
     var total_time: f32 = 0.0;
     var shader_auto_reloading = false;
@@ -66,8 +66,8 @@ pub fn main() !void {
         const mouse_pos = [2]f32{ mouse.x, mouse.y };
 
         // Set shader required uniform values
-        rl.setShaderValue(shader, locs.time, &total_time, .float);
-        rl.setShaderValue(shader, locs.mouse, &mouse_pos, .vec2);
+        rl.setShaderValue(shader, locs.time, total_time);
+        rl.setShaderValue(shader, locs.mouse, mouse_pos);
 
         // Hot shader reloading
         if (shader_auto_reloading or rl.isMouseButtonPressed(.left)) {
@@ -86,7 +86,7 @@ pub fn main() !void {
                     locs = .init(shader);
 
                     // Reset required uniforms
-                    rl.setShaderValue(shader, locs.resolution, &resolution, .vec2);
+                    rl.setShaderValue(shader, locs.resolution, resolution);
                 }
 
                 frag_shader_file_mod_time = current_frag_shader_mod_time;

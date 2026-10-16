@@ -58,9 +58,9 @@ pub fn main() !void {
     const offset_loc = rl.getShaderLocation(shader, "offset");
 
     // Upload the shader uniform values!
-    rl.setShaderValue(shader, c_loc, &c, .vec2);
-    rl.setShaderValue(shader, zoom_loc, &zoom, .float);
-    rl.setShaderValue(shader, offset_loc, &offset, .vec2);
+    rl.setShaderValue(shader, c_loc, c);
+    rl.setShaderValue(shader, zoom_loc, zoom);
+    rl.setShaderValue(shader, offset_loc, offset);
 
     var increment_speed: i32 = 0; // Multiplier of speed to change c value
     var show_controls = true; // Show controls
@@ -74,7 +74,7 @@ pub fn main() !void {
         for (point_keys, points_of_interest) |key, point| {
             if (rl.isKeyPressed(key)) {
                 c = point;
-                rl.setShaderValue(shader, c_loc, &c, .vec2);
+                rl.setShaderValue(shader, c_loc, c);
                 break;
             }
         }
@@ -83,8 +83,8 @@ pub fn main() !void {
         if (rl.isKeyPressed(.r)) {
             zoom = starting_zoom;
             offset = .{ 0.0, 0.0 };
-            rl.setShaderValue(shader, zoom_loc, &zoom, .float);
-            rl.setShaderValue(shader, offset_loc, &offset, .vec2);
+            rl.setShaderValue(shader, zoom_loc, zoom);
+            rl.setShaderValue(shader, offset_loc, offset);
         }
 
         if (rl.isKeyPressed(.space)) increment_speed = 0; // Pause animation (c change)
@@ -115,15 +115,15 @@ pub fn main() !void {
             offset[1] += rl.getFrameTime() * offset_velocity.y;
 
             // Update the shader uniform values!
-            rl.setShaderValue(shader, zoom_loc, &zoom, .float);
-            rl.setShaderValue(shader, offset_loc, &offset, .vec2);
+            rl.setShaderValue(shader, zoom_loc, zoom);
+            rl.setShaderValue(shader, offset_loc, offset);
         }
 
         // Increment c value with time
         const dc = rl.getFrameTime() * @as(f32, @floatFromInt(increment_speed)) * 0.0005;
         c[0] += dc;
         c[1] += dc;
-        rl.setShaderValue(shader, c_loc, &c, .vec2);
+        rl.setShaderValue(shader, c_loc, c);
 
         // Draw
         // Using a render texture to draw Julia set

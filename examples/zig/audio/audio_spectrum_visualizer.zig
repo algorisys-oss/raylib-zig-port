@@ -66,7 +66,7 @@ pub fn main() !void {
 
     const i_resolution_location = rl.getShaderLocation(shader, "iResolution");
     const i_channel0_location = rl.getShaderLocation(shader, "iChannel0");
-    rl.setShaderValue(shader, i_resolution_location, &i_resolution, .vec2);
+    rl.setShaderValue(shader, i_resolution_location, i_resolution);
     rl.setShaderValueTexture(shader, i_channel0_location, fft_texture);
 
     rl.initAudioDevice();

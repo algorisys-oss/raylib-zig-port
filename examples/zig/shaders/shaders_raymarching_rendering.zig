@@ -41,7 +41,7 @@ pub fn main() !void {
     const resolution_loc = rl.getShaderLocation(shader, "resolution");
 
     var resolution = [2]f32{ screen_width, screen_height };
-    rl.setShaderValue(shader, resolution_loc, &resolution, .vec2);
+    rl.setShaderValue(shader, resolution_loc, resolution);
 
     var run_time: f32 = 0.0;
 
@@ -57,14 +57,14 @@ pub fn main() !void {
         run_time += delta_time;
 
         // Set shader required uniform values
-        rl.setShaderValue(shader, view_eye_loc, &camera.position, .vec3);
-        rl.setShaderValue(shader, view_center_loc, &camera.target, .vec3);
-        rl.setShaderValue(shader, run_time_loc, &run_time, .float);
+        rl.setShaderValue(shader, view_eye_loc, camera.position);
+        rl.setShaderValue(shader, view_center_loc, camera.target);
+        rl.setShaderValue(shader, run_time_loc, run_time);
 
         // Check if screen is resized
         if (rl.isWindowResized()) {
             resolution = .{ @floatFromInt(rl.getScreenWidth()), @floatFromInt(rl.getScreenHeight()) };
-            rl.setShaderValue(shader, resolution_loc, &resolution, .vec2);
+            rl.setShaderValue(shader, resolution_loc, resolution);
         }
 
         // Draw

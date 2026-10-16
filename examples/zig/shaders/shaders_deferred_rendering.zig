@@ -150,9 +150,9 @@ pub fn main() !void {
     const tex_unit_position: i32 = 0;
     const tex_unit_normal: i32 = 1;
     const tex_unit_albedo_spec: i32 = 2;
-    rl.setShaderValue(deferred_shader, rl.gl.getLocationUniform(deferred_shader.id, "gPosition"), &tex_unit_position, .sampler2d);
-    rl.setShaderValue(deferred_shader, rl.gl.getLocationUniform(deferred_shader.id, "gNormal"), &tex_unit_normal, .sampler2d);
-    rl.setShaderValue(deferred_shader, rl.gl.getLocationUniform(deferred_shader.id, "gAlbedoSpec"), &tex_unit_albedo_spec, .sampler2d);
+    rl.setShaderValue(deferred_shader, rl.gl.getLocationUniform(deferred_shader.id, "gPosition"), tex_unit_position);
+    rl.setShaderValue(deferred_shader, rl.gl.getLocationUniform(deferred_shader.id, "gNormal"), tex_unit_normal);
+    rl.setShaderValue(deferred_shader, rl.gl.getLocationUniform(deferred_shader.id, "gAlbedoSpec"), tex_unit_albedo_spec);
     rl.gl.disableShader();
 
     // Assign out lighting shader to model
@@ -192,7 +192,7 @@ pub fn main() !void {
         rl.updateCamera(&camera, .orbital);
 
         // Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
-        rl.setShaderValue(deferred_shader, deferred_shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(deferred_shader, deferred_shader.loc(.vector_view).*, camera.position);
 
         // Check key inputs to enable/disable lights
         for (&lights, [_]rl.KeyboardKey{ .y, .r, .g, .b }) |*light, key| {

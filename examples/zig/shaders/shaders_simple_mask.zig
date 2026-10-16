@@ -88,7 +88,7 @@ pub fn main() !void {
         rotation.z -= 0.0025;
 
         // Send frames counter to shader for animation
-        rl.setShaderValue(shader, shader_frame, &frames_counter, .int);
+        rl.setShaderValue(shader, shader_frame, frames_counter);
 
         // Rotate one of the models
         model1.transform = rl.math.matrixRotateXYZ(rotation);

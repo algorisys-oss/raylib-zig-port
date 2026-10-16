@@ -42,7 +42,7 @@ pub fn main() !void {
 
     // Transfer screenCenter position to shader. Which is used to calculate ray direction
     const screen_center: rl.Vector2 = .{ .x = screen_width / 2.0, .y = screen_height / 2.0 };
-    rl.setShaderValue(shdr_raymarch, march_locs.screen_center, &screen_center, .vec2);
+    rl.setShaderValue(shdr_raymarch, march_locs.screen_center, screen_center);
 
     // Use Customized function to create writable depth texture buffer
     const target = try loadRenderTextureDepthTex(screen_width, screen_height);
@@ -68,11 +68,11 @@ pub fn main() !void {
         rl.updateCamera(&camera, .orbital);
 
         // Update Camera Postion in the ray march shader
-        rl.setShaderValue(shdr_raymarch, march_locs.cam_pos, &camera.position, .vec3);
+        rl.setShaderValue(shdr_raymarch, march_locs.cam_pos, camera.position);
 
         // Update Camera Looking Vector. Vector length determines FOV
         const cam_dir = rl.math.vector3Scale(rl.math.vector3Normalize(rl.math.vector3Subtract(camera.target, camera.position)), cam_dist);
-        rl.setShaderValue(shdr_raymarch, march_locs.cam_dir, &cam_dir, .vec3);
+        rl.setShaderValue(shdr_raymarch, march_locs.cam_dir, cam_dir);
 
         // Draw
         // Draw into our custom render texture (framebuffer)

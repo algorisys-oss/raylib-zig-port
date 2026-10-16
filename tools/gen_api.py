@@ -201,6 +201,72 @@ pub fn slice(list: AutomationEventList) []AutomationEvent {
 ''',
 }
 
+# Slice views of pointer+count fields, from an explicit table (never inferred
+# from field names): struct -> [(method, field, element type, element count)].
+# The count expression may use the receiver (`self`). A different element
+# type reinterprets packed components (e.g. 3 floats per vertex -> Vector3);
+# a null pointer yields an empty slice. Fields are named like the C struct,
+# so the methods take a `Slice` suffix (Zig forbids a field and decl sharing
+# a name).
+SLICE_ACCESSORS = {
+    "Mesh": [
+        ("vertexSlice", "vertices", "Vector3", "self.vertexCount"),
+        ("texcoordSlice", "texcoords", "Vector2", "self.vertexCount"),
+        ("texcoord2Slice", "texcoords2", "Vector2", "self.vertexCount"),
+        ("normalSlice", "normals", "Vector3", "self.vertexCount"),
+        ("tangentSlice", "tangents", "Vector4", "self.vertexCount"),
+        ("colorSlice", "colors", "Color", "self.vertexCount"),
+        ("indexSlice", "indices", "u16", "self.triangleCount * 3"),
+        ("animVertexSlice", "animVertices", "Vector3", "self.vertexCount"),
+        ("animNormalSlice", "animNormals", "Vector3", "self.vertexCount"),
+        ("boneIndexSlice", "boneIndices", "[4]u8", "self.vertexCount"),
+        ("boneWeightSlice", "boneWeights", "[4]f32", "self.vertexCount"),
+    ],
+    "Model": [
+        ("meshSlice", "meshes", "Mesh", "self.meshCount"),
+        ("materialSlice", "materials", "Material", "self.materialCount"),
+        ("meshMaterialSlice", "meshMaterial", "c_int", "self.meshCount"),
+        ("currentPoseSlice", "currentPose", "Transform", "self.skeleton.boneCount"),
+        ("boneMatrixSlice", "boneMatrices", "Matrix", "self.skeleton.boneCount"),
+    ],
+    "ModelSkeleton": [
+        ("boneSlice", "bones", "BoneInfo", "self.boneCount"),
+        ("bindPoseSlice", "bindPose", "Transform", "self.boneCount"),
+    ],
+    "ModelAnimation": [
+        ("keyframePoseSlice", "keyframePoses", "ModelAnimPose", "self.keyframeCount"),
+    ],
+    "Font": [
+        ("glyphSlice", "glyphs", "GlyphInfo", "self.glyphCount"),
+        ("recSlice", "recs", "Rectangle", "self.glyphCount"),
+    ],
+}
+
+# Inline NUL-padded name arrays -> the name as a slice. Pointer receiver: the
+# slice points into the struct itself, so a by-value copy would dangle.
+NAME_ACCESSORS = {"ModelAnimation": "name", "BoneInfo": "name"}
+
+
+def slice_accessor_source(sname, method, field, elem, count, field_elem):
+    view = "items" if elem == field_elem else f"@as([*]{elem}, @ptrCast(items))"
+    return f"""
+/// `{field}` as a slice ({count.replace('self.', '')} items; empty when null).
+pub fn {method}(self: {sname}) []{elem} {{
+    const items = self.{field} orelse return &.{{}};
+    return {view}[0..@intCast({count})];
+}}
+"""
+
+
+def name_accessor_source(sname, field):
+    return f"""
+/// `{field}` up to its NUL terminator.
+pub fn {field}Slice(self: *const {sname}) []const u8 {{
+    return std.mem.sliceTo(&self.{field}, 0);
+}}
+"""
+
+
 # Hand-written wrappers: name -> Zig source (uses `c.` for the boundary).
 # Each exists because its C signature carries something the mechanical rules
 # deliberately don't guess at: out-params, owned buffers, varargs, callbacks.
@@ -315,6 +381,52 @@ pub fn detachAudioMixedProcessor(processor: AudioCallback) void {
 /// Internal memory reallocator (`ptr` may be null; `size` is the new size in bytes).
 pub fn memRealloc(ptr: ?*anyopaque, size: u32) ?*anyopaque {
     return c.MemRealloc(ptr, size);
+}
+''',
+    # ---- shader uniforms: type inferred at comptime --------------------------
+    "SetShaderValue": '''
+/// Set shader uniform value. The GLSL type is inferred from `value`: f32, i32,
+/// u32, Vector2/3/4 or [2..4] arrays of f32/i32/u32 (float, vec2.., int,
+/// ivec2.., uint, uivec2..). Raw C call: `rl.c.SetShaderValue`.
+pub fn setShaderValue(shader: Shader, locIndex: i32, value: anytype) void {
+    const v: UniformValue(@TypeOf(value)) = value;
+    c.SetShaderValue(shader, locIndex, &v, @backingInt(inferUniformType(@TypeOf(v))));
+}
+
+/// Literal arguments (`1.0`, `3`) are f32 / i32 uniforms.
+fn UniformValue(comptime T: type) type {
+    return switch (T) {
+        comptime_float => f32,
+        comptime_int => i32,
+        else => T,
+    };
+}
+
+fn inferUniformType(comptime T: type) ShaderUniformDataType {
+    return switch (T) {
+        f32 => .float,
+        Vector2, [2]f32 => .vec2,
+        Vector3, [3]f32 => .vec3,
+        Vector4, [4]f32 => .vec4,
+        i32 => .int,
+        [2]i32 => .ivec2,
+        [3]i32 => .ivec3,
+        [4]i32 => .ivec4,
+        u32 => .uint,
+        [2]u32 => .uivec2,
+        [3]u32 => .uivec3,
+        [4]u32 => .uivec4,
+        else => @compileError("unsupported shader uniform type: " ++ @typeName(T)),
+    };
+}
+''',
+    "SetShaderValueV": '''
+/// Set shader uniform value array: `values` is a slice (or array pointer) of
+/// any type `setShaderValue` accepts; the count is its length.
+pub fn setShaderValueV(shader: Shader, locIndex: i32, values: anytype) void {
+    const Elem = std.meta.Elem(@TypeOf(values));
+    const items: []const Elem = values;
+    c.SetShaderValueV(shader, locIndex, items.ptr, @backingInt(inferUniformType(Elem)), @intCast(items.len));
 }
 ''',
     # ---- file data: owned buffers as slices --------------------------------
@@ -1129,9 +1241,18 @@ class Gen:
                 for cname, r, g, b, a, comment in parse_colors(self.src):
                     zname = COLOR_NAMES.get(cname, cname.lower())
                     out.append(f"    pub const {zname}: Color = .{{ .r = {r}, .g = {g}, .b = {b}, .a = {a} }}; // {comment.strip()}")
-            if sname in STRUCT_METHODS:
+            methods = STRUCT_METHODS.get(sname, "")
+            field_types = {f: self.field_type(sname, b_, st, f, ar) for b_, st, f, ar in fields}
+            for method, field, elem, count in SLICE_ACCESSORS.get(sname, []):
+                field_elem = field_types[field].removeprefix("?[*]")
+                if field_types[field] == "ModelAnimPose":
+                    field_elem = "Transform"  # ModelAnimPose = ?[*]Transform
+                methods += slice_accessor_source(sname, method, field, elem, count, field_elem)
+            if sname in NAME_ACCESSORS:
+                methods += name_accessor_source(sname, NAME_ACCESSORS[sname])
+            if methods:
                 out.append("")
-                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].strip("\n").splitlines())
+                out.extend("    " + l if l else "" for l in methods.strip("\n").splitlines())
             out.append("};\n")
         for target, alias in self.aliases:
             out.append(f"pub const {alias} = {target};")

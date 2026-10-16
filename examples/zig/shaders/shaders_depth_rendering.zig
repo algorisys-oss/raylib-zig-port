@@ -35,7 +35,7 @@ pub fn main() !void {
     defer rl.unloadShader(depth_shader); // Unload shader
     const depth_loc = rl.getShaderLocation(depth_shader, "depthTexture");
     const flip_texture_loc = rl.getShaderLocation(depth_shader, "flipY");
-    rl.setShaderValue(depth_shader, flip_texture_loc, &@as(i32, 1), .int); // Flip Y texture
+    rl.setShaderValue(depth_shader, flip_texture_loc, 1); // Flip Y texture
 
     // Load scene models
     const cube = try rl.loadModelFromMesh(rl.genMeshCube(1.0, 1.0, 1.0));

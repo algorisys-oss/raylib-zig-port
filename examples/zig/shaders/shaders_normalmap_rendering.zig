@@ -99,11 +99,11 @@ pub fn main() !void {
         plane.transform = rl.math.matrixRotateY(@as(f32, @floatCast(rl.getTime())) * 0.5);
 
         // Update shader values
-        rl.setShaderValue(shader, light_pos_loc, &light_position, .vec3);
-        rl.setShaderValue(shader, shader.loc(.vector_view).*, &camera.position, .vec3);
-        rl.setShaderValue(shader, specular_exponent_loc, &specular_exponent, .float);
+        rl.setShaderValue(shader, light_pos_loc, light_position);
+        rl.setShaderValue(shader, shader.loc(.vector_view).*, camera.position);
+        rl.setShaderValue(shader, specular_exponent_loc, specular_exponent);
         const use_normal_map_value: i32 = @intFromBool(use_normal_map);
-        rl.setShaderValue(shader, use_normal_map_loc, &use_normal_map_value, .int);
+        rl.setShaderValue(shader, use_normal_map_loc, use_normal_map_value);
 
         // Draw
         rl.beginDrawing();

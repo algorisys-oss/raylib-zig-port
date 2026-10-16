@@ -34,9 +34,9 @@ pub fn main() !void {
     const texture_size_loc = rl.getShaderLocation(shdr_outline, "textureSize");
 
     // Set shader values (they can be changed later)
-    rl.setShaderValue(shdr_outline, outline_size_loc, &outline_size, .float);
-    rl.setShaderValue(shdr_outline, outline_color_loc, &outline_color, .vec4);
-    rl.setShaderValue(shdr_outline, texture_size_loc, &texture_size, .vec2);
+    rl.setShaderValue(shdr_outline, outline_size_loc, outline_size);
+    rl.setShaderValue(shdr_outline, outline_color_loc, outline_color);
+    rl.setShaderValue(shdr_outline, texture_size_loc, texture_size);
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
 
@@ -46,7 +46,7 @@ pub fn main() !void {
         outline_size += rl.getMouseWheelMove();
         if (outline_size < 1.0) outline_size = 1.0;
 
-        rl.setShaderValue(shdr_outline, outline_size_loc, &outline_size, .float);
+        rl.setShaderValue(shdr_outline, outline_size_loc, outline_size);
 
         // Draw
         rl.beginDrawing();

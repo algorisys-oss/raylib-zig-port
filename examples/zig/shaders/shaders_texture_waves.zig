@@ -45,13 +45,13 @@ pub fn main() !void {
     const speed_y: f32 = 8.0;
 
     const screen_size = [2]f32{ @floatFromInt(rl.getScreenWidth()), @floatFromInt(rl.getScreenHeight()) };
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "size"), &screen_size, .vec2);
-    rl.setShaderValue(shader, freq_x_loc, &freq_x, .float);
-    rl.setShaderValue(shader, freq_y_loc, &freq_y, .float);
-    rl.setShaderValue(shader, amp_x_loc, &amp_x, .float);
-    rl.setShaderValue(shader, amp_y_loc, &amp_y, .float);
-    rl.setShaderValue(shader, speed_x_loc, &speed_x, .float);
-    rl.setShaderValue(shader, speed_y_loc, &speed_y, .float);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "size"), screen_size);
+    rl.setShaderValue(shader, freq_x_loc, freq_x);
+    rl.setShaderValue(shader, freq_y_loc, freq_y);
+    rl.setShaderValue(shader, amp_x_loc, amp_x);
+    rl.setShaderValue(shader, amp_y_loc, amp_y);
+    rl.setShaderValue(shader, speed_x_loc, speed_x);
+    rl.setShaderValue(shader, speed_y_loc, speed_y);
 
     var seconds: f32 = 0.0;
 
@@ -62,7 +62,7 @@ pub fn main() !void {
         // Update
         seconds += rl.getFrameTime();
 
-        rl.setShaderValue(shader, seconds_loc, &seconds, .float);
+        rl.setShaderValue(shader, seconds_loc, seconds);
 
         // Draw
         rl.beginDrawing();

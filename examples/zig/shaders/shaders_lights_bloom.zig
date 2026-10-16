@@ -66,7 +66,7 @@ pub fn main() !void {
         .{ .x = 0.7, .y = 0.2, .z = 1.0 }, // Purple
     };
 
-    rl.setShaderValueV(light_shader, light_col_loc, &light_colors, .vec3, max_lights);
+    rl.setShaderValueV(light_shader, light_col_loc, &light_colors);
 
     rl.setTargetFPS(60);
 
@@ -87,8 +87,8 @@ pub fn main() !void {
             position.* = .{ .x = @sin(angle) * radius, .y = height, .z = @cos(angle) * radius };
         }
 
-        rl.setShaderValueV(light_shader, light_pos_loc, &light_positions, .vec3, max_lights);
-        rl.setShaderValue(light_shader, view_pos_loc, &camera.position, .vec3);
+        rl.setShaderValueV(light_shader, light_pos_loc, &light_positions);
+        rl.setShaderValue(light_shader, view_pos_loc, camera.position);
 
         // Draw
         // Render the lit scene to an offscreen texture

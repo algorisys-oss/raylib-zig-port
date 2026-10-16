@@ -62,6 +62,47 @@ test "generic wrappers instantiate (refAllDecls skips anytype functions)" {
     rl.traceLog(.info, "{s}", .{"unused"});
 }
 
+test "setShaderValue/V infer the uniform type at comptime" {
+    // @TypeOf analyzes the generic instantiations without running them
+    // (running needs a GL context).
+    const shader: rl.Shader = undefined;
+    _ = @TypeOf(rl.setShaderValue(shader, 0, @as(f32, 1)));
+    _ = @TypeOf(rl.setShaderValue(shader, 0, 1.0));
+    _ = @TypeOf(rl.setShaderValue(shader, 0, 7));
+    _ = @TypeOf(rl.setShaderValue(shader, 0, rl.Vector3{ .x = 0, .y = 0, .z = 0 }));
+    _ = @TypeOf(rl.setShaderValue(shader, 0, [4]f32{ 0, 0, 0, 0 }));
+    _ = @TypeOf(rl.setShaderValue(shader, 0, [2]i32{ 0, 0 }));
+    _ = @TypeOf(rl.setShaderValue(shader, 0, @as(u32, 1)));
+    const lights: [2]rl.Vector3 = @splat(.{ .x = 0, .y = 0, .z = 0 });
+    _ = @TypeOf(rl.setShaderValueV(shader, 0, &lights));
+    _ = @TypeOf(rl.setShaderValueV(shader, 0, @as([]const f32, &.{ 1, 2 })));
+}
+
+test "slice accessors view pointer+count fields" {
+    std.testing.refAllDecls(rl.Mesh);
+    std.testing.refAllDecls(rl.Model);
+    std.testing.refAllDecls(rl.ModelSkeleton);
+    std.testing.refAllDecls(rl.ModelAnimation);
+    std.testing.refAllDecls(rl.Font);
+    std.testing.refAllDecls(rl.BoneInfo);
+
+    var vertices = [_]f32{ 1, 2, 3, 4, 5, 6 };
+    var indices = [_]u16{ 0, 1, 0 };
+    var mesh = std.mem.zeroes(rl.Mesh);
+    mesh.vertexCount = 2;
+    mesh.triangleCount = 1;
+    mesh.vertices = &vertices;
+    mesh.indices = &indices;
+    try std.testing.expectEqual(@as(usize, 2), mesh.vertexSlice().len);
+    try std.testing.expectEqual(@as(f32, 5), mesh.vertexSlice()[1].y);
+    try std.testing.expectEqual(@as(usize, 3), mesh.indexSlice().len);
+    try std.testing.expectEqual(@as(usize, 0), mesh.normalSlice().len); // null -> empty
+
+    var anim = std.mem.zeroes(rl.ModelAnimation);
+    @memcpy(anim.name[0..4], "walk");
+    try std.testing.expectEqualStrings("walk", anim.nameSlice());
+}
+
 test "colors and enums match raylib.h" {
     try std.testing.expectEqual(rl.Color{ .r = 245, .g = 245, .b = 245, .a = 255 }, rl.Color.ray_white);
     try std.testing.expectEqual(c.KEY_LEFT_SHIFT, @backingInt(rl.KeyboardKey.left_shift));

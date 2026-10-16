@@ -53,15 +53,15 @@ pub fn main() !void {
     // Ambient light level
     const ambient: rl.Vector4 = .{ .x = 0.2, .y = 0.2, .z = 0.2, .w = 1.0 };
     const ambient_loc = rl.getShaderLocation(shader, "ambient");
-    rl.setShaderValue(shader, ambient_loc, &ambient, .vec4);
+    rl.setShaderValue(shader, ambient_loc, ambient);
 
     const fog_color = rl.colorNormalize(.gray);
     const fog_color_loc = rl.getShaderLocation(shader, "fogColor");
-    rl.setShaderValue(shader, fog_color_loc, &fog_color, .vec4);
+    rl.setShaderValue(shader, fog_color_loc, fog_color);
 
     var fog_density: f32 = 0.15;
     const fog_density_loc = rl.getShaderLocation(shader, "fogDensity");
-    rl.setShaderValue(shader, fog_density_loc, &fog_density, .float);
+    rl.setShaderValue(shader, fog_density_loc, fog_density);
 
     // Assign texture to default model material
     // NOTE: All models share the same shader
@@ -91,14 +91,14 @@ pub fn main() !void {
             if (fog_density < 0.0) fog_density = 0.0;
         }
 
-        rl.setShaderValue(shader, fog_density_loc, &fog_density, .float);
+        rl.setShaderValue(shader, fog_density_loc, fog_density);
 
         // Rotate the torus
         model_a.transform = rl.math.matrixMultiply(model_a.transform, rl.math.matrixRotateX(-0.025));
         model_a.transform = rl.math.matrixMultiply(model_a.transform, rl.math.matrixRotateZ(0.012));
 
         // Update the light shader with the camera view position
-        rl.setShaderValue(shader, shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(shader, shader.loc(.vector_view).*, camera.position);
 
         // Draw
         rl.beginDrawing();

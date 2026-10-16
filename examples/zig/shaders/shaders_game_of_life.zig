@@ -121,7 +121,7 @@ pub fn main() !void {
     // Set shader uniform size of the world
     const resolution_loc = rl.getShaderLocation(shdr_game_of_life, "resolution");
     const resolution = [2]f32{ world_width, world_height };
-    rl.setShaderValue(shdr_game_of_life, resolution_loc, &resolution, .vec2);
+    rl.setShaderValue(shdr_game_of_life, resolution_loc, resolution);
 
     // Define two textures: the current world and the previous world
     var world1 = try rl.loadRenderTexture(world_width, world_height);

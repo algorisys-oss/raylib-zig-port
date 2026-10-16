@@ -46,7 +46,7 @@ pub fn main() !void {
 
     // Ambient light level (some basic lighting)
     const ambient_loc = rl.getShaderLocation(shader, "ambient");
-    rl.setShaderValue(shader, ambient_loc, &[4]f32{ 0.1, 0.1, 0.1, 1.0 }, .vec4);
+    rl.setShaderValue(shader, ambient_loc, [4]f32{ 0.1, 0.1, 0.1, 1.0 });
 
     // Create lights
     var lights = [rlights.max_lights]rlights.Light{
@@ -64,7 +64,7 @@ pub fn main() !void {
         rl.updateCamera(&camera, .orbital);
 
         // Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
-        rl.setShaderValue(shader, shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(shader, shader.loc(.vector_view).*, camera.position);
 
         // Check key inputs to enable/disable lights
         for (&lights, [_]rl.KeyboardKey{ .y, .r, .g, .b }) |*light, key| {

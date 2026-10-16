@@ -44,15 +44,15 @@ pub fn main() !void {
     const light_color_normalized = rl.colorNormalize(light_color);
     const light_dir_loc = rl.getShaderLocation(shadow_shader, "lightDir");
     const light_col_loc = rl.getShaderLocation(shadow_shader, "lightColor");
-    rl.setShaderValue(shadow_shader, light_dir_loc, &light_dir, .vec3);
-    rl.setShaderValue(shadow_shader, light_col_loc, &light_color_normalized, .vec4);
+    rl.setShaderValue(shadow_shader, light_dir_loc, light_dir);
+    rl.setShaderValue(shadow_shader, light_col_loc, light_color_normalized);
     const ambient_loc = rl.getShaderLocation(shadow_shader, "ambient");
     const ambient = [4]f32{ 0.1, 0.1, 0.1, 1.0 };
-    rl.setShaderValue(shadow_shader, ambient_loc, &ambient, .vec4);
+    rl.setShaderValue(shadow_shader, ambient_loc, ambient);
     const light_vp_loc = rl.getShaderLocation(shadow_shader, "lightVP");
     const shadow_map_loc = rl.getShaderLocation(shadow_shader, "shadowMap");
     const shadow_map_resolution: i32 = shadowmap_resolution;
-    rl.setShaderValue(shadow_shader, rl.getShaderLocation(shadow_shader, "shadowMapResolution"), &shadow_map_resolution, .int);
+    rl.setShaderValue(shadow_shader, rl.getShaderLocation(shadow_shader, "shadowMapResolution"), shadow_map_resolution);
 
     const cube = try rl.loadModelFromMesh(rl.genMeshCube(1.0, 1.0, 1.0));
     defer rl.unloadModel(cube);
@@ -91,7 +91,7 @@ pub fn main() !void {
 
         // send the updated camera position to the shader so that it can calculate the correct lighting for the scene
         const camera_pos = camera.position;
-        rl.setShaderValue(shadow_shader, shadow_shader.loc(.vector_view).*, &camera_pos, .vec3);
+        rl.setShaderValue(shadow_shader, shadow_shader.loc(.vector_view).*, camera_pos);
 
         frame_counter += 1;
         frame_counter = @rem(frame_counter, anims[0].keyframeCount);
@@ -114,7 +114,7 @@ pub fn main() !void {
 
         light_dir = rl.math.vector3Normalize(light_dir);
         light_camera.position = rl.math.vector3Scale(light_dir, -15.0);
-        rl.setShaderValue(shadow_shader, light_dir_loc, &light_dir, .vec3);
+        rl.setShaderValue(shadow_shader, light_dir_loc, light_dir);
 
         // Draw
         // PASS 01: Render all objects into the shadowmap render texture

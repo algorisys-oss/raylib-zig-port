@@ -125,7 +125,7 @@ pub fn main() !void {
         }
 
         rl.gl.bindShaderBuffer(ssbo_a, 1);
-        rl.setShaderValue(gol_render_shader, res_uniform_loc, &resolution, .vec2);
+        rl.setShaderValue(gol_render_shader, res_uniform_loc, resolution);
 
         // Draw
         rl.beginDrawing();

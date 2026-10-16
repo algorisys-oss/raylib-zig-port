@@ -43,7 +43,7 @@ pub fn main() !void {
     const shader = try rl.loadShader(null, std.fmt.comptimePrint("resources/shaders/glsl{d}/tiling.fs", .{glsl_version}));
     defer rl.unloadShader(shader);
     rl.setTextureWrap(texture, .repeat);
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "tiling"), &tiling, .vec2);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "tiling"), tiling);
     material.shader = shader;
 
     rl.disableCursor(); // Limit cursor to relative movement inside the window

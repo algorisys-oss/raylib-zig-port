@@ -61,9 +61,9 @@ pub fn main() !void {
     const max_iterations_loc = rl.getShaderLocation(shader, "maxIterations");
 
     // Upload the shader uniform values!
-    rl.setShaderValue(shader, zoom_loc, &zoom, .float);
-    rl.setShaderValue(shader, offset_loc, &offset, .vec2);
-    rl.setShaderValue(shader, max_iterations_loc, &max_iterations, .int);
+    rl.setShaderValue(shader, zoom_loc, zoom);
+    rl.setShaderValue(shader, offset_loc, offset);
+    rl.setShaderValue(shader, max_iterations_loc, max_iterations);
 
     var show_controls = true; // Show controls
 
@@ -131,9 +131,9 @@ pub fn main() !void {
             max_iterations = @intFromFloat(@sqrt(2.0 * @sqrt(@abs(1.0 - @sqrt(37.5 * zoom)))) * max_iterations_multiplier);
 
             // Update the shader uniform values!
-            rl.setShaderValue(shader, zoom_loc, &zoom, .float);
-            rl.setShaderValue(shader, offset_loc, &offset, .vec2);
-            rl.setShaderValue(shader, max_iterations_loc, &max_iterations, .int);
+            rl.setShaderValue(shader, zoom_loc, zoom);
+            rl.setShaderValue(shader, offset_loc, offset);
+            rl.setShaderValue(shader, max_iterations_loc, max_iterations);
         }
 
         // Draw

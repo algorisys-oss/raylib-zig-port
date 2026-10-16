@@ -81,7 +81,7 @@ pub fn main() !void {
 
     // Ambient light level (some basic lighting)
     const ambient_loc = rl.getShaderLocation(shader, "ambient");
-    rl.setShaderValue(shader, ambient_loc, &[4]f32{ 0.1, 0.1, 0.1, 1.0 }, .vec4);
+    rl.setShaderValue(shader, ambient_loc, [4]f32{ 0.1, 0.1, 0.1, 1.0 });
 
     // Assign out lighting shader to model
     for (models) |model| {
@@ -122,7 +122,7 @@ pub fn main() !void {
         if (rl.isMouseButtonPressed(.left)) current_model = (current_model + 1) % models.len;
 
         // Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
-        rl.setShaderValue(shader, shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(shader, shader.loc(.vector_view).*, camera.position);
 
         // Update light values (actually, only enable/disable them)
         for (lights) |light| light.update(shader);

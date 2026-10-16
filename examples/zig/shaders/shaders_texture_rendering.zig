@@ -29,7 +29,7 @@ pub fn main() !void {
 
     var time: f32 = 0.0;
     const time_loc = rl.getShaderLocation(shader, "uTime");
-    rl.setShaderValue(shader, time_loc, &time, .float);
+    rl.setShaderValue(shader, time_loc, time);
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
 
@@ -37,7 +37,7 @@ pub fn main() !void {
     while (!rl.windowShouldClose()) { // Detect window close button or ESC key
         // Update
         time = @floatCast(rl.getTime());
-        rl.setShaderValue(shader, time_loc, &time, .float);
+        rl.setShaderValue(shader, time_loc, time);
 
         // Draw
         rl.beginDrawing();

@@ -43,15 +43,15 @@ pub fn main() !void {
     defer rl.unloadShader(distortion); // Unload distortion shader
 
     // Update distortion shader with lens and distortion-scale parameters
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "leftLensCenter"), &config.leftLensCenter, .vec2);
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "rightLensCenter"), &config.rightLensCenter, .vec2);
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "leftScreenCenter"), &config.leftScreenCenter, .vec2);
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "rightScreenCenter"), &config.rightScreenCenter, .vec2);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "leftLensCenter"), config.leftLensCenter);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "rightLensCenter"), config.rightLensCenter);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "leftScreenCenter"), config.leftScreenCenter);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "rightScreenCenter"), config.rightScreenCenter);
 
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "scale"), &config.scale, .vec2);
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "scaleIn"), &config.scaleIn, .vec2);
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "deviceWarpParam"), &device.lensDistortionValues, .vec4);
-    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "chromaAbParam"), &device.chromaAbCorrection, .vec4);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "scale"), config.scale);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "scaleIn"), config.scaleIn);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "deviceWarpParam"), device.lensDistortionValues);
+    rl.setShaderValue(distortion, rl.getShaderLocation(distortion, "chromaAbParam"), device.chromaAbCorrection);
 
     // Initialize framebuffer for stereo rendering
     // NOTE: Screen size should match HMD aspect ratio

@@ -178,6 +178,18 @@ pub const Font = extern struct {
     texture: Texture2D,
     recs: ?[*]Rectangle,
     glyphs: ?[*]GlyphInfo,
+
+    /// `glyphs` as a slice (glyphCount items; empty when null).
+    pub fn glyphSlice(self: Font) []GlyphInfo {
+        const items = self.glyphs orelse return &.{};
+        return items[0..@intCast(self.glyphCount)];
+    }
+
+    /// `recs` as a slice (glyphCount items; empty when null).
+    pub fn recSlice(self: Font) []Rectangle {
+        const items = self.recs orelse return &.{};
+        return items[0..@intCast(self.glyphCount)];
+    }
 };
 
 pub const Camera3D = extern struct {
@@ -212,6 +224,72 @@ pub const Mesh = extern struct {
     animNormals: ?[*]f32,
     vaoId: c_uint,
     vboId: ?[*]c_uint,
+
+    /// `vertices` as a slice (vertexCount items; empty when null).
+    pub fn vertexSlice(self: Mesh) []Vector3 {
+        const items = self.vertices orelse return &.{};
+        return @as([*]Vector3, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `texcoords` as a slice (vertexCount items; empty when null).
+    pub fn texcoordSlice(self: Mesh) []Vector2 {
+        const items = self.texcoords orelse return &.{};
+        return @as([*]Vector2, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `texcoords2` as a slice (vertexCount items; empty when null).
+    pub fn texcoord2Slice(self: Mesh) []Vector2 {
+        const items = self.texcoords2 orelse return &.{};
+        return @as([*]Vector2, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `normals` as a slice (vertexCount items; empty when null).
+    pub fn normalSlice(self: Mesh) []Vector3 {
+        const items = self.normals orelse return &.{};
+        return @as([*]Vector3, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `tangents` as a slice (vertexCount items; empty when null).
+    pub fn tangentSlice(self: Mesh) []Vector4 {
+        const items = self.tangents orelse return &.{};
+        return @as([*]Vector4, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `colors` as a slice (vertexCount items; empty when null).
+    pub fn colorSlice(self: Mesh) []Color {
+        const items = self.colors orelse return &.{};
+        return @as([*]Color, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `indices` as a slice (triangleCount * 3 items; empty when null).
+    pub fn indexSlice(self: Mesh) []u16 {
+        const items = self.indices orelse return &.{};
+        return items[0..@intCast(self.triangleCount * 3)];
+    }
+
+    /// `animVertices` as a slice (vertexCount items; empty when null).
+    pub fn animVertexSlice(self: Mesh) []Vector3 {
+        const items = self.animVertices orelse return &.{};
+        return @as([*]Vector3, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `animNormals` as a slice (vertexCount items; empty when null).
+    pub fn animNormalSlice(self: Mesh) []Vector3 {
+        const items = self.animNormals orelse return &.{};
+        return @as([*]Vector3, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `boneIndices` as a slice (vertexCount items; empty when null).
+    pub fn boneIndexSlice(self: Mesh) [][4]u8 {
+        const items = self.boneIndices orelse return &.{};
+        return @as([*][4]u8, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
+
+    /// `boneWeights` as a slice (vertexCount items; empty when null).
+    pub fn boneWeightSlice(self: Mesh) [][4]f32 {
+        const items = self.boneWeights orelse return &.{};
+        return @as([*][4]f32, @ptrCast(items))[0..@intCast(self.vertexCount)];
+    }
 };
 
 pub const Shader = extern struct {
@@ -250,12 +328,29 @@ pub const Transform = extern struct {
 pub const BoneInfo = extern struct {
     name: [32]u8,
     parent: c_int,
+
+    /// `name` up to its NUL terminator.
+    pub fn nameSlice(self: *const BoneInfo) []const u8 {
+        return std.mem.sliceTo(&self.name, 0);
+    }
 };
 
 pub const ModelSkeleton = extern struct {
     boneCount: c_uint,
     bones: ?[*]BoneInfo,
     bindPose: ModelAnimPose,
+
+    /// `bones` as a slice (boneCount items; empty when null).
+    pub fn boneSlice(self: ModelSkeleton) []BoneInfo {
+        const items = self.bones orelse return &.{};
+        return items[0..@intCast(self.boneCount)];
+    }
+
+    /// `bindPose` as a slice (boneCount items; empty when null).
+    pub fn bindPoseSlice(self: ModelSkeleton) []Transform {
+        const items = self.bindPose orelse return &.{};
+        return items[0..@intCast(self.boneCount)];
+    }
 };
 
 pub const Model = extern struct {
@@ -268,6 +363,36 @@ pub const Model = extern struct {
     skeleton: ModelSkeleton,
     currentPose: ModelAnimPose,
     boneMatrices: ?[*]Matrix,
+
+    /// `meshes` as a slice (meshCount items; empty when null).
+    pub fn meshSlice(self: Model) []Mesh {
+        const items = self.meshes orelse return &.{};
+        return items[0..@intCast(self.meshCount)];
+    }
+
+    /// `materials` as a slice (materialCount items; empty when null).
+    pub fn materialSlice(self: Model) []Material {
+        const items = self.materials orelse return &.{};
+        return items[0..@intCast(self.materialCount)];
+    }
+
+    /// `meshMaterial` as a slice (meshCount items; empty when null).
+    pub fn meshMaterialSlice(self: Model) []c_int {
+        const items = self.meshMaterial orelse return &.{};
+        return items[0..@intCast(self.meshCount)];
+    }
+
+    /// `currentPose` as a slice (skeleton.boneCount items; empty when null).
+    pub fn currentPoseSlice(self: Model) []Transform {
+        const items = self.currentPose orelse return &.{};
+        return items[0..@intCast(self.skeleton.boneCount)];
+    }
+
+    /// `boneMatrices` as a slice (skeleton.boneCount items; empty when null).
+    pub fn boneMatrixSlice(self: Model) []Matrix {
+        const items = self.boneMatrices orelse return &.{};
+        return items[0..@intCast(self.skeleton.boneCount)];
+    }
 };
 
 pub const ModelAnimation = extern struct {
@@ -275,6 +400,17 @@ pub const ModelAnimation = extern struct {
     boneCount: c_uint,
     keyframeCount: c_int,
     keyframePoses: ?[*]ModelAnimPose,
+
+    /// `keyframePoses` as a slice (keyframeCount items; empty when null).
+    pub fn keyframePoseSlice(self: ModelAnimation) []ModelAnimPose {
+        const items = self.keyframePoses orelse return &.{};
+        return items[0..@intCast(self.keyframeCount)];
+    }
+
+    /// `name` up to its NUL terminator.
+    pub fn nameSlice(self: *const ModelAnimation) []const u8 {
+        return std.mem.sliceTo(&self.name, 0);
+    }
 };
 
 pub const Ray = extern struct {
@@ -1196,14 +1332,47 @@ pub fn getShaderLocationAttrib(shader: Shader, attribName: [:0]const u8) i32 {
     return c.GetShaderLocationAttrib(shader, attribName.ptr);
 }
 
-/// Set shader uniform value
-pub fn setShaderValue(shader: Shader, locIndex: i32, value: *const anyopaque, uniformType: ShaderUniformDataType) void {
-    c.SetShaderValue(shader, locIndex, value, @backingInt(uniformType));
+/// Set shader uniform value. The GLSL type is inferred from `value`: f32, i32,
+/// u32, Vector2/3/4 or [2..4] arrays of f32/i32/u32 (float, vec2.., int,
+/// ivec2.., uint, uivec2..). Raw C call: `rl.c.SetShaderValue`.
+pub fn setShaderValue(shader: Shader, locIndex: i32, value: anytype) void {
+    const v: UniformValue(@TypeOf(value)) = value;
+    c.SetShaderValue(shader, locIndex, &v, @backingInt(inferUniformType(@TypeOf(v))));
 }
 
-/// Set shader uniform value vector
-pub fn setShaderValueV(shader: Shader, locIndex: i32, value: *const anyopaque, uniformType: ShaderUniformDataType, count: i32) void {
-    c.SetShaderValueV(shader, locIndex, value, @backingInt(uniformType), count);
+/// Literal arguments (`1.0`, `3`) are f32 / i32 uniforms.
+fn UniformValue(comptime T: type) type {
+    return switch (T) {
+        comptime_float => f32,
+        comptime_int => i32,
+        else => T,
+    };
+}
+
+fn inferUniformType(comptime T: type) ShaderUniformDataType {
+    return switch (T) {
+        f32 => .float,
+        Vector2, [2]f32 => .vec2,
+        Vector3, [3]f32 => .vec3,
+        Vector4, [4]f32 => .vec4,
+        i32 => .int,
+        [2]i32 => .ivec2,
+        [3]i32 => .ivec3,
+        [4]i32 => .ivec4,
+        u32 => .uint,
+        [2]u32 => .uivec2,
+        [3]u32 => .uivec3,
+        [4]u32 => .uivec4,
+        else => @compileError("unsupported shader uniform type: " ++ @typeName(T)),
+    };
+}
+
+/// Set shader uniform value array: `values` is a slice (or array pointer) of
+/// any type `setShaderValue` accepts; the count is its length.
+pub fn setShaderValueV(shader: Shader, locIndex: i32, values: anytype) void {
+    const Elem = std.meta.Elem(@TypeOf(values));
+    const items: []const Elem = values;
+    c.SetShaderValueV(shader, locIndex, items.ptr, @backingInt(inferUniformType(Elem)), @intCast(items.len));
 }
 
 /// Set shader uniform value (matrix 4x4)

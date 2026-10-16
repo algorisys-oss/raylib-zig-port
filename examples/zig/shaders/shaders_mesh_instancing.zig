@@ -71,7 +71,7 @@ pub fn main() !void {
 
     // Set shader value: ambient light level
     const ambient_loc = rl.getShaderLocation(shader, "ambient");
-    rl.setShaderValue(shader, ambient_loc, &[4]f32{ 0.2, 0.2, 0.2, 1.0 }, .vec4);
+    rl.setShaderValue(shader, ambient_loc, [4]f32{ 0.2, 0.2, 0.2, 1.0 });
 
     // Create one light
     _ = rlights.createLight(.directional, .{ .x = 50.0, .y = 50.0, .z = 0.0 }, rl.math.vector3Zero(), .white, shader);
@@ -98,7 +98,7 @@ pub fn main() !void {
         rl.updateCamera(&camera, .orbital);
 
         // Update the light shader with the camera view position
-        rl.setShaderValue(shader, shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(shader, shader.loc(.vector_view).*, camera.position);
 
         // Draw
         rl.beginDrawing();

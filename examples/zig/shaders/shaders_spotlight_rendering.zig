@@ -116,7 +116,7 @@ pub fn main() !void {
     // a pitch black half and a dimly lit half
     const w_loc = rl.getShaderLocation(shdr_spot, "screenWidth");
     const sw: f32 = @floatFromInt(rl.getScreenWidth());
-    rl.setShaderValue(shdr_spot, w_loc, &sw, .float);
+    rl.setShaderValue(shdr_spot, w_loc, sw);
 
     // Randomize the locations and velocities of the spotlights
     // and initialize the shader locations
@@ -135,9 +135,9 @@ pub fn main() !void {
         spot.inner = 28.0 * n;
         spot.radius = 48.0 * n;
 
-        rl.setShaderValue(shdr_spot, spot.position_loc, &spot.position, .vec2);
-        rl.setShaderValue(shdr_spot, spot.inner_loc, &spot.inner, .float);
-        rl.setShaderValue(shdr_spot, spot.radius_loc, &spot.radius, .float);
+        rl.setShaderValue(shdr_spot, spot.position_loc, spot.position);
+        rl.setShaderValue(shdr_spot, spot.inner_loc, spot.inner);
+        rl.setShaderValue(shdr_spot, spot.radius_loc, spot.radius);
     }
 
     rl.setTargetFPS(60); // Set  to run at 60 frames-per-second
@@ -166,7 +166,7 @@ pub fn main() !void {
                 if (spot.position.y > screen_height - 64) spot.speed.y = -spot.speed.y;
             }
 
-            rl.setShaderValue(shdr_spot, spot.position_loc, &spot.position, .vec2);
+            rl.setShaderValue(shdr_spot, spot.position_loc, spot.position);
         }
 
         // Draw

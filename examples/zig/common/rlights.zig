@@ -57,12 +57,12 @@ pub const Light = struct {
         // Send to shader light enabled state and type
         const enabled: i32 = @intFromBool(light.enabled);
         const light_type: i32 = @backingInt(light.type);
-        rl.setShaderValue(shader, light.enabled_loc, &enabled, .int);
-        rl.setShaderValue(shader, light.type_loc, &light_type, .int);
+        rl.setShaderValue(shader, light.enabled_loc, enabled);
+        rl.setShaderValue(shader, light.type_loc, light_type);
 
         // Send to shader light position and target position values
-        rl.setShaderValue(shader, light.position_loc, &light.position, .vec3);
-        rl.setShaderValue(shader, light.target_loc, &light.target, .vec3);
+        rl.setShaderValue(shader, light.position_loc, light.position);
+        rl.setShaderValue(shader, light.target_loc, light.target);
 
         // Send to shader light color values
         const color = [4]f32{
@@ -71,7 +71,7 @@ pub const Light = struct {
             @as(f32, @floatFromInt(light.color.b)) / 255,
             @as(f32, @floatFromInt(light.color.a)) / 255,
         };
-        rl.setShaderValue(shader, light.color_loc, &color, .vec4);
+        rl.setShaderValue(shader, light.color_loc, color);
     }
 };
 

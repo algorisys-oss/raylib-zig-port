@@ -63,7 +63,7 @@ pub fn main() !void {
         rl.updateCamera(&camera, .free); // Update camera
 
         time += rl.getFrameTime(); // Update time variable
-        rl.setShaderValue(shader, rl.getShaderLocation(shader, "time"), &time, .float); // Send time value to shader
+        rl.setShaderValue(shader, rl.getShaderLocation(shader, "time"), time); // Send time value to shader
 
         // Draw
         rl.beginDrawing();

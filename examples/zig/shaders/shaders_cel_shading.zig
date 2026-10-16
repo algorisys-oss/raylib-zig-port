@@ -48,7 +48,7 @@ pub fn main() !void {
     // numBands: controls toon quantization steps (2 = hard binary, 20 = near-smooth)
     var num_bands: f32 = 10.0;
     const num_bands_loc = rl.getShaderLocation(cel_shader, "numBands");
-    rl.setShaderValue(cel_shader, num_bands_loc, &num_bands, .float);
+    rl.setShaderValue(cel_shader, num_bands_loc, num_bands);
 
     // Inverted-hull outline shader: draws back faces extruded along normals
     const outline_shader = try rl.loadShader(
@@ -78,7 +78,7 @@ pub fn main() !void {
         // Update
         rl.updateCamera(&camera, .orbital);
 
-        rl.setShaderValue(cel_shader, cel_shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(cel_shader, cel_shader.loc(.vector_view).*, camera.position);
 
         // [Z] Toggle cel shading on/off
         if (rl.isKeyPressed(.z)) {
@@ -92,7 +92,7 @@ pub fn main() !void {
         // [Q/E] Decrease/increase toon band count (press or hold to repeat)
         if (rl.isKeyPressed(.e) or rl.isKeyPressedRepeat(.e)) num_bands = rl.math.clamp(num_bands + 1.0, 2.0, 20.0);
         if (rl.isKeyPressed(.q) or rl.isKeyPressedRepeat(.q)) num_bands = rl.math.clamp(num_bands - 1.0, 2.0, 20.0);
-        rl.setShaderValue(cel_shader, num_bands_loc, &num_bands, .float);
+        rl.setShaderValue(cel_shader, num_bands_loc, num_bands);
 
         // Spin light opposite to CAMERA_ORBITAL (0.5 rad/s), angled 45 degrees off vertical
         const t: f32 = @floatCast(rl.getTime());
@@ -113,7 +113,7 @@ pub fn main() !void {
             if (outline_enabled) {
                 // Outline pass: cull front faces, draw extruded back faces as silhouette
                 const thickness: f32 = 0.005;
-                rl.setShaderValue(outline_shader, outline_thickness_loc, &thickness, .float);
+                rl.setShaderValue(outline_shader, outline_thickness_loc, thickness);
 
                 rl.gl.setCullFace(rl.gl.cull_face_front);
 

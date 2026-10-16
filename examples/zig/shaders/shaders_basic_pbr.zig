@@ -67,14 +67,14 @@ const Light = struct {
     fn update(light: Light, shader: rl.Shader) void {
         const enabled: i32 = @intFromBool(light.enabled);
         const light_type: i32 = @backingInt(light.type);
-        rl.setShaderValue(shader, light.enabled_loc, &enabled, .int);
-        rl.setShaderValue(shader, light.type_loc, &light_type, .int);
+        rl.setShaderValue(shader, light.enabled_loc, enabled);
+        rl.setShaderValue(shader, light.type_loc, light_type);
 
         // Send to shader light position and target position values
-        rl.setShaderValue(shader, light.position_loc, &light.position, .vec3);
-        rl.setShaderValue(shader, light.target_loc, &light.target, .vec3);
-        rl.setShaderValue(shader, light.color_loc, &light.color, .vec4);
-        rl.setShaderValue(shader, light.intensity_loc, &light.intensity, .float);
+        rl.setShaderValue(shader, light.position_loc, light.position);
+        rl.setShaderValue(shader, light.target_loc, light.target);
+        rl.setShaderValue(shader, light.color_loc, light.color);
+        rl.setShaderValue(shader, light.intensity_loc, light.intensity);
     }
 
     /// The light's color, back in 8-bit channels
@@ -139,7 +139,7 @@ pub fn main() !void {
     shader.loc(.vector_view).* = rl.getShaderLocation(shader, "viewPos");
     const light_count_loc = rl.getShaderLocation(shader, "numOfLights");
     const max_light_count: i32 = max_lights;
-    rl.setShaderValue(shader, light_count_loc, &max_light_count, .int);
+    rl.setShaderValue(shader, light_count_loc, max_light_count);
 
     // Setup ambient color and intensity parameters
     const ambient_intensity: f32 = 0.02;
@@ -149,8 +149,8 @@ pub fn main() !void {
         .y = @as(f32, @floatFromInt(ambient_color.g)) / 255.0,
         .z = @as(f32, @floatFromInt(ambient_color.b)) / 255.0,
     };
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "ambientColor"), &ambient_color_normalized, .vec3);
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "ambient"), &ambient_intensity, .float);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "ambientColor"), ambient_color_normalized);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "ambient"), ambient_intensity);
 
     // Get location for shader parameters that can be modified in real time
     const metallic_value_loc = rl.getShaderLocation(shader, "metallicValue");
@@ -223,10 +223,10 @@ pub fn main() !void {
     // Setup material texture maps usage in shader
     // NOTE: By default, the texture maps are always used
     const usage: i32 = 1;
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexAlbedo"), &usage, .int);
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexNormal"), &usage, .int);
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexMRA"), &usage, .int);
-    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexEmissive"), &usage, .int);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexAlbedo"), usage);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexNormal"), usage);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexMRA"), usage);
+    rl.setShaderValue(shader, rl.getShaderLocation(shader, "useTexEmissive"), usage);
 
     rl.setTargetFPS(60); // Set our game to run at 60 frames-per-second
 
@@ -236,7 +236,7 @@ pub fn main() !void {
         rl.updateCamera(&camera, .orbital);
 
         // Update the shader with the camera view vector (points towards { 0.0f, 0.0f, 0.0f })
-        rl.setShaderValue(shader, shader.loc(.vector_view).*, &camera.position, .vec3);
+        rl.setShaderValue(shader, shader.loc(.vector_view).*, camera.position);
 
         // Check key inputs to enable/disable lights
         if (rl.isKeyPressed(.one)) lights[2].enabled = !lights[2].enabled;
@@ -258,26 +258,26 @@ pub fn main() !void {
             defer rl.endMode3D();
 
             // Set floor model texture tiling and emissive color parameters on shader
-            rl.setShaderValue(shader, texture_tiling_loc, &floor_texture_tiling, .vec2);
+            rl.setShaderValue(shader, texture_tiling_loc, floor_texture_tiling);
             const floor_emissive_color = rl.colorNormalize(floor_material.map(.emission).color);
-            rl.setShaderValue(shader, emissive_color_loc, &floor_emissive_color, .vec4);
+            rl.setShaderValue(shader, emissive_color_loc, floor_emissive_color);
 
             // Set floor metallic and roughness values
-            rl.setShaderValue(shader, metallic_value_loc, &floor_material.map(.metalness).value, .float);
-            rl.setShaderValue(shader, roughness_value_loc, &floor_material.map(.roughness).value, .float);
+            rl.setShaderValue(shader, metallic_value_loc, floor_material.map(.metalness).value);
+            rl.setShaderValue(shader, roughness_value_loc, floor_material.map(.roughness).value);
 
             rl.drawModel(floor, .{ .x = 0.0, .y = 0.0, .z = 0.0 }, 5.0, .white); // Draw floor model
 
             // Set old car model texture tiling, emissive color and emissive intensity parameters on shader
-            rl.setShaderValue(shader, texture_tiling_loc, &car_texture_tiling, .vec2);
+            rl.setShaderValue(shader, texture_tiling_loc, car_texture_tiling);
             const car_emissive_color = rl.colorNormalize(car_material.map(.emission).color);
-            rl.setShaderValue(shader, emissive_color_loc, &car_emissive_color, .vec4);
+            rl.setShaderValue(shader, emissive_color_loc, car_emissive_color);
             const emissive_intensity: f32 = 0.01;
-            rl.setShaderValue(shader, emissive_intensity_loc, &emissive_intensity, .float);
+            rl.setShaderValue(shader, emissive_intensity_loc, emissive_intensity);
 
             // Set old car metallic and roughness values
-            rl.setShaderValue(shader, metallic_value_loc, &car_material.map(.metalness).value, .float);
-            rl.setShaderValue(shader, roughness_value_loc, &car_material.map(.roughness).value, .float);
+            rl.setShaderValue(shader, metallic_value_loc, car_material.map(.metalness).value);
+            rl.setShaderValue(shader, roughness_value_loc, car_material.map(.roughness).value);
 
             rl.drawModel(car, .{ .x = 0.0, .y = 0.0, .z = 0.0 }, 0.25, .white); // Draw car model
 

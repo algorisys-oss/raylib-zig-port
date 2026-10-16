@@ -63,6 +63,9 @@ pub fn main() !void {
 | returned buffer + `int *count` out-param | returned slice; freed by the matching `unload` | `loadFileData(path)` → `[]u8` |
 | color `#define` (`RAYWHITE`) | `Color` decl (`.ray_white`) | `clearBackground(.ray_white)` |
 | enum constant (`KEY_LEFT_SHIFT`) | enum tag without prefix | `.left_shift` |
+| `SetShaderValue(s, loc, &v, SHADER_UNIFORM_VEC3)` | uniform type inferred from `v` at comptime | `rl.setShaderValue(shader, loc, camera.position)` |
+| `SetShaderValueV(s, loc, arr, type, count)` | slice/array pointer; type and count inferred | `rl.setShaderValueV(shader, loc, &light_positions)` |
+| pointer + count struct fields | `xSlice()` accessors (explicit table) | `for (model.meshSlice()) \|mesh\| …`, `mesh.vertexSlice()` (`[]Vector3`) |
 | printf-style varargs (`TextFormat`, `TraceLog`) | `std.fmt` comptime format | `rl.textFormat("{d} pts", .{score})` |
 | `PI` / `DEG2RAD` / `RAD2DEG` | `f32` constants | `rl.deg2rad * angle` |
 | `char *` struct field | `[*:0]u8` (NUL-terminated) | `std.mem.span(files.paths.?[0])` |

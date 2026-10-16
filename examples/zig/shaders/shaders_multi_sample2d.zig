@@ -51,7 +51,7 @@ pub fn main() !void {
         }
         divider_value = std.math.clamp(divider_value, 0.0, 1.0);
 
-        rl.setShaderValue(shader, divider_loc, &divider_value, .float);
+        rl.setShaderValue(shader, divider_loc, divider_value);
 
         // Draw
         rl.beginDrawing();
