@@ -46,7 +46,8 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   `src/platforms/rcore_desktop_glfw.zig` (216 exports before and after).
 - `zig build webexamples`: browser gate, C oracle vs Zig-API translation in
   headless Chrome (SwiftShader), byte-compared. C-vs-C deterministic; negative
-  control fails. **46/46** (`core_basic_window` + all 45 shapes), Debug and
+  control fails. **78/78** (`core_basic_window` + 45 shapes + 32/33 textures;
+  textures_to_image excluded, docs/web.md), Debug and
   ReleaseFast.
 - `zig build webdemos`: the same examples without the shim, for the site.
 - Two port bugs found (hidden by x86-64): libc `time_t`/`timespec`/`stat`/
@@ -55,6 +56,10 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   `c_allocator` in Zig-API examples (WasmAllocator grows memory behind
   Emscripten), `std.c.time_t` in examples' own libc declarations, and raygui
   compiled with the web flags (`-DPLATFORM_WEB`, no UBSan) on the Zig side.
+- Textures (2026-10-16): 32/33 in the gate; textures_to_image excluded (WebGL 2
+  cannot read back an RGB texture, in C or Zig). Port bug found by the web
+  link: rmodels declared par_shapes_set_epsilon_degenerate_sphere(f64) for a C
+  float (a trap on wasm). Fixed; web links now use `-Wl,--fatal-warnings`.
 - Desktop gates after all of this: pixel 12/12, exdiff 217/217, apiexamples
   217/217, cdiff 4/4, audio 43/43, data, math/cam/gest, apitest, constaudit 0.
 

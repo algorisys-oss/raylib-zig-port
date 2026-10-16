@@ -382,6 +382,40 @@ const web_examples = [_][]const u8{
     "shapes/shapes_top_down_lights",
     "shapes/shapes_triangle_strip",
     "shapes/shapes_vector_angle",
+    "textures/textures_background_scrolling",
+    "textures/textures_blend_modes",
+    "textures/textures_bunnymark",
+    "textures/textures_cellular_automata",
+    "textures/textures_clipboard_image",
+    "textures/textures_fog_of_war",
+    "textures/textures_framebuffer_rendering",
+    "textures/textures_gif_player",
+    "textures/textures_image_channel",
+    "textures/textures_image_drawing",
+    "textures/textures_image_generation",
+    "textures/textures_image_kernel",
+    "textures/textures_image_loading",
+    "textures/textures_image_processing",
+    "textures/textures_image_rotate",
+    "textures/textures_image_text",
+    "textures/textures_logo_raylib",
+    "textures/textures_magnifying_glass",
+    "textures/textures_mouse_painting",
+    "textures/textures_npatch_drawing",
+    "textures/textures_particles_blending",
+    "textures/textures_polygon_drawing",
+    "textures/textures_portal_window",
+    "textures/textures_raw_data",
+    "textures/textures_screen_buffer",
+    "textures/textures_sprite_animation",
+    "textures/textures_sprite_button",
+    "textures/textures_sprite_explosion",
+    "textures/textures_sprite_stacking",
+    "textures/textures_srcrec_dstrec",
+    "textures/textures_textured_curve",
+    "textures/textures_tiled_drawing",
+    // Browser exclusions, one per line as `// <entry>: <reason>` (docs/web.md):
+    // textures/textures_to_image: WebGL 2 cannot glReadPixels an RGB texture (GL_INVALID_OPERATION); C and Zig both draw an unwritten buffer
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
@@ -1002,6 +1036,11 @@ const emcc_flags = [_][]const u8{
     // frame back from MEMFS.
     "-sEXPORTED_RUNTIME_METHODS=FS,ENV",
     "-O2",
+    // A Zig extern whose signature differs from the C definition links on wasm
+    // with only a warning, and the call becomes a trap (RuntimeError:
+    // unreachable). x86-64 hides such bugs: par_shapes_set_epsilon_degenerate_sphere
+    // was declared f64 for a C float and passed 0.0 correctly by luck.
+    "-Wl,--fatal-warnings",
 };
 
 /// One example linked by emcc into <name>.js + .wasm (+ .data when the example's

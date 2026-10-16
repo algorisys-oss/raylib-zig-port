@@ -6,8 +6,10 @@ This page explains how it is put together, how it is checked against C raylib,
 and what is not done yet.
 
 Status (2026-10-16): the platform backend and the OpenGL ES 3 path are ported.
-The browser gate covers 46 examples: `core_basic_window` and all 45 of the
-shapes category. All 46 pass in Debug and in ReleaseFast.
+The browser gate covers 78 examples: `core_basic_window`, all 45 of the
+shapes category and 32 of the 33 textures examples. All 78 pass in Debug and
+in ReleaseFast. The one excluded example, and why, is under "Browser
+exclusions" below.
 
 ## What runs in the browser
 
@@ -162,7 +164,7 @@ the right argument for the target (`c_va.arg(&ap)`).
 
 ## Writing Zig for the web build
 
-Two rules, both learned from examples that passed on the desktop and failed in
+Three rules, all learned from code that passed on the desktop and failed in
 the browser:
 
 - **Allocate with `std.heap.c_allocator`, not `std.heap.page_allocator`.** On
@@ -175,15 +177,31 @@ the browser:
 - **Declare libc's time functions with `std.c.time_t`.** `time_t` is 64-bit on
   wasm32 but `c_long` is 32-bit. A `time(?*c_long) c_long` declaration links,
   and wasm-ld replaces the call with a trap (`RuntimeError: unreachable`).
+- **A Zig `extern` must match the C prototype exactly.** On wasm, a call
+  through a mismatched signature links with a warning and then traps at
+  runtime. rmodels declared `par_shapes_set_epsilon_degenerate_sphere` with an
+  `f64` for C's `float`; on x86-64 it passed `0.0` correctly by luck, and on
+  the web every `GenMeshSphere` call would have trapped. The web link now
+  passes `-Wl,--fatal-warnings`, so a mismatch fails the build.
 
 raygui is compiled as C on both sides of the gate, and with the same
 defines: `-DPLATFORM_WEB` on the web (raygui reads the scroll wheel
 differently there), and without UBSan, which emcc has no runtime for. The Zig
 side once used the desktop flags, and every raygui example failed to link.
 
+## Browser exclusions
+
+An example is left out of the browser gate only when it cannot give a correct
+picture in the browser, in C as well as in Zig. Each one is a comment in
+build.zig's `web_examples` and a row here.
+
+| Example | Reason |
+|---|---|
+| `textures_to_image` | It reads an RGB texture back from the GPU (`LoadImageFromTexture`). On OpenGL ES, rlgl does that with `glReadPixels` in the texture's own format, and WebGL 2 accepts only RGBA there: the call fails with `GL_INVALID_OPERATION` in C and in Zig. Both then draw a buffer the GPU never wrote: leftover heap bytes in C, zeros in Zig. |
+
 ## Not done yet
 
-- The gate covers core_basic_window and the shapes category. The other
+- The gate covers core_basic_window, shapes and textures. The other
   categories come next, with each browser exclusion recorded and explained.
 - Shaders: the examples hard-code GLSL 330. On the web they must load the
   `glsl100` (or `glsl300es`) variants, from one comptime constant.

@@ -1352,7 +1352,7 @@ extern fn par_shapes_create_parametric_sphere(slices: c_int, stacks: c_int) *par
 extern fn par_shapes_create_trefoil_knot(slices: c_int, stacks: c_int, radius: f32) *par_shapes_mesh;
 extern fn par_shapes_create_hemisphere(slices: c_int, stacks: c_int) *par_shapes_mesh;
 extern fn par_shapes_create_disk(radius: f32, slices: c_int, center: *const [3]f32, normal: *const [3]f32) *par_shapes_mesh;
-extern fn par_shapes_set_epsilon_degenerate_sphere(epsilon: f64) void;
+extern fn par_shapes_set_epsilon_degenerate_sphere(epsilon: f32) void;
 extern fn par_shapes_translate(mesh: *par_shapes_mesh, x: f32, y: f32, z: f32) void;
 extern fn par_shapes_rotate(mesh: *par_shapes_mesh, radians: f32, axis: *const [3]f32) void;
 extern fn par_shapes_scale(mesh: *par_shapes_mesh, x: f32, y: f32, z: f32) void;

@@ -278,6 +278,9 @@ before claiming a module done.
   grows memory behind Emscripten's back (stale JS heap views, WebGL errors,
   "detached ArrayBuffer"). Zig-API examples use `std.heap.c_allocator`. The
   same `time_t` rule applies to examples' own libc declarations (docs/web.md).
+- **Zig `extern` decls must match the C prototype (float is `f32`).** x86-64
+  tolerates a mismatch silently; wasm-ld turns the call into a trap. The web
+  link runs with `-Wl,--fatal-warnings` to catch it (docs/web.md).
 - **Forwarding `...` to vprintf: `&ap` is x86-64 only.** C's `va_list` is an
   array on x86-64 (decays to a pointer) and a plain pointer on wasm32. Passing
   `&ap` everywhere made TraceLog/TextFormat format stack garbage on the web,
