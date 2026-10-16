@@ -754,16 +754,26 @@ pub fn unloadRandomSequence(sequence: []i32) void {
 ''',
 }
 
-# rlgl's batch structs carry #if branches per GL backend; this is the pinned
-# GRAPHICS_API_OPENGL_33 layout (checked against translate-c by apitest).
+# rlgl's batch structs carry #if branches per GL backend. The library runs rlgl
+# on OpenGL 3.3 on the desktop and on OpenGL ES 3 (WebGL 2) on Emscripten
+# (src/rlgl.zig `graphics_api`), so the API follows the target the same way.
+# The desktop layout is checked against translate-c by apitest.
 GL_TYPES = '''
+    /// The web build runs rlgl on OpenGL ES 3 (WebGL 2), the desktop on OpenGL 3.3;
+    /// a few batch details differ between the two, as in rlgl.h.
+    const web = @import("builtin").os.tag == .emscripten;
+
+    /// Element type of `VertexBuffer.indices`: rlgl.h stores quad indices as
+    /// `unsigned short` on OpenGL ES and `unsigned int` on OpenGL 3.3.
+    pub const BatchIndex = if (web) c_ushort else c_uint;
+
     pub const VertexBuffer = extern struct {
         elementCount: c_int, // Number of elements in the buffer (QUADS)
         vertices: ?[*]f32, // Vertex position (XYZ - 3 components per vertex)
         texcoords: ?[*]f32, // Vertex texture coordinates (UV - 2 components per vertex)
         normals: ?[*]f32, // Vertex normal (XYZ - 3 components per vertex)
         colors: ?[*]u8, // Vertex colors (RGBA - 4 components per vertex)
-        indices: ?[*]c_uint, // Vertex indices (6 indices per quad)
+        indices: ?[*]BatchIndex, // Vertex indices (6 indices per quad)
         vaoId: c_uint, // OpenGL Vertex Array Object id
         vboId: [5]c_uint, // OpenGL Vertex Buffer Objects id (5 types of vertex data)
     };
@@ -785,8 +795,8 @@ GL_TYPES = '''
     };
 '''
 
-# Constants rlgl.h defines per GL backend (#if): the pinned OPENGL_33 value.
-GL_PINNED_CONSTANTS = {"RL_DEFAULT_BATCH_BUFFER_ELEMENTS": 8192}
+# Constants rlgl.h defines per GL backend (#if), as Zig expressions over `web`.
+GL_PINNED_CONSTANTS = {"RL_DEFAULT_BATCH_BUFFER_ELEMENTS": "if (web) 2048 else 8192"}
 
 GL_OVERRIDES = {
     "rlMultMatrixf": '''

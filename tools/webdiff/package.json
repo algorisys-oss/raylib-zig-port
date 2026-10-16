@@ -1,0 +1,9 @@
+{
+  "name": "raylib-zig-webdiff",
+  "private": true,
+  "type": "module",
+  "description": "Headless-Chrome harness for the browser examples gate (tools/webdiff.sh)",
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

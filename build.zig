@@ -40,13 +40,34 @@ const ported_modules = [_][]const u8{
     "raudio.c", // -> src/raudio.zig (audio; miniaudio/dr_*/stb_vorbis/qoa/jar_* via src/c/raudio_impl.c shim)
 };
 
+/// The two targets the port builds for. Desktop is the pinned Linux/GLFW/GL 3.3
+/// configuration every gate runs on; web is PLATFORM_WEB + OpenGL ES 3 (WebGL 2)
+/// on Emscripten, linked by emcc (see `addWeb`). The Zig modules pick their side
+/// at comptime from the target OS (rcore.zig `backend`, rlgl.zig `graphics_api`);
+/// these defines do the same for the C that is still compiled.
+const Platform = enum { desktop, web };
+
 /// Compile defines pinning the Linux/GLFW/GL3.3 configuration. Proven to build
 /// and render headlessly under both the GPU and llvmpipe.
 const c_defines = [_][]const u8{
     "-DPLATFORM_DESKTOP_GLFW",
     "-DGRAPHICS_API_OPENGL_33",
-    "-D_GNU_SOURCE",
     "-D_GLFW_X11",
+} ++ c_defines_common;
+
+/// The web configuration: what upstream raylib's Makefile passes for
+/// PLATFORM_WEB, with the WebGL 2 graphics API.
+const web_c_defines = [_][]const u8{
+    "-DPLATFORM_WEB",
+    "-DGRAPHICS_API_OPENGL_ES3",
+} ++ c_defines_common ++ [_][]const u8{
+    // EM_ASM (rcore_web.c) refuses strict C modes; upstream builds the web with
+    // gnu99 too. Later -std wins over the common -std=c99.
+    "-std=gnu99",
+};
+
+const c_defines_common = [_][]const u8{
+    "-D_GNU_SOURCE",
     "-DSUPPORT_MODULE_RSHAPES=1",
     "-DSUPPORT_MODULE_RTEXTURES=1",
     "-DSUPPORT_MODULE_RTEXT=1",
@@ -311,6 +332,13 @@ const api_examples = [_][]const u8{
     "textures/textures_to_image",
 };
 
+/// Examples in the browser gate (`zig build webexamples`): each runs in headless
+/// Chrome twice, as upstream C on the all-C library and as the Zig-API translation
+/// on the Zig library, and the final frames must be byte-identical.
+const web_examples = [_][]const u8{
+    "core/core_basic_window",
+};
+
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
 
 /// rlgl.h (header-only GL abstraction) is ported to src/rlgl.zig. When true, the
@@ -333,42 +361,66 @@ fn isPorted(name: []const u8) bool {
     return false;
 }
 
+/// Where a library is built for: the platform, and for the web the emsdk whose
+/// sysroot headers and translated HTML5 API the build uses.
+const LibTarget = struct {
+    target: std.Build.ResolvedTarget,
+    platform: Platform = .desktop,
+    /// The `emscripten` module rcore_web.zig imports (web only).
+    emscripten: ?*std.Build.Module = null,
+    /// emsdk's sysroot include directory (web only).
+    sysroot_include: ?[]const u8 = null,
+};
+
 /// Build a static libraylib. `swap = false` forces an all-C build (the oracle);
 /// `swap = true` replaces ported `.c` files with their Zig objects.
 fn raylibLib(
     b: *std.Build,
-    target: std.Build.ResolvedTarget,
+    lt: LibTarget,
     optimize: ?std.builtin.Optimize,
     cfg_mod: *std.Build.Module,
     swap: bool,
     name: []const u8,
 ) *std.Build.Step.Compile {
+    const target = lt.target;
+    const web = lt.platform == .web;
     const mod = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
     mod.addIncludePath(b.path("vendor/raylib/src"));
     mod.addIncludePath(b.path("vendor/raylib/src/external/glfw/include"));
-    mod.addSystemIncludePath(.{ .cwd_relative = "/usr/include" });
+    if (lt.sysroot_include) |dir| {
+        mod.addSystemIncludePath(.{ .cwd_relative = dir });
+    } else mod.addSystemIncludePath(.{ .cwd_relative = "/usr/include" });
     // (no addLibraryPath here — this is a static archive; system libs are linked
     //  on the final executable in linkExe.)
 
     // C compile flags: when rlgl is ported, the swapped build adds
     // -DRAYLIB_ZIG_NO_RLGL_IMPL so rcore.c stops instantiating rlgl + glad
     // (provided by src/rlgl.zig + src/c/glad_impl.c instead). Oracle stays all-C.
-    const rlgl_flags = c_defines ++ [_][]const u8{
+    const no_rlgl_impl = [_][]const u8{
         "-DRAYLIB_ZIG_NO_RLGL_IMPL",
         // RL_DEFAULT_SHADER_* name constants live in rlgl.h's (now-disabled)
         // IMPLEMENTATION block; rcore.c/rmodels.c still use them.
         "-includesrc/c/rlgl_impl_defs.h",
     };
+    const rlgl_flags = c_defines ++ no_rlgl_impl;
     // The oracle compiles WITHOUT UBSan: its job is producing upstream C's
     // practical reference output, and zig cc's default trap aborts on upstream's
     // own benign-in-practice UB (e.g. rtextures.c ImageKernelConvolution's
     // out-of-range float->uchar, hit by textures_image_kernel). The swapped
     // build keeps UBSan on its remaining C — it has caught real port bugs.
     const oracle_flags = c_defines ++ [_][]const u8{"-fno-sanitize=undefined"};
-    const c_flags: []const []const u8 = if (swap and rlgl_ported) &rlgl_flags else &oracle_flags;
+    // On the web emcc does the final link, and Zig's UBSan runtime comes with a
+    // Zig link only: both libraries' C is built without it there.
+    const web_rlgl_flags = web_c_defines ++ no_rlgl_impl ++ [_][]const u8{"-fno-sanitize=undefined"};
+    const web_oracle_flags = web_c_defines ++ [_][]const u8{"-fno-sanitize=undefined"};
+    const c_flags: []const []const u8 = switch (lt.platform) {
+        .desktop => if (swap and rlgl_ported) &rlgl_flags else &oracle_flags,
+        .web => if (swap and rlgl_ported) &web_rlgl_flags else &web_oracle_flags,
+    };
 
-    // GLFW is always C (vendored third-party windowing — never ported).
-    mod.addCSourceFile(.{ .file = b.path("vendor/raylib/src/rglfw.c"), .flags = c_flags });
+    // GLFW is always C (vendored third-party windowing — never ported). On the
+    // web Emscripten supplies GLFW (-sUSE_GLFW=3) against the canvas instead.
+    if (!web) mod.addCSourceFile(.{ .file = b.path("vendor/raylib/src/rglfw.c"), .flags = c_flags });
 
     for (raylib_tus) |tu| {
         const tu_ported = isPorted(tu) or (rcore_ported and std.mem.eql(u8, tu, "rcore.c"));
@@ -381,6 +433,9 @@ fn raylibLib(
                 .link_libc = true,
             });
             obj_mod.addImport("config", cfg_mod);
+            if (std.mem.eql(u8, stem, "rcore")) {
+                if (lt.emscripten) |em| obj_mod.addImport("emscripten", em);
+            }
             const obj = b.addObject(.{ .name = stem, .root_module = obj_mod });
             obj.use_llvm = true; // self-hosted x86 backend miscompiles by-value float code
             mod.addObject(obj);
@@ -410,8 +465,9 @@ fn raylibLib(
     }
 
     // rlgl swap: GLAD loader (C shim) + the rlgl.zig object, in the swapped build.
+    // On the web rlgl.zig calls WebGL 2 directly (src/gles3.zig): no loader.
     if (swap and rlgl_ported) {
-        mod.addCSourceFile(.{ .file = b.path("src/c/glad_impl.c"), .flags = c_flags });
+        if (!web) mod.addCSourceFile(.{ .file = b.path("src/c/glad_impl.c"), .flags = c_flags });
         const rlgl_obj = b.addObject(.{ .name = "rlgl", .root_module = b.createModule(.{
             .root_source_file = b.path("src/rlgl.zig"),
             .target = target,
@@ -532,11 +588,11 @@ pub fn build(b: *std.Build) void {
     const cfg_mod = cfg.createModule();
 
     // Production library (ported Zig swapped in) — installed.
-    const lib = raylibLib(b, target, optimize, cfg_mod, true, "raylib");
+    const lib = raylibLib(b, .{ .target = target }, optimize, cfg_mod, true, "raylib");
     b.installArtifact(lib);
 
     // All-C oracle library (never swapped) — for the differential gate.
-    const oracle = raylibLib(b, target, optimize, cfg_mod, false, "raylib_oracle");
+    const oracle = raylibLib(b, .{ .target = target }, optimize, cfg_mod, false, "raylib_oracle");
 
     // Headless demo against the production lib.
     const demo = linkExe(b, target, optimize, lib, "demo", "test/scene_runner.c");
@@ -651,6 +707,8 @@ pub fn build(b: *std.Build) void {
         diff.has_side_effects = true;
         step.dependOn(&diff.step);
     }
+
+    addWeb(b, optimize, cfg_mod);
 
     // `zig build angrybirds` — Angry Birds capstone demo (Zig game over the C ABI).
     {
@@ -851,4 +909,214 @@ pub fn build(b: *std.Build) void {
         gestdiff.addArtifactArg(zexe);
         b.step("gesttest", "rgestures bit-exact numeric diff (C vs Zig)").dependOn(&gestdiff.step);
     }
+}
+
+/// emcc settings shared by every web example, C oracle and Zig alike.
+const emcc_flags = [_][]const u8{
+    // Emscripten supplies GLFW 3 against the canvas (PLATFORM_WEB runs on it).
+    "-sUSE_GLFW=3",
+    // The examples keep raylib's `while (!WindowShouldClose())` loop; Asyncify lets
+    // WindowShouldClose yield to the browser (emscripten_sleep) mid-loop.
+    "-sASYNCIFY",
+    // rlgl is built for OpenGL ES 3, which needs a WebGL 2 context.
+    "-sMIN_WEBGL_VERSION=2",
+    "-sMAX_WEBGL_VERSION=2",
+    "-sALLOW_MEMORY_GROWTH=1",
+    "-sSTACK_SIZE=1048576",
+    "-sFORCE_FILESYSTEM=1",
+    // A factory function (`createExample(config)`) instead of a global `Module`,
+    // so a page decides when an example starts and which canvas it gets.
+    "-sMODULARIZE=1",
+    "-sEXPORT_NAME=createExample",
+    // FS and ENV: the gate passes EXDIFF_* through ENV and reads the final
+    // frame back from MEMFS.
+    "-sEXPORTED_RUNTIME_METHODS=FS,ENV",
+    "-O2",
+};
+
+/// One example linked by emcc into <name>.js + .wasm (+ .data when the example's
+/// category has a resources/ directory). Returns the directory holding them.
+fn emccLink(
+    b: *std.Build,
+    emcc_path: []const u8,
+    name: []const u8,
+    category: []const u8,
+    inputs: []const *std.Build.Step.Compile,
+    js_library: ?std.Build.LazyPath,
+) std.Build.LazyPath {
+    const emcc = b.addSystemCommand(&.{emcc_path});
+    for (inputs) |input| emcc.addArtifactArg(input);
+    emcc.addArgs(&emcc_flags);
+    if (js_library) |js| {
+        emcc.addArg("--js-library");
+        emcc.addFileArg(js);
+    }
+    // Examples load "resources/..." relative to the working directory, which is
+    // MEMFS's root on the web.
+    const resources = b.fmt("{s}/{s}/resources", .{ raylib_examples, category });
+    if (std.Io.Dir.cwd().access(b.graph.io, resources, .{})) |_| {
+        emcc.addArgs(&.{ "--preload-file", b.fmt("{s}@resources", .{resources}) });
+    } else |_| {}
+    emcc.addArg("-o");
+    return emcc.addOutputFileArg(b.fmt("{s}.js", .{name})).dirname();
+}
+
+const raylib_examples = "/home/rajesh/opensource/graphics/raylib-6.2/examples";
+
+/// `zig build web` and `zig build webexamples`: the port's web target.
+///
+/// Zig compiles the library (Zig modules + the bundled C) for wasm32-emscripten,
+/// and emcc links each program, because the JavaScript glue and the WebGL
+/// context are things only Emscripten emits. `web` installs the Zig library;
+/// `webexamples` is the browser gate over `web_examples`: the upstream C example
+/// on the all-C library (the oracle) and the Zig-API translation on the Zig
+/// library, each run in headless Chrome by tools/webdiff.sh, final frames
+/// byte-compared.
+fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Module) void {
+    const web_step = b.step("web", "Build the Zig raylib for the browser (wasm32-emscripten)");
+    const demos_step = b.step("webdemos", "Browser builds of the web examples for the site (zig-out/web/examples)");
+    const gate_step = b.step("webexamples", "Browser gate: web examples, C vs Zig, in headless Chrome");
+
+    const emsdk = b.option([]const u8, "emsdk", "Path to the Emscripten SDK (default: $EMSDK)") orelse
+        b.graph.environ_map.get("EMSDK") orelse {
+        const fail = b.addFail("no Emscripten SDK: pass -Demsdk=/path/to/emsdk, or source emsdk_env.sh");
+        web_step.dependOn(&fail.step);
+        gate_step.dependOn(&fail.step);
+        demos_step.dependOn(&fail.step);
+        return;
+    };
+    const emcc_path = b.pathJoin(&.{ emsdk, "upstream", "emscripten", "emcc" });
+    const sysroot_include = b.pathJoin(&.{ emsdk, "upstream", "emscripten", "cache", "sysroot", "include" });
+
+    const target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .emscripten });
+
+    // Emscripten's HTML5 API for rcore_web.zig, from emsdk's own headers.
+    const em_h = b.addTranslateC(.{
+        .root_source_file = b.path("src/platforms/emscripten.h"),
+        .target = target,
+        .optimize = optimize orelse .Debug,
+        .link_libc = true,
+    });
+    em_h.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
+
+    const lt: LibTarget = .{
+        .target = target,
+        .platform = .web,
+        .emscripten = em_h.createModule(),
+        .sysroot_include = sysroot_include,
+    };
+    const lib = raylibLib(b, lt, optimize, cfg_mod, true, "raylib");
+    const oracle = raylibLib(b, lt, optimize, cfg_mod, false, "raylib_oracle");
+    web_step.dependOn(&b.addInstallArtifact(lib, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
+    const js_library = b.path("src/platforms/rcore_web.js");
+    web_step.dependOn(&b.addInstallFile(js_library, "web/rcore_web.js").step);
+
+    // The Zig-API boundary with the exdiff hooks (as `apiexamples` uses).
+    const gate_api = b.createModule(.{
+        .root_source_file = b.path("src/api/raylib.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const gate_c = b.createModule(.{ .root_source_file = b.path("src/api/c_exdiff.zig") });
+    gate_c.addImport("raylib", gate_api);
+    gate_api.addImport("raylib_c", gate_c);
+    const raygui = rayguiModule(b, gate_api);
+    raygui.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
+    var helpers: [2]std.Build.Module.Import = undefined;
+    for (&helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
+        const helper_mod = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/zig/common/{s}.zig", .{helper_name})) });
+        helper_mod.addImport("raylib", gate_api);
+        helper.* = .{ .name = helper_name, .module = helper_mod };
+    }
+
+    // The API as programs use it (no determinism hooks), for the site's demos.
+    const demo_api = b.createModule(.{
+        .root_source_file = b.path("src/api/raylib.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const demo_c = b.createModule(.{ .root_source_file = b.path("src/api/c.zig") });
+    demo_c.addImport("raylib", demo_api);
+    demo_api.addImport("raylib_c", demo_c);
+    const demo_raygui = rayguiModule(b, demo_api);
+    demo_raygui.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
+    var demo_helpers: [2]std.Build.Module.Import = undefined;
+    for (&demo_helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
+        const helper_mod = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/zig/common/{s}.zig", .{helper_name})) });
+        helper_mod.addImport("raylib", demo_api);
+        helper.* = .{ .name = helper_name, .module = helper_mod };
+    }
+
+    const c_flags = [_][]const u8{ "-std=gnu99", "-DPLATFORM_WEB", "-ffp-contract=off", "-fno-sanitize=undefined", "-w" };
+
+    const c_dirs = b.addWriteFiles();
+    const zig_dirs = b.addWriteFiles();
+    var list_text: std.ArrayList(u8) = .empty;
+    for (web_examples) |entry| {
+        const category = entry[0..std.mem.indexOfScalar(u8, entry, '/').?];
+        const name = entry[category.len + 1 ..];
+        list_text.appendSlice(b.allocator, b.fmt("{s}\n", .{name})) catch @panic("OOM");
+
+        // C oracle: the unmodified upstream example, shimmed for determinism.
+        const c_mod = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
+        c_mod.addIncludePath(b.path("vendor/raylib/src"));
+        c_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/{s}", .{ raylib_examples, category }) });
+        c_mod.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
+        c_mod.addCSourceFile(.{
+            .file = .{ .cwd_relative = b.fmt("{s}/{s}.c", .{ raylib_examples, entry }) },
+            .flags = &(c_flags ++ [_][]const u8{"-includetools/exdiff/shim.h"}),
+        });
+        c_mod.addCSourceFiles(.{ .files = &.{ "tools/exdiff/driver.c", "tools/exdiff/hooks.c" }, .flags = &c_flags });
+        const c_lib = b.addLibrary(.{ .name = b.fmt("{s}_c", .{name}), .linkage = .static, .root_module = c_mod });
+        const c_out = emccLink(b, emcc_path, name, category, &.{ c_lib, oracle }, null);
+        _ = c_dirs.addCopyDirectory(c_out, name, .{});
+
+        // Zig: the Zig-API translation on the Zig library.
+        const z_mod = b.createModule(.{
+            .root_source_file = b.path(b.fmt("examples/zig/{s}.zig", .{entry})),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        z_mod.addImport("raylib", gate_api);
+        z_mod.addImport("raygui", raygui);
+        for (helpers) |helper| z_mod.addImport(helper.name, helper.module);
+        z_mod.addIncludePath(b.path("vendor/raylib/src"));
+        z_mod.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
+        z_mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &c_flags });
+        const z_lib = b.addLibrary(.{ .name = name, .linkage = .static, .root_module = z_mod });
+        z_lib.use_llvm = true;
+        const z_out = emccLink(b, emcc_path, name, category, &.{ z_lib, lib }, js_library);
+        _ = zig_dirs.addCopyDirectory(z_out, name, .{});
+
+        // The same translation for the site: the real API, the real main loop.
+        const d_mod = b.createModule(.{
+            .root_source_file = b.path(b.fmt("examples/zig/{s}.zig", .{entry})),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        d_mod.addImport("raylib", demo_api);
+        d_mod.addImport("raygui", demo_raygui);
+        for (demo_helpers) |helper| d_mod.addImport(helper.name, helper.module);
+        const d_lib = b.addLibrary(.{ .name = b.fmt("{s}_demo", .{name}), .linkage = .static, .root_module = d_mod });
+        d_lib.use_llvm = true;
+        const d_out = emccLink(b, emcc_path, name, category, &.{ d_lib, lib }, js_library);
+        demos_step.dependOn(&b.addInstallDirectory(.{
+            .source_dir = d_out,
+            .install_dir = .{ .custom = "web/examples" },
+            .install_subdir = name,
+        }).step);
+    }
+    const list = b.addWriteFiles().add("webexamples.list", list_text.items);
+
+    const diff = b.addSystemCommand(&.{"tools/webdiff.sh"});
+    diff.addDirectoryArg(c_dirs.getDirectory());
+    diff.addDirectoryArg(zig_dirs.getDirectory());
+    diff.addFileArg(list);
+    diff.addArg(b.option([]const u8, "web-filter", "webexamples: only diff examples whose name contains this") orelse "");
+    diff.has_side_effects = true;
+    gate_step.dependOn(&diff.step);
 }

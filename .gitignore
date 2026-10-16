@@ -21,3 +21,6 @@ src/c_layout.zig
 /zig-out/frames/
 __pycache__/
 *.pyc
+
+# Browser gate harness deps (tools/webdiff, npm install)
+node_modules/

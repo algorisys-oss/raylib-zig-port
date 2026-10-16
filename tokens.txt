@@ -184,3 +184,4 @@
 38	2026-10-16	15:16:43	15:17:32	34	28802	11026537	9170	11064543	399086229	read ziglang.in stack + lane-dodger web build
 39	2026-10-16	15:18:53	15:21:00+	28	37620	9229994	23089	9290731	408376960	(in progress at record) raylib-zig-web AGENTS.md/CLAUDE.md/handoff; this record
 # Session total ~408.4M main-loop (incl. cache reads) + ~3.87M agents.
+# 2026-10-16 15:24-17:10 phase W (web target) was done from the raylib-zig-web session; its tokens are recorded in raylib-zig-web/tokens.txt, not here.

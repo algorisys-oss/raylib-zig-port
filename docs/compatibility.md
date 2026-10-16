@@ -18,8 +18,9 @@ that configuration, compatibility is not claimed.
 |---|---|---|
 | raylib version | **6.2** (tag `6.2`, git `02566453`) | other versions (re-port per release; 6.1-dev → 6.2 took one session) |
 | OS / arch | Linux x86-64 | others untested |
-| Platform backend | `PLATFORM_DESKTOP_GLFW` (GLFW 3, X11) | SDL, RGFW, Win32, DRM, Web, Android (see [not-migrated.md](not-migrated.md)) |
-| Graphics API | `GRAPHICS_API_OPENGL_33` | OpenGL 1.1 / 2.1 / 4.3, ES2 / ES3, rlsw |
+| Platform backend | `PLATFORM_DESKTOP_GLFW` (GLFW 3, X11) | SDL, RGFW, Win32, DRM, Android (see [not-migrated.md](not-migrated.md)) |
+| Graphics API | `GRAPHICS_API_OPENGL_33` | OpenGL 1.1 / 2.1 / 4.3, ES2, rlsw |
+| Web (in progress) | `PLATFORM_WEB` + `GRAPHICS_API_OPENGL_ES3` (WebGL 2) on `wasm32-emscripten`: ported; the browser gate covers **1** example so far (see [web.md](web.md)) | claims above do not yet extend to the web |
 | Feature config | raylib's **default `config.h`** | any non-default `SUPPORT_*` flag (see §5) |
 | Library form | static `libraylib.a` | shared `libraylib.so` (not built) |
 | Optimization | Debug and ReleaseFast (both gated, §3) | — |

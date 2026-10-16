@@ -267,6 +267,17 @@ before claiming a module done.
   contracts — visible only when the transform has non-zero off-diagonals
   (rotation), which the original scene battery never exercised. All C in this
   repo now compiles `-ffp-contract=off` (build.zig c_defines); keep it.
+- **Hand-declared libc types are Linux x86-64 types.** (Found by the web
+  target, 2026-10-16.) rcore.zig declared `time()` as returning `c_long`; on
+  x86-64 that equals `time_t`, on wasm32 `c_long` is 32-bit and `time_t`
+  64-bit, and wasm-ld produced invalid wasm (Binaryen: "local.set's value type
+  must be correct" in InitWindow). Use `std.c` types (`time_t`, `timespec`,
+  `dirent`, `Stat` where it exists) for anything libc defines per OS; when a
+  wasm link fails validation, relink with `--profiling-funcs` to get names.
+- **Forwarding `...` to vprintf: `&ap` is x86-64 only.** C's `va_list` is an
+  array on x86-64 (decays to a pointer) and a plain pointer on wasm32. Passing
+  `&ap` everywhere made TraceLog/TextFormat format stack garbage on the web,
+  and crashed the tab in ReleaseFast. Use `c_va.arg(&ap)` (src/c_va.zig).
 - **`Color` is 4×`u8` packed; `Vector*`/`Matrix` are `f32`.** Match field types
   and struct packing exactly; raylib passes these **by value** across the ABI
   (e.g. `DrawRectangle(..., Color)`), which is calling-convention-sensitive for
@@ -390,8 +401,17 @@ python3 tools/constaudit.py    # mirrored-constant audit
 tools/exdiff.sh <oracle.a> zig-out/lib/libraylib.a [filter]  # examples gate
 ```
 
+Web target (docs/web.md; needs emsdk, and `npm install` in tools/webdiff once):
+
+```bash
+zig build web -Demsdk=$HOME/emsdk           # wasm32-emscripten libraylib.a + rcore_web.js
+zig build webexamples -Demsdk=$HOME/emsdk   # browser gate: C vs Zig in headless Chrome
+```
+
 The oracle archive lives in the zig cache:
-`find .zig-cache ~/.cache/zig-local -name libraylib_oracle.a` (newest). When
+`find .zig-cache ~/.cache/zig-local -name libraylib_oracle.a` (newest). The web
+build makes a wasm archive of the same name: the desktop one is the archive
+whose `ar t` lists `rglfw.o`. When
 several builds run concurrently (e.g. agent worktrees), pass a private
 `--cache-dir` to avoid shared-cache link races. Vendored C (vendor/raylib/src)
 is raylib 6.2 + one local patch (see vendor/README.md).

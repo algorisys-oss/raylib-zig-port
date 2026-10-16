@@ -4,6 +4,24 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
+## Phase W — web target (for raylib-zig-web) — in progress (started 2026-10-16)
+
+The browser build of the port, for the documentation site. Details: docs/web.md.
+
+- Ported: `platforms/rcore_web.c` -> `src/platforms/rcore_web.zig` + `rcore_web.js`
+  (EM_ASM/EM_JS as an Emscripten JS library); rlgl `GRAPHICS_API_OPENGL_ES3`
+  (WebGL 2) in `src/rlgl.zig` via `src/gles3.zig`. Chosen at comptime from the
+  target OS. rcore.zig's desktop GLFW backend moved, unchanged, to
+  `src/platforms/rcore_desktop_glfw.zig` (216 exports before and after).
+- `zig build webexamples`: browser gate, C oracle vs Zig-API translation in
+  headless Chrome (SwiftShader), byte-compared. C-vs-C deterministic; negative
+  control fails. **1/1** (`core_basic_window`), Debug and ReleaseFast.
+- `zig build webdemos`: the same examples without the shim, for the site.
+- Two port bugs found (hidden by x86-64): libc `time_t`/`timespec`/`stat`/
+  `dirent` declared with x86-64 types; `va_list` forwarded as `&ap`.
+- Desktop gates after all of this: pixel 12/12, exdiff 217/217, apiexamples
+  217/217, cdiff 4/4, audio 43/43, data, math/cam/gest, apitest, constaudit 0.
+
 ## Phase 6 — idiomatic Zig API — ✅ (2026-10-16; approved "as per the raylib guidelines")
 
 `const rl = @import("raylib");` — raylib's functions, names and types

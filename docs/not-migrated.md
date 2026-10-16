@@ -37,13 +37,20 @@ Portable in principle, but not compiled in the pinned **Linux / GLFW / OpenGL
 | `platforms/rcore_desktop_rgfw.c` | RGFW backend |
 | `platforms/rcore_desktop_win32.c` | raw Win32 backend |
 | `platforms/rcore_drm.c` | Linux DRM/KMS (no desktop) |
-| `platforms/rcore_web*.c` | Emscripten/WebAssembly |
+| `platforms/rcore_web_emscripten.c`, `rcore_web_rgfw.c` | raylib's two other web backends (`PLATFORM_WEB` itself is ported, see below) |
 | `platforms/rcore_android.c` | Android NDK |
 | `platforms/rcore_template.c` | backend skeleton |
-| `GRAPHICS_API_OPENGL_{11,21,43,ES2,ES3}` paths in rlgl | other GL versions |
+| `GRAPHICS_API_OPENGL_{11,21,43,ES2}` paths in rlgl | other GL versions |
 
 The pinned backend, `platforms/rcore_desktop_glfw.c`, **is** in scope (it's
 `#include`d by rcore.c and ports with it).
+
+**The web target is ported (2026-10-16):** `platforms/rcore_web.c`
+(`PLATFORM_WEB`, on Emscripten's GLFW) is `src/platforms/rcore_web.zig` plus
+its JavaScript half `rcore_web.js`, and rlgl's `GRAPHICS_API_OPENGL_ES3` path
+is in `src/rlgl.zig` (WebGL 2 through `src/gles3.zig`). Both are chosen at
+comptime when the target OS is Emscripten. How it is built and checked against
+C in headless Chrome: [web.md](web.md).
 
 ## 3. raylib modules that proved un-portable
 

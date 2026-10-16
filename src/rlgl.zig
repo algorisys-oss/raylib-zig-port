@@ -1,17 +1,32 @@
 //! rlgl - A multi-OpenGL abstraction layer with an immediate-mode style API
 //!
-//! Zig port of raylib's `rlgl.h` (v6.0), GRAPHICS_API_OPENGL_33 configuration only.
+//! Zig port of raylib's `rlgl.h` (v6.0), in two configurations chosen at comptime from
+//! the target: GRAPHICS_API_OPENGL_33 on the desktop, GRAPHICS_API_OPENGL_ES3 (WebGL 2)
+//! on Emscripten. See `graphics_api`.
 //! Every public `rl*` function is exported with its exact C name, byte-compatible
 //! signature, and C calling convention, so the rest of raylib (still C) links
 //! against it unchanged. The vertex-batch accumulation/submission logic mirrors the
 //! C source exactly to keep pixel output bit-identical.
 //!
-//! OpenGL is reached through the GLAD function pointers (`glad_gl*`) declared in
-//! src/gl33.zig and instantiated by src/c/glad_impl.c. raymath helpers and TraceLog
-//! are still C and are `extern`-declared here.
+//! OpenGL is reached through `glad_gl*` function pointers. On the desktop they are
+//! GLAD's, declared in src/gl33.zig and loaded by src/c/glad_impl.c; on the web,
+//! src/gles3.zig declares the same names bound directly to Emscripten's WebGL 2
+//! functions. raymath helpers and TraceLog are still C and are `extern`-declared here.
 
 const std = @import("std");
-const gl = @import("gl33.zig");
+const builtin = @import("builtin");
+
+/// rlgl.h's GRAPHICS_API_OPENGL_* switch. Emscripten means a browser, and a browser
+/// means WebGL 2, which is OpenGL ES 3.0. Note that rlgl.h defines
+/// GRAPHICS_API_OPENGL_ES2 as well whenever ES3 is defined; `es2` below follows it.
+pub const GraphicsApi = enum { opengl_33, opengl_es3 };
+pub const graphics_api: GraphicsApi = if (builtin.os.tag == .emscripten) .opengl_es3 else .opengl_33;
+const es2 = graphics_api == .opengl_es3;
+
+const gl = switch (graphics_api) {
+    .opengl_33 => @import("gl33.zig"),
+    .opengl_es3 => @import("gles3.zig"),
+};
 
 //----------------------------------------------------------------------------------
 // libc functions (RL_MALLOC/RL_CALLOC/RL_REALLOC/RL_FREE map to these).
@@ -46,7 +61,8 @@ const DEG2RAD: f32 = PI / 180.0;
 //----------------------------------------------------------------------------------
 pub const RLGL_VERSION = "6.0";
 
-const RL_DEFAULT_BATCH_BUFFER_ELEMENTS: c_int = 8192;
+// Smaller batches on ES2/ES3: indices are 16-bit there (see `BatchIndex`).
+const RL_DEFAULT_BATCH_BUFFER_ELEMENTS: c_int = if (es2) 2048 else 8192;
 const RL_DEFAULT_BATCH_BUFFERS: c_int = 1;
 const RL_DEFAULT_BATCH_DRAWCALLS: c_int = 256;
 const RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS: c_int = 4;
@@ -115,6 +131,7 @@ const RL_LOG_ERROR: c_int = 5;
 
 // rlGlVersion
 const RL_OPENGL_33: c_int = 3;
+const RL_OPENGL_ES_30: c_int = 6;
 
 // rlPixelFormat
 const RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE: c_int = 1;
@@ -222,13 +239,17 @@ pub const Matrix = extern struct {
     m15: f32,
 };
 
+/// Element type of the batch index buffer: rlgl.h stores quads' indices as
+/// `unsigned short` on ES2/ES3 and `unsigned int` elsewhere.
+pub const BatchIndex = if (es2) c_ushort else c_uint;
+
 pub const rlVertexBuffer = extern struct {
     elementCount: c_int,
     vertices: [*c]f32,
     texcoords: [*c]f32,
     normals: [*c]f32,
     colors: [*c]u8,
-    indices: [*c]c_uint,
+    indices: [*c]BatchIndex,
     vaoId: c_uint,
     vboId: [5]c_uint,
 };
@@ -782,7 +803,8 @@ export fn rlTextureParameters(id: c_uint, param: c_int, value: c_int) callconv(.
                 gl.glad_glTexParameterf.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAX_ANISOTROPY_EXT, @floatFromInt(value));
             } else TraceLog(RL_LOG_WARNING, "GL: Anisotropic filtering not supported");
         },
-        RL_TEXTURE_MIPMAP_BIAS_RATIO => gl.glad_glTexParameterf.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_LOD_BIAS, @as(f32, @floatFromInt(value)) / 100.0),
+        // GL_TEXTURE_LOD_BIAS does not exist in OpenGL ES.
+        RL_TEXTURE_MIPMAP_BIAS_RATIO => if (!es2) gl.glad_glTexParameterf.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_LOD_BIAS, @as(f32, @floatFromInt(value)) / 100.0),
         else => {},
     }
 
@@ -811,7 +833,8 @@ export fn rlCubemapParameters(id: c_uint, param: c_int, value: c_int) callconv(.
                 gl.glad_glTexParameterf.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_MAX_ANISOTROPY_EXT, @floatFromInt(value));
             } else TraceLog(RL_LOG_WARNING, "GL: Anisotropic filtering not supported");
         },
-        RL_TEXTURE_MIPMAP_BIAS_RATIO => gl.glad_glTexParameterf.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_LOD_BIAS, @as(f32, @floatFromInt(value)) / 100.0),
+        // GL_TEXTURE_LOD_BIAS does not exist in OpenGL ES.
+        RL_TEXTURE_MIPMAP_BIAS_RATIO => if (!es2) gl.glad_glTexParameterf.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_LOD_BIAS, @as(f32, @floatFromInt(value)) / 100.0),
         else => {},
     }
 
@@ -931,22 +954,29 @@ export fn rlScissor(x: c_int, y: c_int, width: c_int, height: c_int) callconv(.c
     gl.glad_glScissor.?(x, y, width, height);
 }
 
+// Wire and point modes need glPolygonMode, which OpenGL ES does not have: on ES3
+// these four are no-ops, as in rlgl.h.
+
 // Enable wire mode
 export fn rlEnableWireMode() callconv(.c) void {
+    if (es2) return;
     gl.glad_glPolygonMode.?(gl.GL_FRONT_AND_BACK, gl.GL_LINE);
 }
 // Disable wire mode
 export fn rlDisableWireMode() callconv(.c) void {
+    if (es2) return;
     gl.glad_glPolygonMode.?(gl.GL_FRONT_AND_BACK, gl.GL_FILL);
 }
 
 // Enable point mode
 export fn rlEnablePointMode() callconv(.c) void {
+    if (es2) return;
     gl.glad_glPolygonMode.?(gl.GL_FRONT_AND_BACK, gl.GL_POINT);
     gl.glad_glEnable.?(gl.GL_PROGRAM_POINT_SIZE);
 }
 // Disable point mode
 export fn rlDisablePointMode() callconv(.c) void {
+    if (es2) return;
     gl.glad_glPolygonMode.?(gl.GL_FRONT_AND_BACK, gl.GL_FILL);
 }
 
@@ -974,11 +1004,14 @@ export fn rlGetPointSize() callconv(.c) f32 {
 }
 
 // Enable line aliasing
+// (GL_LINE_SMOOTH is desktop-only: a no-op on ES3.)
 export fn rlEnableSmoothLines() callconv(.c) void {
+    if (es2) return;
     gl.glad_glEnable.?(gl.GL_LINE_SMOOTH);
 }
 // Disable line aliasing
 export fn rlDisableSmoothLines() callconv(.c) void {
+    if (es2) return;
     gl.glad_glDisable.?(gl.GL_LINE_SMOOTH);
 }
 
@@ -1155,8 +1188,8 @@ export fn rlglInit(width: c_int, height: c_int) callconv(.c) void {
     gl.glad_glFrontFace.?(gl.GL_CCW);
     gl.glad_glEnable.?(gl.GL_CULL_FACE);
 
-    // Init state: Cubemap seamless
-    gl.glad_glEnable.?(gl.GL_TEXTURE_CUBE_MAP_SEAMLESS);
+    // Init state: Cubemap seamless (always on, and not a capability, in ES3)
+    if (!es2) gl.glad_glEnable.?(gl.GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
     // Store screen size into global variables
     RLGL.State.framebufferWidth = width;
@@ -1164,7 +1197,7 @@ export fn rlglInit(width: c_int, height: c_int) callconv(.c) void {
 
     // Init state: Color/Depth buffers clear
     gl.glad_glClearColor.?(0.0, 0.0, 0.0, 1.0);
-    gl.glad_glClearDepth.?(1.0);
+    if (es2) gl.glad_glClearDepthf.?(1.0) else gl.glad_glClearDepth.?(1.0);
     gl.glad_glClear.?(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT);
 
     TraceLog(RL_LOG_INFO, "RLGL: Default OpenGL state initialized successfully");
@@ -1184,30 +1217,44 @@ export fn rlglClose() callconv(.c) void {
 
 // Load OpenGL extensions (loader function required)
 export fn rlLoadExtensions(loader: ?*anyopaque) callconv(.c) void {
-    if (gl.gladLoadGL(@ptrCast(@alignCast(loader))) == 0) {
-        TraceLog(RL_LOG_WARNING, "GLAD: Cannot load OpenGL extensions");
-    } else TraceLog(RL_LOG_INFO, "GLAD: OpenGL extensions loaded successfully");
+    switch (graphics_api) {
+        .opengl_33 => {
+            if (gl.gladLoadGL(@ptrCast(@alignCast(loader))) == 0) {
+                TraceLog(RL_LOG_WARNING, "GLAD: Cannot load OpenGL extensions");
+            } else TraceLog(RL_LOG_INFO, "GLAD: OpenGL extensions loaded successfully");
 
-    var numExt: c_int = 0;
-    gl.glad_glGetIntegerv.?(gl.GL_NUM_EXTENSIONS, &numExt);
-    TraceLog(RL_LOG_INFO, "GL: Supported extensions count: %i", numExt);
+            var numExt: c_int = 0;
+            gl.glad_glGetIntegerv.?(gl.GL_NUM_EXTENSIONS, &numExt);
+            TraceLog(RL_LOG_INFO, "GL: Supported extensions count: %i", numExt);
+        },
+        // WebGL 2 functions are linked directly (src/gles3.zig): nothing to load.
+        .opengl_es3 => {},
+    }
 
     // Register supported extensions flags
-    // OpenGL 3.3 extensions supported by default (core)
+    // OpenGL 3.3 and OpenGL ES 3.0 extensions supported by default (core)
     RLGL.ExtSupported.vao = true;
     RLGL.ExtSupported.instancing = true;
     RLGL.ExtSupported.texNPOT = true;
     RLGL.ExtSupported.texFloat32 = true;
     RLGL.ExtSupported.texFloat16 = true;
     RLGL.ExtSupported.texDepth = true;
-    RLGL.ExtSupported.maxDepthBits = 32;
+    switch (graphics_api) {
+        .opengl_33 => RLGL.ExtSupported.maxDepthBits = 32,
+        .opengl_es3 => {
+            RLGL.ExtSupported.texDepthWebGL = true;
+            RLGL.ExtSupported.maxDepthBits = 24;
+        },
+    }
     RLGL.ExtSupported.texAnisoFilter = true;
     RLGL.ExtSupported.texMirrorClamp = true;
 
     // Optional OpenGL 3.3 extensions
-    RLGL.ExtSupported.texCompASTC = gl.GLAD_GL_KHR_texture_compression_astc_hdr != 0 and gl.GLAD_GL_KHR_texture_compression_astc_ldr != 0;
-    RLGL.ExtSupported.texCompDXT = gl.GLAD_GL_EXT_texture_compression_s3tc != 0;
-    RLGL.ExtSupported.texCompETC2 = gl.GLAD_GL_ARB_ES3_compatibility != 0;
+    if (graphics_api == .opengl_33) {
+        RLGL.ExtSupported.texCompASTC = gl.GLAD_GL_KHR_texture_compression_astc_hdr != 0 and gl.GLAD_GL_KHR_texture_compression_astc_ldr != 0;
+        RLGL.ExtSupported.texCompDXT = gl.GLAD_GL_EXT_texture_compression_s3tc != 0;
+        RLGL.ExtSupported.texCompETC2 = gl.GLAD_GL_ARB_ES3_compatibility != 0;
+    }
 
     // Check OpenGL information and capabilities
     TraceLog(RL_LOG_INFO, "GL: OpenGL device information:");
@@ -1244,7 +1291,10 @@ export fn rlGetProcAddress(procName: [*c]const u8) callconv(.c) ?*anyopaque {
 
 // Get current OpenGL version
 export fn rlGetVersion() callconv(.c) c_int {
-    return RL_OPENGL_33;
+    return switch (graphics_api) {
+        .opengl_33 => RL_OPENGL_33,
+        .opengl_es3 => RL_OPENGL_ES_30,
+    };
 }
 
 // Set/get current framebuffer width/height
@@ -1300,7 +1350,7 @@ export fn rlLoadRenderBatch(numBuffers: c_int, bufferElements: c_int) callconv(.
         vb.texcoords = @ptrCast(@alignCast(calloc(be * 2 * 4, @sizeOf(f32))));
         vb.normals = @ptrCast(@alignCast(calloc(be * 3 * 4, @sizeOf(f32))));
         vb.colors = @ptrCast(@alignCast(calloc(be * 4 * 4, @sizeOf(u8))));
-        vb.indices = @ptrCast(@alignCast(calloc(be * 6, @sizeOf(c_uint))));
+        vb.indices = @ptrCast(@alignCast(calloc(be * 6, @sizeOf(BatchIndex))));
 
         var j: usize = 0;
         while (j < 3 * 4 * be) : (j += 1) vb.vertices[j] = 0.0;
@@ -1311,7 +1361,7 @@ export fn rlLoadRenderBatch(numBuffers: c_int, bufferElements: c_int) callconv(.
         j = 0;
         while (j < 4 * 4 * be) : (j += 1) vb.colors[j] = 0;
 
-        var k: c_uint = 0;
+        var k: BatchIndex = 0;
         // Indices can be initialized right now
         j = 0;
         while (j < 6 * be) : (j += 6) {
@@ -1369,7 +1419,7 @@ export fn rlLoadRenderBatch(numBuffers: c_int, bufferElements: c_int) callconv(.
         // Fill index buffer
         gl.glad_glGenBuffers.?(1, &vb.vboId[4]);
         gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, vb.vboId[4]);
-        gl.glad_glBufferData.?(gl.GL_ELEMENT_ARRAY_BUFFER, @intCast(be * 6 * @sizeOf(c_int)), vb.indices, gl.GL_STATIC_DRAW);
+        gl.glad_glBufferData.?(gl.GL_ELEMENT_ARRAY_BUFFER, @intCast(be * 6 * @sizeOf(BatchIndex)), vb.indices, gl.GL_STATIC_DRAW);
     }
 
     TraceLog(RL_LOG_INFO, "RLGL: Render batch vertex buffers loaded successfully in VRAM (GPU)");
@@ -1553,8 +1603,9 @@ export fn rlDrawRenderBatch(batch: *rlRenderBatch) callconv(.c) void {
                 if ((draw.mode == RL_LINES) or (draw.mode == RL_TRIANGLES)) {
                     gl.glad_glDrawArrays.?(@intCast(draw.mode), vertexOffset, draw.vertexCount);
                 } else {
-                    const indexOffset: usize = @as(usize, @intCast(@divTrunc(vertexOffset, 4))) * 6 * @sizeOf(c_uint);
-                    gl.glad_glDrawElements.?(gl.GL_TRIANGLES, @divTrunc(draw.vertexCount, 4) * 6, gl.GL_UNSIGNED_INT, @ptrFromInt(indexOffset));
+                    const indexOffset: usize = @as(usize, @intCast(@divTrunc(vertexOffset, 4))) * 6 * @sizeOf(BatchIndex);
+                    const indexType = if (es2) gl.GL_UNSIGNED_SHORT else gl.GL_UNSIGNED_INT;
+                    gl.glad_glDrawElements.?(gl.GL_TRIANGLES, @divTrunc(draw.vertexCount, 4) * 6, indexType, @ptrFromInt(indexOffset));
                 }
 
                 vertexOffset += (draw.vertexCount + draw.vertexAlignment);
@@ -1697,7 +1748,9 @@ export fn rlLoadTexture(data: ?*const anyopaque, width: c_int, height: c_int, fo
                 gl.glad_glTexImage2D.?(gl.GL_TEXTURE_2D, i, @intCast(glInternalFormat), mipWidth, mipHeight, 0, glFormat, glType, dataPtr);
             } else gl.glad_glCompressedTexImage2D.?(gl.GL_TEXTURE_2D, i, glInternalFormat, mipWidth, mipHeight, 0, mipSize, dataPtr);
 
-            if (format == RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
+            // Swizzle grayscale into RGB on GL 3.3. ES uploads these formats as
+            // GL_LUMINANCE(_ALPHA) instead (rlGetGlTextureFormats).
+            if (es2) {} else if (format == RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
                 const swizzleMask = [4]c_int{ @intCast(gl.GL_RED), @intCast(gl.GL_RED), @intCast(gl.GL_RED), @intCast(gl.GL_ONE) };
                 gl.glad_glTexParameteriv.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_RGBA, &swizzleMask);
             } else if (format == RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA) {
@@ -1716,13 +1769,22 @@ export fn rlLoadTexture(data: ?*const anyopaque, width: c_int, height: c_int, fo
     }
 
     // Texture parameters configuration
-    gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, @intCast(gl.GL_REPEAT));
-    gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, @intCast(gl.GL_REPEAT));
+    if (es2) {
+        // NOTE: OpenGL ES 2.0 with no GL_OES_texture_npot support (i.e. WebGL) has limited NPOT support, so CLAMP_TO_EDGE must be used
+        const texIsPOT = (width > 0 and (width & (width - 1)) == 0) and (height > 0 and (height & (height - 1)) == 0);
+        const wrap = if (texIsPOT or RLGL.ExtSupported.texNPOT) gl.GL_REPEAT else gl.GL_CLAMP_TO_EDGE;
+        gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, @intCast(wrap));
+        gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, @intCast(wrap));
+    } else {
+        gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, @intCast(gl.GL_REPEAT));
+        gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, @intCast(gl.GL_REPEAT));
+    }
 
     gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, @intCast(gl.GL_NEAREST));
     gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, @intCast(gl.GL_NEAREST));
 
-    if (mipmapCount > 1) {
+    // rlgl.h sets mipmap filtering and levels on GL 3.3 only.
+    if (!es2 and mipmapCount > 1) {
         gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, @intCast(gl.GL_LINEAR));
         gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, @intCast(gl.GL_LINEAR_MIPMAP_LINEAR));
 
@@ -1750,7 +1812,14 @@ export fn rlLoadTextureDepth(width: c_int, height: c_int, useRenderBuffer_in: bo
     var useRenderBuffer = useRenderBuffer_in;
     if (!RLGL.ExtSupported.texDepth) useRenderBuffer = true;
 
-    const glInternalFormat: c_uint = gl.GL_DEPTH_COMPONENT;
+    // Possible formats: GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT32 and GL_DEPTH_COMPONENT32F
+    // On ES3 (WebGL 2) rlgl.h picks a sized format from maxDepthBits.
+    const glInternalFormat: c_uint = if (!es2)
+        gl.GL_DEPTH_COMPONENT
+    else if (RLGL.ExtSupported.maxDepthBits == 24)
+        gl.GL_DEPTH_COMPONENT24
+    else
+        gl.GL_DEPTH_COMPONENT16;
 
     if (!useRenderBuffer and RLGL.ExtSupported.texDepth) {
         gl.glad_glGenTextures.?(1, &id);
@@ -1824,7 +1893,8 @@ export fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_i
                 } else gl.glad_glCompressedTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, glInternalFormat, mipSize, mipSize, 0, dataSize, facePtr);
             }
 
-            if (format == RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
+            // GL 3.3 only, as in rlLoadTexture
+            if (es2) {} else if (format == RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
                 const swizzleMask = [4]c_int{ @intCast(gl.GL_RED), @intCast(gl.GL_RED), @intCast(gl.GL_RED), @intCast(gl.GL_ONE) };
                 gl.glad_glTexParameteriv.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_SWIZZLE_RGBA, &swizzleMask);
             } else if (format == RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA) {
@@ -1850,7 +1920,7 @@ export fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_i
     gl.glad_glTexParameteri.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_MAG_FILTER, @intCast(gl.GL_LINEAR));
     gl.glad_glTexParameteri.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_S, @intCast(gl.GL_CLAMP_TO_EDGE));
     gl.glad_glTexParameteri.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_T, @intCast(gl.GL_CLAMP_TO_EDGE));
-    gl.glad_glTexParameteri.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_R, @intCast(gl.GL_CLAMP_TO_EDGE));
+    if (!es2) gl.glad_glTexParameteri.?(gl.GL_TEXTURE_CUBE_MAP, gl.GL_TEXTURE_WRAP_R, @intCast(gl.GL_CLAMP_TO_EDGE)); // Flag not supported on OpenGL ES 2.0
 
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_CUBE_MAP, 0);
 
@@ -1881,39 +1951,43 @@ export fn rlGetGlTextureFormats(format: c_int, glInternalFormat: [*c]c_uint, glF
     glFormat.* = 0;
     glType.* = 0;
 
+    // NOTE: on OpenGL ES 2.0 (WebGL), internalFormat must match format and options
+    // allowed are: GL_LUMINANCE, GL_RGB, GL_RGBA. rlgl.h keeps that rule on ES3. Its
+    // ES float formats (GL_R32F_EXT, GL_RED_EXT, ...) have the same values as the
+    // GL 3.3 names used below, so only the 8-bit formats differ.
     switch (format) {
         RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-            glInternalFormat.* = gl.GL_R8;
-            glFormat.* = gl.GL_RED;
+            glInternalFormat.* = if (es2) gl.GL_LUMINANCE else gl.GL_R8;
+            glFormat.* = if (es2) gl.GL_LUMINANCE else gl.GL_RED;
             glType.* = gl.GL_UNSIGNED_BYTE;
         },
         RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-            glInternalFormat.* = gl.GL_RG8;
-            glFormat.* = gl.GL_RG;
+            glInternalFormat.* = if (es2) gl.GL_LUMINANCE_ALPHA else gl.GL_RG8;
+            glFormat.* = if (es2) gl.GL_LUMINANCE_ALPHA else gl.GL_RG;
             glType.* = gl.GL_UNSIGNED_BYTE;
         },
         RL_PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-            glInternalFormat.* = gl.GL_RGB565;
+            glInternalFormat.* = if (es2) gl.GL_RGB else gl.GL_RGB565;
             glFormat.* = gl.GL_RGB;
             glType.* = gl.GL_UNSIGNED_SHORT_5_6_5;
         },
         RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-            glInternalFormat.* = gl.GL_RGB8;
+            glInternalFormat.* = if (es2) gl.GL_RGB else gl.GL_RGB8;
             glFormat.* = gl.GL_RGB;
             glType.* = gl.GL_UNSIGNED_BYTE;
         },
         RL_PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-            glInternalFormat.* = gl.GL_RGB5_A1;
+            glInternalFormat.* = if (es2) gl.GL_RGBA else gl.GL_RGB5_A1;
             glFormat.* = gl.GL_RGBA;
             glType.* = gl.GL_UNSIGNED_SHORT_5_5_5_1;
         },
         RL_PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-            glInternalFormat.* = gl.GL_RGBA4;
+            glInternalFormat.* = if (es2) gl.GL_RGBA else gl.GL_RGBA4;
             glFormat.* = gl.GL_RGBA;
             glType.* = gl.GL_UNSIGNED_SHORT_4_4_4_4;
         },
         RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-            glInternalFormat.* = gl.GL_RGBA8;
+            glInternalFormat.* = if (es2) gl.GL_RGBA else gl.GL_RGBA8;
             glFormat.* = gl.GL_RGBA;
             glType.* = gl.GL_UNSIGNED_BYTE;
         },
@@ -2017,6 +2091,8 @@ export fn rlGenTextureMipmaps(id: c_uint, width: c_int, height: c_int, format: c
 
 // Read texture pixel data
 export fn rlReadTexturePixels(id: c_uint, width: c_int, height: c_int, format: c_int) callconv(.c) ?*anyopaque {
+    if (es2) return readTexturePixelsFramebuffer(id, width, height, format);
+
     var pixels: ?*anyopaque = null;
 
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, id);
@@ -2035,6 +2111,34 @@ export fn rlReadTexturePixels(id: c_uint, width: c_int, height: c_int, format: c
     } else TraceLog(RL_LOG_WARNING, "TEXTURE: [ID %i] Data retrieval not suported for pixel format (%i)", id, format);
 
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, 0);
+
+    return pixels;
+}
+
+/// rlReadTexturePixels on OpenGL ES, which has no glGetTexImage: attach the texture
+/// to a temporary framebuffer and read it back with glReadPixels. As in rlgl.h,
+/// this only works for formats the framebuffer can render to (RGBA8 is safe).
+fn readTexturePixelsFramebuffer(id: c_uint, width: c_int, height: c_int, format: c_int) ?*anyopaque {
+    const fboId = rlLoadFramebuffer();
+    gl.glad_glBindFramebuffer.?(gl.GL_FRAMEBUFFER, fboId);
+    gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, 0);
+
+    // Attach our texture to FBO
+    gl.glad_glFramebufferTexture2D.?(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, id, 0);
+
+    // We read data as RGBA because FBO texture is configured as RGBA, despite binding another texture format
+    const pixels = malloc(@intCast(rlGetPixelDataSize(width, height, format)));
+
+    var glInternalFormat: c_uint = 0;
+    var glFormat: c_uint = 0;
+    var glType: c_uint = 0;
+    rlGetGlTextureFormats(format, &glInternalFormat, &glFormat, &glType);
+    gl.glad_glReadPixels.?(0, 0, width, height, glFormat, glType, pixels);
+
+    gl.glad_glBindFramebuffer.?(gl.GL_FRAMEBUFFER, 0);
+
+    // Clean up temporal fbo
+    rlUnloadFramebuffer(fboId);
 
     return pixels;
 }
@@ -2186,7 +2290,9 @@ export fn rlFramebufferComplete(id: c_uint) callconv(.c) bool {
             gl.GL_FRAMEBUFFER_UNSUPPORTED => TraceLog(RL_LOG_WARNING, "FBO: [ID %i] Framebuffer is unsupported", id),
             gl.GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT => TraceLog(RL_LOG_WARNING, "FBO: [ID %i] Framebuffer has incomplete attachment", id),
             gl.GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => TraceLog(RL_LOG_WARNING, "FBO: [ID %i] Framebuffer has a missing attachment", id),
-            else => {},
+            else => if (es2 and status == gl.GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS) {
+                TraceLog(RL_LOG_WARNING, "FBO: [ID %i] Framebuffer has incomplete dimensions", id);
+            },
         }
     }
 
@@ -2396,7 +2502,7 @@ export fn rlLoadShader(code: [*c]const u8, type_: c_int) callconv(.c) c_uint {
         switch (type_) {
             RL_VERTEX_SHADER => TraceLog(RL_LOG_WARNING, "SHADER: [ID %i] Failed to compile vertex shader code", shaderId),
             RL_FRAGMENT_SHADER => TraceLog(RL_LOG_WARNING, "SHADER: [ID %i] Failed to compile fragment shader code", shaderId),
-            RL_COMPUTE_SHADER => TraceLog(RL_LOG_WARNING, "SHADER: Compute shaders not enabled. Define GRAPHICS_API_OPENGL_43", shaderId),
+            RL_COMPUTE_SHADER => if (!es2) TraceLog(RL_LOG_WARNING, "SHADER: Compute shaders not enabled. Define GRAPHICS_API_OPENGL_43", shaderId),
             else => {},
         }
 
@@ -2417,7 +2523,7 @@ export fn rlLoadShader(code: [*c]const u8, type_: c_int) callconv(.c) c_uint {
         switch (type_) {
             RL_VERTEX_SHADER => TraceLog(RL_LOG_INFO, "SHADER: [ID %i] Vertex shader compiled successfully", shaderId),
             RL_FRAGMENT_SHADER => TraceLog(RL_LOG_INFO, "SHADER: [ID %i] Fragment shader compiled successfully", shaderId),
-            RL_COMPUTE_SHADER => TraceLog(RL_LOG_WARNING, "SHADER: Compute shaders not enabled. Define GRAPHICS_API_OPENGL_43", shaderId),
+            RL_COMPUTE_SHADER => if (!es2) TraceLog(RL_LOG_WARNING, "SHADER: Compute shaders not enabled. Define GRAPHICS_API_OPENGL_43", shaderId),
             else => {},
         }
     }
@@ -2553,10 +2659,15 @@ export fn rlSetUniform(locIndex: c_int, value: ?*const anyopaque, uniformType: c
         RL_SHADER_UNIFORM_IVEC2 => gl.glad_glUniform2iv.?(locIndex, count, @ptrCast(@alignCast(value))),
         RL_SHADER_UNIFORM_IVEC3 => gl.glad_glUniform3iv.?(locIndex, count, @ptrCast(@alignCast(value))),
         RL_SHADER_UNIFORM_IVEC4 => gl.glad_glUniform4iv.?(locIndex, count, @ptrCast(@alignCast(value))),
-        RL_SHADER_UNIFORM_UINT => gl.glad_glUniform1uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
-        RL_SHADER_UNIFORM_UIVEC2 => gl.glad_glUniform2uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
-        RL_SHADER_UNIFORM_UIVEC3 => gl.glad_glUniform3uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
-        RL_SHADER_UNIFORM_UIVEC4 => gl.glad_glUniform4uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
+        // rlgl.h sets unsigned uniforms on GL 3.3 only; on ES they fall to the warning.
+        RL_SHADER_UNIFORM_UINT, RL_SHADER_UNIFORM_UIVEC2, RL_SHADER_UNIFORM_UIVEC3, RL_SHADER_UNIFORM_UIVEC4 => if (es2) {
+            TraceLog(RL_LOG_WARNING, "SHADER: Failed to set uniform value, data type not recognized");
+        } else switch (uniformType) {
+            RL_SHADER_UNIFORM_UINT => gl.glad_glUniform1uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
+            RL_SHADER_UNIFORM_UIVEC2 => gl.glad_glUniform2uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
+            RL_SHADER_UNIFORM_UIVEC3 => gl.glad_glUniform3uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
+            else => gl.glad_glUniform4uiv.?(locIndex, count, @ptrCast(@alignCast(value))),
+        },
         RL_SHADER_UNIFORM_SAMPLER2D => gl.glad_glUniform1iv.?(locIndex, count, @ptrCast(@alignCast(value))),
         else => TraceLog(RL_LOG_WARNING, "SHADER: Failed to set uniform value, data type not recognized"),
     }
@@ -2581,7 +2692,9 @@ export fn rlSetUniformMatrix(locIndex: c_int, mat: Matrix) callconv(.c) void {
 
 // Set shader value uniform matrices
 export fn rlSetUniformMatrices(locIndex: c_int, matrices: [*c]const Matrix, count: c_int) callconv(.c) void {
-    gl.glad_glUniformMatrix4fv.?(locIndex, count, @intCast(gl.GL_TRUE), @ptrCast(@alignCast(matrices)));
+    // WARNING: WebGL does not support Matrix transpose ("true" parameter)
+    const transpose = if (es2) gl.GL_FALSE else gl.GL_TRUE;
+    gl.glad_glUniformMatrix4fv.?(locIndex, count, @intCast(transpose), @ptrCast(@alignCast(matrices)));
 }
 
 // Set shader value uniform sampler
@@ -2807,9 +2920,26 @@ export fn rlLoadDrawCube() callconv(.c) void {
 // Module Functions Definition - Internal helpers (file-private)
 //----------------------------------------------------------------------------------
 
-// Default vertex shader code (GLSL 330)
+// Default shaders: GLSL 330 on GL 3.3, GLSL 300 es on ES3. Only the header differs.
+const defaultVShaderHeader = switch (graphics_api) {
+    .opengl_33 => "#version 330                       \n",
+    // Precision highp is mandatory in vertex shaders, mediump may run as fp16 and misplace vertices
+    .opengl_es3 => "#version 300 es                    \n" ++
+        "precision highp float;             \n",
+};
+const defaultFShaderHeader = switch (graphics_api) {
+    .opengl_33 => "#version 330       \n",
+    .opengl_es3 => "#version 300 es                    \n" ++
+        "#ifdef GL_FRAGMENT_PRECISION_HIGH  \n" ++
+        "precision highp float;             \n" ++
+        "#else                              \n" ++
+        "precision mediump float;           \n" ++
+        "#endif                             \n",
+};
+
+// Default vertex shader code
 const defaultVShaderCode =
-    "#version 330                       \n" ++
+    defaultVShaderHeader ++
     "in vec3 vertexPosition;            \n" ++
     "in vec2 vertexTexCoord;            \n" ++
     "in vec4 vertexColor;               \n" ++
@@ -2823,9 +2953,9 @@ const defaultVShaderCode =
     "    gl_Position = mvp*vec4(vertexPosition, 1.0); \n" ++
     "}                                  \n";
 
-// Default fragment shader code (GLSL 330)
+// Default fragment shader code
 const defaultFShaderCode =
-    "#version 330       \n" ++
+    defaultFShaderHeader ++
     "in vec2 fragTexCoord;              \n" ++
     "in vec4 fragColor;                 \n" ++
     "out vec4 finalColor;               \n" ++

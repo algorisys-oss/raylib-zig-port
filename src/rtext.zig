@@ -17,6 +17,7 @@
 //! functions the shim exports.
 
 const std = @import("std");
+const c_va = @import("c_va.zig");
 
 //----------------------------------------------------------------------------------
 // libc / libm functions, called directly so results are bit-identical to the C source.
@@ -31,7 +32,7 @@ extern fn strncpy(noalias [*c]u8, noalias [*c]const u8, usize) [*c]u8;
 extern fn strstr([*c]const u8, [*c]const u8) [*c]u8;
 extern fn sprintf(noalias [*c]u8, noalias [*c]const u8, ...) c_int;
 extern fn snprintf(noalias [*c]u8, usize, noalias [*c]const u8, ...) c_int;
-extern fn vsnprintf(noalias [*c]u8, usize, noalias [*c]const u8, ap: *std.builtin.VaList) c_int;
+extern fn vsnprintf(noalias [*c]u8, usize, noalias [*c]const u8, ap: c_va.Arg) c_int;
 extern fn sscanf(noalias [*c]const u8, noalias [*c]const u8, ...) c_int;
 
 extern fn sqrtf(f32) f32;
@@ -1507,7 +1508,7 @@ export fn TextFormat(text: [*c]const u8, ...) callconv(.c) [*c]const u8 {
 
     if (text != null) {
         var args = @cVaStart();
-        const requiredByteCount = vsnprintf(currentBuffer, MAX_TEXT_BUFFER_LENGTH, text, &args);
+        const requiredByteCount = vsnprintf(currentBuffer, MAX_TEXT_BUFFER_LENGTH, text, c_va.arg(&args));
         @cVaEnd(&args);
 
         // If requiredByteCount is larger than the MAX_TEXT_BUFFER_LENGTH, then overflow occurred

@@ -5003,13 +5003,21 @@ pub const math = struct {
 /// (`rlPushMatrix` -> `rl.gl.pushMatrix`), constants without `RL_`
 /// (`RL_QUADS` -> `rl.gl.quads`). A low-level layer: GL enums stay `i32`.
 pub const gl = struct {
+    /// The web build runs rlgl on OpenGL ES 3 (WebGL 2), the desktop on OpenGL 3.3;
+    /// a few batch details differ between the two, as in rlgl.h.
+    const web = @import("builtin").os.tag == .emscripten;
+
+    /// Element type of `VertexBuffer.indices`: rlgl.h stores quad indices as
+    /// `unsigned short` on OpenGL ES and `unsigned int` on OpenGL 3.3.
+    pub const BatchIndex = if (web) c_ushort else c_uint;
+
     pub const VertexBuffer = extern struct {
         elementCount: c_int, // Number of elements in the buffer (QUADS)
         vertices: ?[*]f32, // Vertex position (XYZ - 3 components per vertex)
         texcoords: ?[*]f32, // Vertex texture coordinates (UV - 2 components per vertex)
         normals: ?[*]f32, // Vertex normal (XYZ - 3 components per vertex)
         colors: ?[*]u8, // Vertex colors (RGBA - 4 components per vertex)
-        indices: ?[*]c_uint, // Vertex indices (6 indices per quad)
+        indices: ?[*]BatchIndex, // Vertex indices (6 indices per quad)
         vaoId: c_uint, // OpenGL Vertex Array Object id
         vboId: [5]c_uint, // OpenGL Vertex Buffer Objects id (5 types of vertex data)
     };
@@ -5030,7 +5038,7 @@ pub const gl = struct {
         currentDepth: f32, // Current depth value for next draw
     };
 
-    pub const default_batch_buffer_elements: i32 = 8192;
+    pub const default_batch_buffer_elements: i32 = if (web) 2048 else 8192;
     pub const default_batch_buffers: i32 = 1; // Default number of batch buffers (multi-buffering)
     pub const default_batch_drawcalls: i32 = 256; // Default number of batch draw calls (by state changes: mode, texture)
     pub const default_batch_max_texture_units: i32 = 4; // Maximum number of textures units that can be activated on batch drawing (SetShaderValueTexture())
