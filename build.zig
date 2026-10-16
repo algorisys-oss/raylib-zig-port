@@ -824,6 +824,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "core_fileio", .args = &.{} },
             .{ .name = "core_automation", .args = &.{} },
             .{ .name = "shapes_sweep", .args = &.{} },
+            .{ .name = "audio_wave", .args = &.{} },
             .{ .name = "font_data", .args = &.{
                 fonts_dir ++ "/anonymous_pro_bold.ttf",
                 fonts_dir ++ "/pixantiqua.ttf",
