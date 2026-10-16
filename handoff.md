@@ -1,4 +1,4 @@
-# handoff.md — fresh-session bootstrap (written 2026-10-16 15:00 IST)
+# handoff.md — fresh-session bootstrap (written 2026-10-16 15:21 IST)
 
 > Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
@@ -35,15 +35,19 @@
 
 ## 3. Next step on resume
 
-Nothing in flight; no open decisions. The three API choices offered on
-2026-10-16 were taken per recommendation and landed: typed
-`setShaderValue`/`setShaderValueV` (uniform type inferred at comptime),
-`xSlice()` accessors from an explicit table, and the embedded example data
-kept in git with provenance (`tools/c_array_to_raw.py`, byte-verified).
-Example coverage is complete (226/227). Possible next steps if wanted: a
-raylib release bump (same playbook as 6.2), or more API ergonomics surfaced
-by the translation agents (raygui `i32` results → bool helpers; `textCopy`
-taking `[]u8`).
+The next workstream is the **documentation website**, in its own repo:
+`/home/rajesh/lab/ai-port/raylib-zig-web` (read its AGENTS.md first). Its
+phase W (the port's **web target**) is done **in this repo**:
+1. Port `platforms/rcore_web.c` (Emscripten GLFW) to Zig, chosen at comptime
+   for the `.emscripten` target.
+2. Add the `GRAPHICS_API_OPENGL_ES3` (WebGL 2) path to `rlgl.zig`.
+3. Build examples for `wasm32-emscripten` + `emcc` link (template:
+   `/home/rajesh/lab/zig/my-zig-guide/examples/lane-dodger/build.zig` `addWeb`),
+   `-sASYNCIFY` for the standard main loop, GLSL 100 shaders on the web.
+4. Browser oracle gate: C-web vs Zig-web example, headless Chrome (Playwright),
+   canvas byte-diff (C-vs-C determinism first).
+Start with `core_basic_window` end to end. Update docs/not-migrated.md and
+docs/compatibility.md as the web target lands.
 
 Note: every filtered apiexamples run still builds all ~226 example exes — a
 cold full run can push a cache to 13–27 GB; clear `~/.cache/zig-local` /

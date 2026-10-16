@@ -166,8 +166,21 @@
 26	2026-10-16	12:09:22	12:09:49	12	2858	2835270	2210	2840350	300275025	214/214; rcamera in rl; push; launched last-10 agent
 27	2026-10-16	13:03:54	13:03:58	4	596	569068	24	569692	300844717	last-10 interim
 28	2026-10-16	13:09:43	13:10:20	38	14326	9153848	7215	9175427	310020144	merged last 10 (ff); msf_gif provenance; docs
-29	2026-10-16	13:37:10	13:38:00+	10	1095	2302369	1078	2304552	312324696	(in progress at record) 217/217 confirmed; push; handoff
+29	2026-10-16	13:37:10	13:37:20	10	1095	2302369	1078	2304552	312324696	217/217 confirmed; push; handoff
 # Agents this stretch: helpers 207.6k · raygui B 233.2k · raygui A 225.1k · last-10 208.5k = ~874.4k
 # Session total ~312.3M main-loop (incl. cache reads) + ~3.87M agents.
 # Landed: Zig-API coverage 226/227 upstream examples (217 gated byte-identical,
 # 9 build-only); raygui binding; rlights/reasings Zig modules; rcamera in rl.
+
+# --- refresh 15:21 (same session): API polish, compatibility record, web-site planning
+30	2026-10-16	13:50:39	13:50:57	4	1760	1164306	2724	1168794	316401350	recommendations for 3 open API decisions
+31	2026-10-16	13:52:51	14:07:03	100	78093	29993440	50449	30122082	346523432	typed setShaderValue/V; slice accessors; resource provenance tool
+32	2026-10-16	14:11:01	14:11:29	24	7514	6746599	5606	6759743	353283175	compile-all check (146 call sites typed)
+33	2026-10-16	14:25:07	14:25:27	18	5266	4933087	3876	4942247	358225422	217/217; commit; accessor rewrite
+34	2026-10-16	14:42:26	14:42:52	8	2125	1856676	1957	1860766	360086188	217/217; push; docs
+35	2026-10-16	14:50:21	14:52:15	48	44383	15035602	27865	15107898	375194086	docs/compatibility.md; ReleaseFast examples sweep started
+36	2026-10-16	15:00:23	15:02:09	14	3729	3820030	5379	3829152	379023238	ReleaseFast examples 217/217; README Compatibility; push
+37	2026-10-16	15:15:38	15:16:43	28	14902	8970878	12640	8998448	388021686	web-site feasibility (emsdk, wasm target, upstream web backend)
+38	2026-10-16	15:16:43	15:17:32	34	28802	11026537	9170	11064543	399086229	read ziglang.in stack + lane-dodger web build
+39	2026-10-16	15:18:53	15:21:00+	28	37620	9229994	23089	9290731	408376960	(in progress at record) raylib-zig-web AGENTS.md/CLAUDE.md/handoff; this record
+# Session total ~408.4M main-loop (incl. cache reads) + ~3.87M agents.
