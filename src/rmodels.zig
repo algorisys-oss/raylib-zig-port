@@ -17,39 +17,15 @@ const Io = std.Io;
 const cmem = @import("cmem.zig");
 const iqm = @import("rmodels_iqm.zig");
 
-//----------------------------------------------------------------------------------
-// libc / libm functions, called directly so results are bit-identical to the C source.
-//----------------------------------------------------------------------------------
-extern fn malloc(usize) ?*anyopaque;
-extern fn calloc(usize, usize) ?*anyopaque;
-extern fn realloc(?*anyopaque, usize) ?*anyopaque;
-extern fn free(?*anyopaque) void;
-extern fn memcpy(noalias ?*anyopaque, noalias ?*const anyopaque, usize) ?*anyopaque;
-extern fn memset(?*anyopaque, c_int, usize) ?*anyopaque;
-extern fn memcmp(?*const anyopaque, ?*const anyopaque, usize) c_int;
-extern fn strcmp([*c]const u8, [*c]const u8) c_int;
-extern fn strlen([*c]const u8) usize;
-extern fn strncpy(noalias [*c]u8, noalias [*c]const u8, usize) [*c]u8;
-extern fn sprintf(noalias [*c]u8, noalias [*c]const u8, ...) c_int;
-extern fn snprintf(noalias [*c]u8, usize, noalias [*c]const u8, ...) c_int;
-
+// libm, called directly: results must be bit-identical to C's (CLAUDE.md,
+// "Float bit-exactness"). sqrtf/fabsf/fminf/fmaxf are @sqrt/@abs/@min/@max,
+// which compile to the same instructions clang inlines for them.
 extern fn sinf(f32) f32;
 extern fn cosf(f32) f32;
-extern fn sqrtf(f32) f32;
-extern fn fmaxf(f32, f32) f32;
-extern fn fmin(f64, f64) f64;
-extern fn fmax(f64, f64) f64;
 
-// POSIX chdir for LoadOBJ working-directory switch
-extern fn chdir([*c]const u8) c_int;
-
-// raylib RL_MALLOC/RL_CALLOC/RL_FREE/RL_REALLOC map to malloc/calloc/free/realloc.
-const RL_MALLOC = malloc;
-const RL_CALLOC = calloc;
-const RL_REALLOC = realloc;
-inline fn RL_FREE(p: anytype) void {
-    free(@ptrCast(@constCast(p)));
-}
+// printf float formatting for the exporters: std.fmt rounds ties differently
+// (CLAUDE.md), so floats go through libc
+extern fn snprintf(noalias [*]u8, usize, noalias [*:0]const u8, ...) c_int;
 
 const PI: f32 = 3.14159265358979323846;
 const DEG2RAD: f32 = PI / 180.0;
@@ -306,29 +282,26 @@ const float16 = extern struct { v: [16]f32 };
 //----------------------------------------------------------------------------------
 // Cross-module raylib C symbols (rcore / rtextures, still C in this build).
 //----------------------------------------------------------------------------------
-extern fn TraceLog(logLevel: c_int, text: [*c]const u8, ...) void;
-extern fn LoadFileData(fileName: [*c]const u8, dataSize: [*c]c_int) [*c]u8;
-extern fn UnloadFileData(data: [*c]u8) void;
-extern fn LoadFileText(fileName: [*c]const u8) [*c]u8;
-extern fn UnloadFileText(text: [*c]u8) void;
-extern fn SaveFileText(fileName: [*c]const u8, text: [*c]u8) bool;
-extern fn GetFileNameWithoutExt(filePath: [*c]const u8) [*c]const u8;
-extern fn GetDirectoryPath(filePath: [*c]const u8) [*c]const u8;
-extern fn GetWorkingDirectory() [*c]const u8;
-extern fn IsFileExtension(fileName: [*c]const u8, ext: [*c]const u8) bool;
-extern fn TextFormat(text: [*c]const u8, ...) [*c]const u8;
-extern fn TextLength(text: [*c]const u8) c_uint;
-extern fn MemAlloc(size: c_uint) ?*anyopaque;
-extern fn MemFree(ptr: ?*anyopaque) void;
+extern fn TraceLog(logLevel: c_int, text: [*:0]const u8, ...) void;
+extern fn LoadFileData(fileName: [*:0]const u8, dataSize: *c_int) ?[*]u8;
+extern fn UnloadFileData(data: ?[*]u8) void;
+extern fn LoadFileText(fileName: [*:0]const u8) ?[*:0]u8;
+extern fn UnloadFileText(text: ?[*:0]u8) void;
+extern fn SaveFileText(fileName: [*:0]const u8, text: [*:0]const u8) bool;
+extern fn GetFileNameWithoutExt(filePath: [*:0]const u8) [*:0]const u8;
+extern fn GetDirectoryPath(filePath: [*:0]const u8) [*:0]const u8;
+extern fn GetWorkingDirectory() [*:0]const u8;
+extern fn IsFileExtension(fileName: [*c]const u8, ext: [*:0]const u8) bool;
+extern fn TextFormat(text: [*:0]const u8, ...) [*:0]const u8;
 
 // rtextures (still C-ABI)
-extern fn LoadTexture(fileName: [*c]const u8) Texture2D;
+extern fn LoadTexture(fileName: [*:0]const u8) Texture2D;
 extern fn LoadTextureFromImage(image: Image) Texture2D;
-extern fn LoadImage(fileName: [*c]const u8) Image;
-extern fn LoadImageFromMemory(fileType: [*c]const u8, fileData: [*c]const u8, dataSize: c_int) Image;
+extern fn LoadImage(fileName: [*:0]const u8) Image;
+extern fn LoadImageFromMemory(fileType: [*:0]const u8, fileData: [*]const u8, dataSize: c_int) Image;
 extern fn UnloadImage(image: Image) void;
-extern fn LoadImageColors(image: Image) [*c]Color;
-extern fn UnloadImageColors(colors: [*c]Color) void;
+extern fn LoadImageColors(image: Image) ?[*]Color;
+extern fn UnloadImageColors(colors: ?[*]Color) void;
 extern fn GetImageColor(image: Image, x: c_int, y: c_int) Color;
 extern fn UnloadShader(shader: Shader) void;
 
@@ -347,7 +320,6 @@ extern fn rlPopMatrix() void;
 extern fn rlTranslatef(x: f32, y: f32, z: f32) void;
 extern fn rlRotatef(angle: f32, x: f32, y: f32, z: f32) void;
 extern fn rlScalef(x: f32, y: f32, z: f32) void;
-extern fn rlMultMatrixf(matf: [*c]const f32) void;
 extern fn rlSetTexture(id: c_uint) void;
 extern fn rlEnableShader(id: c_uint) void;
 extern fn rlDisableShader() void;
@@ -422,7 +394,6 @@ extern fn Vector3Divide(v1: Vector3, v2: Vector3) Vector3;
 extern fn Vector3CrossProduct(v1: Vector3, v2: Vector3) Vector3;
 extern fn Vector3DotProduct(v1: Vector3, v2: Vector3) f32;
 extern fn Vector3Length(v: Vector3) f32;
-extern fn Vector3Distance(v1: Vector3, v2: Vector3) f32;
 extern fn Vector3DistanceSqr(v1: Vector3, v2: Vector3) f32;
 extern fn Vector3Normalize(v: Vector3) Vector3;
 extern fn Vector3Negate(v: Vector3) Vector3;
@@ -432,7 +403,6 @@ extern fn Vector3RotateByQuaternion(v: Vector3, q: Quaternion) Vector3;
 extern fn Vector3RotateByAxisAngle(v: Vector3, axis: Vector3, angle: f32) Vector3;
 extern fn Vector3Lerp(v1: Vector3, v2: Vector3, amount: f32) Vector3;
 extern fn Vector3Min(v1: Vector3, v2: Vector3) Vector3;
-extern fn Vector3Max(v1: Vector3, v2: Vector3) Vector3;
 extern fn Vector3Zero() Vector3;
 extern fn Vector3CubicHermite(v1: Vector3, tangent1: Vector3, v2: Vector3, tangent2: Vector3, amount: f32) Vector3;
 
@@ -500,7 +470,7 @@ fn freeModelData(model: Model) void {
 }
 
 /// Copies a C string into `buffer`, truncated to fit as snprintf("%s") does
-fn copyCString(buffer: []u8, source: [*c]const u8) [:0]const u8 {
+fn copyCString(buffer: []u8, source: [*:0]const u8) [:0]const u8 {
     const text = std.mem.span(source);
     const len = @min(text.len, buffer.len - 1);
     @memcpy(buffer[0..len], text[0..len]);
@@ -513,7 +483,7 @@ fn io() Io {
     return Io.Threaded.global_single_threaded.io();
 }
 
-fn changeDirectory(path: [*c]const u8) !void {
+fn changeDirectory(path: [*:0]const u8) !void {
     try std.process.setCurrentPath(io(), std.mem.span(path));
 }
 
@@ -521,12 +491,20 @@ fn changeDirectory(path: [*c]const u8) !void {
 // Module Functions Definition - 3D Shapes drawing
 //----------------------------------------------------------------------------------
 
+fn rlVertex(v: Vector3) void {
+    rlVertex3f(v.x, v.y, v.z);
+}
+
+fn rlNormal(n: Vector3) void {
+    rlNormal3f(n.x, n.y, n.z);
+}
+
 // Draw a line in 3D world space
 export fn DrawLine3D(startPos: Vector3, endPos: Vector3, color: Color) callconv(.c) void {
     rlBegin(RL_LINES);
     rlColor4ub(color.r, color.g, color.b, color.a);
-    rlVertex3f(startPos.x, startPos.y, startPos.z);
-    rlVertex3f(endPos.x, endPos.y, endPos.z);
+    rlVertex(startPos);
+    rlVertex(endPos);
     rlEnd();
 }
 
@@ -564,30 +542,29 @@ export fn DrawCircle3D(center: Vector3, radius: f32, rotationAxis: Vector3, rota
 export fn DrawTriangle3D(v1: Vector3, v2: Vector3, v3: Vector3, color: Color) callconv(.c) void {
     rlBegin(RL_TRIANGLES);
     rlColor4ub(color.r, color.g, color.b, color.a);
-    rlVertex3f(v1.x, v1.y, v1.z);
-    rlVertex3f(v2.x, v2.y, v2.z);
-    rlVertex3f(v3.x, v3.y, v3.z);
+    rlVertex(v1);
+    rlVertex(v2);
+    rlVertex(v3);
     rlEnd();
 }
 
 // Draw a triangle strip defined by points
 export fn DrawTriangleStrip3D(points: [*c]const Vector3, pointCount: c_int, color: Color) callconv(.c) void {
     if (pointCount < 3) return; // Security check
+    const strip = points[0..@intCast(pointCount)];
 
     rlBegin(RL_TRIANGLES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    var i: c_int = 2;
-    while (i < pointCount) : (i += 1) {
-        const u: usize = @intCast(i);
-        if (@rem(i, 2) == 0) {
-            rlVertex3f(points[u].x, points[u].y, points[u].z);
-            rlVertex3f(points[u - 2].x, points[u - 2].y, points[u - 2].z);
-            rlVertex3f(points[u - 1].x, points[u - 1].y, points[u - 1].z);
+    // Every other triangle is flipped to keep the winding counter-clockwise
+    for (2..strip.len) |i| {
+        rlVertex(strip[i]);
+        if (i % 2 == 0) {
+            rlVertex(strip[i - 2]);
+            rlVertex(strip[i - 1]);
         } else {
-            rlVertex3f(points[u].x, points[u].y, points[u].z);
-            rlVertex3f(points[u - 1].x, points[u - 1].y, points[u - 1].z);
-            rlVertex3f(points[u - 2].x, points[u - 2].y, points[u - 2].z);
+            rlVertex(strip[i - 1]);
+            rlVertex(strip[i - 2]);
         }
     }
     rlEnd();
@@ -782,19 +759,19 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
             vertices[2] = rotateSlice(vertices[2], cosslice, sinslice);
             vertices[3] = rotateSlice(vertices[3], cosslice, sinslice);
 
-            rlNormal3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlNormal3f(vertices[3].x, vertices[3].y, vertices[3].z);
-            rlVertex3f(vertices[3].x, vertices[3].y, vertices[3].z);
-            rlNormal3f(vertices[1].x, vertices[1].y, vertices[1].z);
-            rlVertex3f(vertices[1].x, vertices[1].y, vertices[1].z);
+            rlNormal(vertices[0]);
+            rlVertex(vertices[0]);
+            rlNormal(vertices[3]);
+            rlVertex(vertices[3]);
+            rlNormal(vertices[1]);
+            rlVertex(vertices[1]);
 
-            rlNormal3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlNormal3f(vertices[2].x, vertices[2].y, vertices[2].z);
-            rlVertex3f(vertices[2].x, vertices[2].y, vertices[2].z);
-            rlNormal3f(vertices[3].x, vertices[3].y, vertices[3].z);
-            rlVertex3f(vertices[3].x, vertices[3].y, vertices[3].z);
+            rlNormal(vertices[0]);
+            rlVertex(vertices[0]);
+            rlNormal(vertices[2]);
+            rlVertex(vertices[2]);
+            rlNormal(vertices[3]);
+            rlVertex(vertices[3]);
         }
 
         vertices[2] = vertices[3]; // Rotate around z axis to set up starting vertices for next ring
@@ -838,16 +815,16 @@ export fn DrawSphereWires(centerPos: Vector3, radius: f32, rings: c_int, slices:
             vertices[3] = rotateSlice(vertices[3], cosslice, sinslice);
 
             // Longitude lines
-            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlVertex3f(vertices[1].x, vertices[1].y, vertices[1].z);
+            rlVertex(vertices[0]);
+            rlVertex(vertices[1]);
 
             // Latitude lines
-            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlVertex3f(vertices[2].x, vertices[2].y, vertices[2].z);
+            rlVertex(vertices[0]);
+            rlVertex(vertices[2]);
 
             // Diagonal lines
-            rlVertex3f(vertices[0].x, vertices[0].y, vertices[0].z);
-            rlVertex3f(vertices[3].x, vertices[3].y, vertices[3].z);
+            rlVertex(vertices[0]);
+            rlVertex(vertices[3]);
         }
 
         vertices[2] = vertices[3]; // Rotate around z axis to set up starting vertices for next ring
@@ -954,23 +931,23 @@ export fn DrawCylinderEx(startPos: Vector3, endPos: Vector3, startRadius: f32, e
         const w4 = Vector3{ .x = endPos.x + s4 * b1.x + c4 * b2.x, .y = endPos.y + s4 * b1.y + c4 * b2.y, .z = endPos.z + s4 * b1.z + c4 * b2.z };
 
         if (startRadius > 0) {
-            rlVertex3f(startPos.x, startPos.y, startPos.z);
-            rlVertex3f(w2.x, w2.y, w2.z);
-            rlVertex3f(w1.x, w1.y, w1.z);
+            rlVertex(startPos);
+            rlVertex(w2);
+            rlVertex(w1);
         }
 
-        rlVertex3f(w1.x, w1.y, w1.z);
-        rlVertex3f(w2.x, w2.y, w2.z);
-        rlVertex3f(w3.x, w3.y, w3.z);
+        rlVertex(w1);
+        rlVertex(w2);
+        rlVertex(w3);
 
-        rlVertex3f(w2.x, w2.y, w2.z);
-        rlVertex3f(w4.x, w4.y, w4.z);
-        rlVertex3f(w3.x, w3.y, w3.z);
+        rlVertex(w2);
+        rlVertex(w4);
+        rlVertex(w3);
 
         if (endRadius > 0) {
-            rlVertex3f(endPos.x, endPos.y, endPos.z);
-            rlVertex3f(w3.x, w3.y, w3.z);
-            rlVertex3f(w4.x, w4.y, w4.z);
+            rlVertex(endPos);
+            rlVertex(w3);
+            rlVertex(w4);
         }
     }
     rlEnd();
@@ -1042,14 +1019,14 @@ export fn DrawCylinderWiresEx(startPos: Vector3, endPos: Vector3, startRadius: f
         const c4 = cosf(baseAngle * fi1) * endRadius;
         const w4 = Vector3{ .x = endPos.x + s4 * b1.x + c4 * b2.x, .y = endPos.y + s4 * b1.y + c4 * b2.y, .z = endPos.z + s4 * b1.z + c4 * b2.z };
 
-        rlVertex3f(w1.x, w1.y, w1.z);
-        rlVertex3f(w2.x, w2.y, w2.z);
+        rlVertex(w1);
+        rlVertex(w2);
 
-        rlVertex3f(w1.x, w1.y, w1.z);
-        rlVertex3f(w3.x, w3.y, w3.z);
+        rlVertex(w1);
+        rlVertex(w3);
 
-        rlVertex3f(w3.x, w3.y, w3.z);
-        rlVertex3f(w4.x, w4.y, w4.z);
+        rlVertex(w3);
+        rlVertex(w4);
     }
     rlEnd();
 }
@@ -1119,21 +1096,21 @@ export fn DrawCapsule(startPos: Vector3, endPos: Vector3, radius: f32, rings_in:
                 };
 
                 if (c == 0) {
-                    rlVertex3f(w1.x, w1.y, w1.z);
-                    rlVertex3f(w2.x, w2.y, w2.z);
-                    rlVertex3f(w3.x, w3.y, w3.z);
+                    rlVertex(w1);
+                    rlVertex(w2);
+                    rlVertex(w3);
 
-                    rlVertex3f(w2.x, w2.y, w2.z);
-                    rlVertex3f(w4.x, w4.y, w4.z);
-                    rlVertex3f(w3.x, w3.y, w3.z);
+                    rlVertex(w2);
+                    rlVertex(w4);
+                    rlVertex(w3);
                 } else {
-                    rlVertex3f(w1.x, w1.y, w1.z);
-                    rlVertex3f(w3.x, w3.y, w3.z);
-                    rlVertex3f(w2.x, w2.y, w2.z);
+                    rlVertex(w1);
+                    rlVertex(w3);
+                    rlVertex(w2);
 
-                    rlVertex3f(w2.x, w2.y, w2.z);
-                    rlVertex3f(w3.x, w3.y, w3.z);
-                    rlVertex3f(w4.x, w4.y, w4.z);
+                    rlVertex(w2);
+                    rlVertex(w3);
+                    rlVertex(w4);
                 }
             }
         }
@@ -1176,13 +1153,13 @@ export fn DrawCapsule(startPos: Vector3, endPos: Vector3, radius: f32, rings_in:
                 .z = endPos.z + ringSin4 * b1.z + ringCos4 * b2.z,
             };
 
-            rlVertex3f(w1.x, w1.y, w1.z);
-            rlVertex3f(w2.x, w2.y, w2.z);
-            rlVertex3f(w3.x, w3.y, w3.z);
+            rlVertex(w1);
+            rlVertex(w2);
+            rlVertex(w3);
 
-            rlVertex3f(w2.x, w2.y, w2.z);
-            rlVertex3f(w4.x, w4.y, w4.z);
-            rlVertex3f(w3.x, w3.y, w3.z);
+            rlVertex(w2);
+            rlVertex(w4);
+            rlVertex(w3);
         }
     }
     rlEnd();
@@ -1251,20 +1228,20 @@ export fn DrawCapsuleWires(startPos: Vector3, endPos: Vector3, radius: f32, ring
                     .z = capCenter.z + (sinf(baseRingAngle * fi1) * b0.z + ringSin4 * b1.z + ringCos4 * b2.z) * radius,
                 };
 
-                rlVertex3f(w1.x, w1.y, w1.z);
-                rlVertex3f(w2.x, w2.y, w2.z);
+                rlVertex(w1);
+                rlVertex(w2);
 
-                rlVertex3f(w2.x, w2.y, w2.z);
-                rlVertex3f(w3.x, w3.y, w3.z);
+                rlVertex(w2);
+                rlVertex(w3);
 
-                rlVertex3f(w1.x, w1.y, w1.z);
-                rlVertex3f(w3.x, w3.y, w3.z);
+                rlVertex(w1);
+                rlVertex(w3);
 
-                rlVertex3f(w2.x, w2.y, w2.z);
-                rlVertex3f(w4.x, w4.y, w4.z);
+                rlVertex(w2);
+                rlVertex(w4);
 
-                rlVertex3f(w3.x, w3.y, w3.z);
-                rlVertex3f(w4.x, w4.y, w4.z);
+                rlVertex(w3);
+                rlVertex(w4);
             }
         }
         capCenter = startPos;
@@ -1306,14 +1283,14 @@ export fn DrawCapsuleWires(startPos: Vector3, endPos: Vector3, radius: f32, ring
                 .z = endPos.z + ringSin4 * b1.z + ringCos4 * b2.z,
             };
 
-            rlVertex3f(w1.x, w1.y, w1.z);
-            rlVertex3f(w3.x, w3.y, w3.z);
+            rlVertex(w1);
+            rlVertex(w3);
 
-            rlVertex3f(w2.x, w2.y, w2.z);
-            rlVertex3f(w4.x, w4.y, w4.z);
+            rlVertex(w2);
+            rlVertex(w4);
 
-            rlVertex3f(w2.x, w2.y, w2.z);
-            rlVertex3f(w3.x, w3.y, w3.z);
+            rlVertex(w2);
+            rlVertex(w3);
         }
     }
     rlEnd();
@@ -1345,7 +1322,7 @@ export fn DrawRay(ray: Ray, color: Color) callconv(.c) void {
     rlColor4ub(color.r, color.g, color.b, color.a);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    rlVertex3f(ray.position.x, ray.position.y, ray.position.z);
+    rlVertex(ray.position);
     rlVertex3f(ray.position.x + ray.direction.x * scale, ray.position.y + ray.direction.y * scale, ray.position.z + ray.direction.z * scale);
     rlEnd();
 }
@@ -2708,9 +2685,10 @@ export fn ExportMeshAsCode(mesh: Mesh, fileName: [*c]const u8) callconv(.c) bool
 }
 
 /// Saves the text through raylib's SaveFileText (which honours user callbacks)
-fn saveText(fileName: [*c]const u8, text: *Io.Writer.Allocating) bool {
+fn saveText(fileName: [*:0]const u8, text: *Io.Writer.Allocating) bool {
     text.writer.writeByte(0) catch return false;
-    return SaveFileText(fileName, text.written().ptr);
+    const written = text.written();
+    return SaveFileText(fileName, written[0 .. written.len - 1 :0]);
 }
 
 /// Writes `value` as C's printf would with `format`. std.fmt rounds ties
@@ -2742,7 +2720,7 @@ fn writeMeshObj(w: *Io.Writer, mesh: Mesh) Io.Writer.Error!void {
     try w.print("# Triangle Count:   {d}\n\n", .{mesh.triangleCount});
     try w.writeAll("g mesh\n");
 
-    const lines = [_]struct { prefix: []const u8, values: [*c]const f32, components: usize, format: [:0]const u8 }{
+    const lines = [_]struct { prefix: []const u8, values: ?[*]const f32, components: usize, format: [:0]const u8 }{
         .{ .prefix = "v", .values = mesh.vertices, .components = 3, .format = "%.6f" },
         .{ .prefix = "vt", .values = mesh.texcoords, .components = 2, .format = "%.6f" },
         .{ .prefix = "vn", .values = mesh.normals, .components = 3, .format = "%.4f" },
@@ -2750,7 +2728,7 @@ fn writeMeshObj(w: *Io.Writer, mesh: Mesh) Io.Writer.Error!void {
     for (lines) |line| {
         for (0..vertexCount) |i| {
             try w.writeAll(line.prefix);
-            for (line.values[i * line.components ..][0..line.components]) |value| {
+            for (line.values.?[i * line.components ..][0..line.components]) |value| {
                 try w.writeByte(' ');
                 try printFloat(w, line.format, value);
             }
@@ -2789,7 +2767,7 @@ fn writeMeshCode(w: *Io.Writer, mesh: Mesh, name: []const u8) Io.Writer.Error!vo
     try w.print("#define {s}_TRIANGLE_COUNT   {d}\n\n", .{ name, mesh.triangleCount });
 
     const vertexCount = count(mesh.vertexCount);
-    const floatArrays = [_]struct { label: []const u8, values: [*c]const f32, components: usize }{
+    const floatArrays = [_]struct { label: []const u8, values: ?[*]const f32, components: usize }{
         .{ .label = "VERTEX", .values = mesh.vertices, .components = 3 },
         .{ .label = "TEXCOORD", .values = mesh.texcoords, .components = 2 },
         .{ .label = "TEXCOORD2", .values = mesh.texcoords2, .components = 2 },
@@ -2797,8 +2775,7 @@ fn writeMeshCode(w: *Io.Writer, mesh: Mesh, name: []const u8) Io.Writer.Error!vo
         .{ .label = "TANGENT", .values = mesh.tangents, .components = 4 },
     };
     for (floatArrays) |array| {
-        if (array.values == null) continue;
-        const values = array.values[0 .. vertexCount * array.components];
+        const values = (array.values orelse continue)[0 .. vertexCount * array.components];
         try w.print("static float {s}_{s}_DATA[{d}] = {{ ", .{ name, array.label, values.len });
         for (values, 0..) |value, i| {
             try printFloat(w, "%.3ff", value);
@@ -2877,27 +2854,23 @@ fn colorFromFloats(rgb: [3]f32) Color {
 
 // Load materials from model file
 export fn LoadMaterials(fileName: [*c]const u8, materialCount: [*c]c_int) callconv(.c) [*c]Material {
-    var materials: [*c]Material = null;
+    materialCount.* = 0;
+    if (!IsFileExtension(fileName, ".mtl")) return null;
+
+    var mats: ?[*]tinyobj_material_t = null;
     var matCount: c_uint = 0;
+    const result = tinyobj_parse_mtl_file(&mats, &matCount, fileName);
+    if (result != TINYOBJ_SUCCESS) TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to parse materials file", fileName);
+    defer tinyobj_materials_free(mats, matCount);
 
-    if (IsFileExtension(fileName, ".mtl")) {
-        var mats: ?[*]tinyobj_material_t = null;
-
-        const result = tinyobj_parse_mtl_file(&mats, &matCount, fileName);
-        if (result != TINYOBJ_SUCCESS) TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to parse materials file", fileName);
-        defer tinyobj_materials_free(mats, matCount);
-
-        if (cmem.alloc(Material, matCount)) |loaded| {
-            processMaterialsObj(loaded, mats);
-            materials = loaded.ptr;
-        } else |_| {
-            TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to allocate memory for materials", fileName);
-            matCount = 0;
-        }
-    }
+    const materials = cmem.alloc(Material, matCount) catch {
+        TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to allocate memory for materials", fileName);
+        return null;
+    };
+    processMaterialsObj(materials, mats);
 
     materialCount.* = @intCast(matCount);
-    return materials;
+    return materials.ptr;
 }
 
 // Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
@@ -2962,13 +2935,16 @@ export fn SetModelMeshMaterial(model: [*c]Model, meshId: c_int, materialId: c_in
 
 // Load model animations from file
 export fn LoadModelAnimations(fileName: [*c]const u8, animCount: [*c]c_int) callconv(.c) [*c]ModelAnimation {
-    var animations: [*c]ModelAnimation = null;
+    const animations = if (IsFileExtension(fileName, ".iqm"))
+        loadModelAnimationsIqm(fileName, animCount)
+    else if (IsFileExtension(fileName, ".m3d"))
+        loadModelAnimationsM3d(fileName, animCount)
+    else if (IsFileExtension(fileName, ".gltf;.glb"))
+        loadModelAnimationsGltf(fileName, animCount)
+    else
+        null;
 
-    if (IsFileExtension(fileName, ".iqm")) animations = loadModelAnimationsIqm(fileName, animCount);
-    if (IsFileExtension(fileName, ".m3d")) animations = loadModelAnimationsM3d(fileName, animCount);
-    if (IsFileExtension(fileName, ".gltf;.glb")) animations = loadModelAnimationsGltf(fileName, animCount);
-
-    return animations;
+    return if (animations) |loaded| loaded.ptr else null;
 }
 
 /// One animation frame position: the two keyframes around it and the blend between them
@@ -3097,13 +3073,13 @@ fn updateModelAnimationVertexBuffers(model: Model) void {
             if ((material.shader.locs != null) and (material.shader.locs[SHADER_LOC_VERTEX_BONEIDS] != -1)) continue;
         }
 
-        skinMesh(mesh, model.boneMatrices) catch {
+        skinMesh(mesh, model.boneMatrices[0..model.skeleton.boneCount]) catch {
             TraceLog(LOG_WARNING, "MESH: Failed to allocate memory for animated vertex data");
         };
     }
 }
 
-fn skinMesh(mesh: *Mesh, boneMatrices: [*c]const Matrix) error{OutOfMemory}!void {
+fn skinMesh(mesh: *Mesh, boneMatrices: []const Matrix) error{OutOfMemory}!void {
     const valueCount = count(mesh.vertexCount) * 3;
     const vertices = mesh.vertices[0..valueCount];
     const normals: ?[]const f32 = if (mesh.normals != null) mesh.normals[0..valueCount] else null;
@@ -3690,14 +3666,19 @@ export fn GenMeshKnot(radius: f32, size: f32, radSeg: c_int, sides: c_int) callc
 export fn GenMeshHeightmap(heightmap: Image, size: Vector3) callconv(.c) Mesh {
     const pixels = LoadImageColors(heightmap);
     defer UnloadImageColors(pixels);
-    return generated(heightmapMesh(pixels, count(heightmap.width), count(heightmap.height), size));
+    return generated(heightmapMesh(imagePixels(pixels, heightmap), count(heightmap.width), count(heightmap.height), size));
+}
+
+/// The colors LoadImageColors returned for `image`, as a slice
+fn imagePixels(pixels: ?[*]const Color, image: Image) []const Color {
+    return if (pixels) |p| p[0 .. count(image.width) * count(image.height)] else &.{};
 }
 
 fn grayValue(c: Color) f32 {
     return @as(f32, @floatFromInt(@as(c_int, c.r) + c.g + c.b)) / 3.0;
 }
 
-fn heightmapMesh(pixels: [*c]const Color, mapX: usize, mapZ: usize, size: Vector3) error{OutOfMemory}!Mesh {
+fn heightmapMesh(pixels: []const Color, mapX: usize, mapZ: usize, size: Vector3) error{OutOfMemory}!Mesh {
     var mesh = empty_mesh;
     // One quad every four pixels, two triangles each
     const quadsX = mapX -| 1;
@@ -3816,10 +3797,10 @@ fn colorEqual(c1: Color, c2: Color) bool {
 export fn GenMeshCubicmap(cubicmap: Image, cubeSize: Vector3) callconv(.c) Mesh {
     const pixels = LoadImageColors(cubicmap);
     defer UnloadImageColors(pixels);
-    return generated(cubicmapMesh(pixels, count(cubicmap.width), count(cubicmap.height), cubeSize));
+    return generated(cubicmapMesh(imagePixels(pixels, cubicmap), count(cubicmap.width), count(cubicmap.height), cubeSize));
 }
 
-fn cubicmapMesh(pixels: [*c]const Color, width: usize, height: usize, cubeSize: Vector3) error{OutOfMemory}!Mesh {
+fn cubicmapMesh(pixels: []const Color, width: usize, height: usize, cubeSize: Vector3) error{OutOfMemory}!Mesh {
     const gpa = std.heap.c_allocator;
 
     // Room for six faces in every cell
@@ -4016,7 +3997,7 @@ export fn DrawBillboardPro(camera: Camera, texture: Texture2D, rec_in: Rectangle
     i = 0;
     while (i < 4) : (i += 1) {
         rlTexCoord2f(texcoords[i].x, texcoords[i].y);
-        rlVertex3f(points[i].x, points[i].y, points[i].z);
+        rlVertex(points[i]);
     }
 
     rlEnd();
@@ -4254,15 +4235,14 @@ fn buildPoseFromParentJoints(bones: []const BoneInfo, transforms: []Transform) v
 // Load OBJ mesh data
 // NOTE: A mesh is created for every shape, and for every change of material
 // within one; tinyobj triangulates the faces
-fn loadObj(fileName: [*c]const u8) Model {
+fn loadObj(fileName: [*:0]const u8) Model {
     var model = empty_model;
     model.transform = MatrixIdentity();
 
-    const fileText = LoadFileText(fileName);
-    if (fileText == null) {
+    const fileText = LoadFileText(fileName) orelse {
         TraceLog(LOG_WARNING, "MODEL: [%s] Unable to read obj file", fileName);
         return model;
-    }
+    };
 
     // Switch to the OBJ directory so material and texture paths resolve
     var currentDirBuffer: [MAX_FILEPATH_LENGTH]u8 = undefined;
@@ -4434,10 +4414,9 @@ fn objIndex(index: c_int, limit: c_uint) ?usize {
 
 /// Loads a model file's bytes, checks the IQM header and logs why it can't
 /// be used. The caller releases the data with UnloadFileData.
-fn openIqm(fileName: [*c]const u8) ?iqm.File {
+fn openIqm(fileName: [*:0]const u8) ?iqm.File {
     var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
-    if (fileData == null) return null;
+    const fileData = LoadFileData(fileName, &dataSize) orelse return null;
 
     const file: iqm.File = .init(fileData[0..count(dataSize)]);
     file.check() catch |err| {
@@ -4456,7 +4435,7 @@ fn unloadIqm(file: iqm.File) void {
 }
 
 // Load IQM mesh data
-fn loadIqm(fileName: [*c]const u8) Model {
+fn loadIqm(fileName: [*:0]const u8) Model {
     const file = openIqm(fileName) orelse return empty_model;
     defer unloadIqm(file);
 
@@ -4471,7 +4450,7 @@ fn iqmCString(name: iqm.Name) [33]u8 {
     return name ++ [_]u8{0};
 }
 
-fn iqmModel(fileName: [*c]const u8, file: iqm.File) error{OutOfMemory}!Model {
+fn iqmModel(fileName: [*:0]const u8, file: iqm.File) error{OutOfMemory}!Model {
     const header = file.header;
     const basePath = GetDirectoryPath(fileName);
 
@@ -4596,7 +4575,7 @@ fn initAnimationState(model: *Model) error{OutOfMemory}!void {
 }
 
 // Load IQM animation data
-fn loadModelAnimationsIqm(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
+fn loadModelAnimationsIqm(fileName: [*:0]const u8, animCount: *c_int) ?[]ModelAnimation {
     const file = openIqm(fileName) orelse return null;
     defer unloadIqm(file);
 
@@ -4606,10 +4585,10 @@ fn loadModelAnimationsIqm(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mode
         animCount.* = 0;
         return null;
     };
-    return animations.ptr;
+    return animations;
 }
 
-fn iqmAnimations(fileName: [*c]const u8, file: iqm.File) error{OutOfMemory}![]ModelAnimation {
+fn iqmAnimations(fileName: [*:0]const u8, file: iqm.File) error{OutOfMemory}![]ModelAnimation {
     const header = file.header;
     const animations = try cmem.alloc(ModelAnimation, header.num_anims);
     errdefer UnloadModelAnimations(animations.ptr, @intCast(animations.len));
@@ -4760,7 +4739,7 @@ fn gltfOptions() cgltf_options {
 }
 
 // Load image from different glTF provided methods (uri, path, buffer_view)
-fn loadImageFromCgltfImage(cgltfImage: ?*const cgltf_image, texPath: [*c]const u8) Image {
+fn loadImageFromCgltfImage(cgltfImage: ?*const cgltf_image, texPath: [*:0]const u8) Image {
     const image = cgltfImage orelse return std.mem.zeroes(Image);
 
     if (image.uri) |uri| {
@@ -4798,7 +4777,7 @@ fn loadImageFromDataUri(uri: [:0]const u8) Image {
     return LoadImageFromMemory(".png", @ptrCast(data), outSize);
 }
 
-fn loadImageFromBufferView(image: *const cgltf_image, view: *const cgltf_buffer_view, texPath: [*c]const u8) Image {
+fn loadImageFromBufferView(image: *const cgltf_image, view: *const cgltf_buffer_view, texPath: [*:0]const u8) Image {
     const gpa = std.heap.c_allocator;
     const data = gpa.alloc(u8, view.size) catch {
         TraceLog(LOG_WARNING, "IMAGE: Failed to allocate memory for glTF image data");
@@ -4823,7 +4802,7 @@ fn loadImageFromBufferView(image: *const cgltf_image, view: *const cgltf_buffer_
 }
 
 /// The texture of a glTF texture view, if it has one and its image loads
-fn loadTextureFromView(view: cgltf_texture_view, texPath: [*c]const u8) ?Texture2D {
+fn loadTextureFromView(view: cgltf_texture_view, texPath: [*:0]const u8) ?Texture2D {
     const texture = view.texture orelse return null;
     const image = loadImageFromCgltfImage(texture.image, texPath);
     if (image.data == null) return null;
@@ -4916,7 +4895,7 @@ const TrianglePrimitives = struct {
 
 /// glTF file data parsed by cgltf, with its buffers loaded
 const GltfFile = struct {
-    fileData: [*c]u8,
+    fileData: [*]u8,
     data: *cgltf_data,
 
     fn deinit(file: GltfFile) void {
@@ -4929,10 +4908,9 @@ const GltfFile = struct {
 // NOTE: Every triangle primitive of every node's mesh becomes a raylib Mesh, with the
 // node's world transform applied; scenes are ignored. Only PBR metallic/roughness
 // materials are read.
-fn loadGltf(fileName: [*c]const u8) Model {
+fn loadGltf(fileName: [*:0]const u8) Model {
     var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
-    if (fileData == null) return empty_model;
+    const fileData = LoadFileData(fileName, &dataSize) orelse return empty_model;
 
     const options = gltfOptions();
     var parsed: ?*cgltf_data = null;
@@ -4991,7 +4969,7 @@ fn loadGltf(fileName: [*c]const u8) Model {
     };
 }
 
-fn gltfModel(fileName: [*c]const u8, data: *cgltf_data, meshCount: usize) error{OutOfMemory}!Model {
+fn gltfModel(fileName: [*:0]const u8, data: *cgltf_data, meshCount: usize) error{OutOfMemory}!Model {
     var model = empty_model;
     errdefer freeModelData(model);
 
@@ -5009,7 +4987,7 @@ fn gltfModel(fileName: [*c]const u8, data: *cgltf_data, meshCount: usize) error{
 
     for (gltfMaterials, model.materials[1 .. gltfMaterials.len + 1]) |*gltfMaterial, *material| {
         material.* = LoadMaterialDefault();
-        try loadGltfMaterial(gltfMaterial, material.maps, GetDirectoryPath(fileName));
+        try loadGltfMaterial(gltfMaterial, material.maps[0..MAX_MATERIAL_MAPS], GetDirectoryPath(fileName));
     }
 
     // Mesh vertex data, transformed to world space
@@ -5060,7 +5038,7 @@ fn gltfModel(fileName: [*c]const u8, data: *cgltf_data, meshCount: usize) error{
     return model;
 }
 
-fn loadGltfMaterial(gltfMaterial: *const cgltf_material, maps: [*c]MaterialMap, texPath: [*c]const u8) error{OutOfMemory}!void {
+fn loadGltfMaterial(gltfMaterial: *const cgltf_material, maps: []MaterialMap, texPath: [*:0]const u8) error{OutOfMemory}!void {
     // Only the PBR metallic/roughness flow is supported: specular/glossiness,
     // clearcoat, transmission, volume, ior, specular and sheen are not
     if (gltfMaterial.has_pbr_metallic_roughness == 0) return;
@@ -5130,7 +5108,7 @@ fn splitMetallicRoughness(image: Image) error{OutOfMemory}!struct { Texture2D, T
 }
 
 /// Loads the vertex attributes and indices of one triangle primitive into `mesh`
-fn loadGltfPrimitive(fileName: [*c]const u8, primitive: *const cgltf_primitive, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
+fn loadGltfPrimitive(fileName: [*:0]const u8, primitive: *const cgltf_primitive, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
     const worldMatrixNormals = MatrixTranspose(MatrixInvert(worldMatrix));
 
     // NOTE: Attributes come in several data formats; only some are supported per
@@ -5183,7 +5161,7 @@ fn accessorIndices(comptime T: type, accessor: *const cgltf_accessor) error{OutO
 
 // POSITION: vec3 of float, u16 or i16, transformed to world space
 // NOTE: The glTF spec requires the POSITION accessor's min and max
-fn loadGltfPositions(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
+fn loadGltfPositions(fileName: [*:0]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
     if (mesh.vertices != null) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Vertices attribute data already loaded", fileName);
         return;
@@ -5206,7 +5184,7 @@ fn loadGltfPositions(fileName: [*c]const u8, accessor: *const cgltf_accessor, me
 }
 
 // NORMAL: vec3 of float, or of normalized integers (renormalized after transforming)
-fn loadGltfNormals(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrixNormals: Matrix) error{OutOfMemory}!void {
+fn loadGltfNormals(fileName: [*:0]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrixNormals: Matrix) error{OutOfMemory}!void {
     if (mesh.normals != null) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Normals attribute data already loaded", fileName);
         return;
@@ -5228,7 +5206,7 @@ fn loadGltfNormals(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh
 }
 
 // TANGENT: vec4 of float, w is the tangent basis sign
-fn loadGltfTangents(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
+fn loadGltfTangents(fileName: [*:0]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
     if (mesh.tangents != null) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Tangents attribute data already loaded", fileName);
         return;
@@ -5249,7 +5227,7 @@ fn loadGltfTangents(fileName: [*c]const u8, accessor: *const cgltf_accessor, mes
 }
 
 // TEXCOORD_n: vec2 of float, u8n or u16n; up to two sets
-fn loadGltfTexcoords(fileName: [*c]const u8, accessor: *const cgltf_accessor, index: c_int, mesh: *Mesh) error{OutOfMemory}!void {
+fn loadGltfTexcoords(fileName: [*:0]const u8, accessor: *const cgltf_accessor, index: c_int, mesh: *Mesh) error{OutOfMemory}!void {
     var texcoords: ?[]f32 = null;
     if (accessor.type == cgltf_type_vec2) {
         texcoords = switch (accessor.component_type) {
@@ -5261,7 +5239,8 @@ fn loadGltfTexcoords(fileName: [*c]const u8, accessor: *const cgltf_accessor, in
         if (texcoords == null) TraceLog(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported", fileName);
     } else TraceLog(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported, use vec2 float", fileName);
 
-    const ptr: [*c]f32 = if (texcoords) |t| t.ptr else null;
+    // NOTE: Deliberately as raylib: an unsupported set still replaces (and leaks) a loaded one
+    const ptr: ?[*]f32 = if (texcoords) |t| t.ptr else null;
     switch (index) {
         0 => mesh.texcoords = ptr,
         1 => mesh.texcoords2 = ptr,
@@ -5274,7 +5253,7 @@ fn loadGltfTexcoords(fileName: [*c]const u8, accessor: *const cgltf_accessor, in
 
 // COLOR_n: vec3 (RGB) or vec4 (RGBA) of u8n, u16n or float, to 8-bit RGBA
 // NOTE: The glTF spec requires colors clamped to [0.0, 1.0]
-fn loadGltfColors(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh) error{OutOfMemory}!void {
+fn loadGltfColors(fileName: [*:0]const u8, accessor: *const cgltf_accessor, mesh: *Mesh) error{OutOfMemory}!void {
     if (mesh.colors != null) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Colors attribute data already loaded", fileName);
         return;
@@ -5323,7 +5302,7 @@ fn colorChannel(comptime T: type, value: T) u8 {
 }
 
 /// Loads a primitive's bone joints and weights into `mesh`; whether it has joints
-fn loadGltfSkinData(fileName: [*c]const u8, primitive: *const cgltf_primitive, mesh: *Mesh) error{OutOfMemory}!bool {
+fn loadGltfSkinData(fileName: [*:0]const u8, primitive: *const cgltf_primitive, mesh: *Mesh) error{OutOfMemory}!bool {
     var hasJoints = false;
     const valueCount = count(mesh.vertexCount) * 4;
 
@@ -5562,7 +5541,7 @@ const BoneChannels = struct {
 };
 
 // Load glTF animation data
-fn loadModelAnimationsGltf(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
+fn loadModelAnimationsGltf(fileName: [*:0]const u8, animCount: *c_int) ?[]ModelAnimation {
     var dataSize: c_int = 0;
     const fileData = LoadFileData(fileName, &dataSize);
 
@@ -5585,11 +5564,11 @@ fn loadModelAnimationsGltf(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
     defer cgltf_free(data);
 
     // NOTE: Without a skin animCount is left untouched, as in raylib
-    var animations: [*c]ModelAnimation = null;
+    var animations: ?[]ModelAnimation = null;
     const skins = cgltfItems(cgltf_skin, data.skins, data.skins_count);
     if (skins.len > 0) {
         if (gltfAnimations(fileName, data, skins[0], animCount)) |loaded| {
-            animations = loaded.ptr;
+            animations = loaded;
         } else |err| {
             switch (err) {
                 error.JointOffsetBuffer => TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate joint offset buffer", fileName),
@@ -5604,7 +5583,7 @@ fn loadModelAnimationsGltf(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
     return animations;
 }
 
-fn gltfAnimations(fileName: [*c]const u8, data: *cgltf_data, skin: cgltf_skin, animCount: [*c]c_int) error{ JointOffsetBuffer, OutOfMemory }![]ModelAnimation {
+fn gltfAnimations(fileName: [*:0]const u8, data: *cgltf_data, skin: cgltf_skin, animCount: *c_int) error{ JointOffsetBuffer, OutOfMemory }![]ModelAnimation {
     const gpa = std.heap.c_allocator;
     const joints = cgltfItems(*cgltf_node, skin.joints, skin.joints_count);
 
@@ -5716,13 +5695,12 @@ fn gltfAnimations(fileName: [*c]const u8, data: *cgltf_data, skin: cgltf_skin, a
 //----------------------------------------------------------------------------------
 
 // Load VOX (MagicaVoxel) mesh data
-fn loadVox(fileName: [*c]const u8) Model {
+fn loadVox(fileName: [*:0]const u8) Model {
     var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
-    if (fileData == null) {
+    const fileData = LoadFileData(fileName, &dataSize) orelse {
         TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load VOX file", fileName);
         return empty_model;
-    }
+    };
     defer UnloadFileData(fileData);
 
     var voxarray = std.mem.zeroes(VoxArray3D);
@@ -5805,7 +5783,7 @@ fn m3dFreeHook(data: ?*anyopaque) callconv(.c) void {
 
 /// m3d's model data, with the file data it was loaded from
 const M3dFile = struct {
-    fileData: [*c]u8,
+    fileData: [*]u8,
     m3d: *m3d_t,
 
     fn deinit(file: M3dFile) void {
@@ -5815,10 +5793,9 @@ const M3dFile = struct {
 };
 
 /// Loads and parses an M3D file, logging why it can't be used
-fn openM3d(fileName: [*c]const u8) ?M3dFile {
+fn openM3d(fileName: [*:0]const u8) ?M3dFile {
     var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
-    if (fileData == null) return null;
+    const fileData = LoadFileData(fileName, &dataSize) orelse return null;
 
     const m3d = m3d_load(fileData, m3dLoaderHook, m3dFreeHook, null);
     if ((m3d == null) or M3D_ERR_ISFATAL(m3d.?.errcode)) {
@@ -5831,7 +5808,7 @@ fn openM3d(fileName: [*c]const u8) ?M3dFile {
 }
 
 // Load M3D mesh data
-fn loadM3d(fileName: [*c]const u8) Model {
+fn loadM3d(fileName: [*:0]const u8) Model {
     const file = openM3d(fileName) orelse return empty_model;
     defer file.deinit();
     const m3d = file.m3d;
@@ -5906,7 +5883,7 @@ fn m3dModel(m3d: *const m3d_t) error{OutOfMemory}!Model {
 
     for (cgltfItems(m3dm_t, m3d.material, m3d.nummaterial), model.materials[1 .. m3d.nummaterial + 1]) |m3dMaterial, *material| {
         material.* = LoadMaterialDefault();
-        loadM3dMaterial(m3d, m3dMaterial, material.maps);
+        loadM3dMaterial(m3d, m3dMaterial, material.maps[0..MAX_MATERIAL_MAPS]);
     }
 
     if (m3d.numbone != 0) try loadM3dSkeleton(&model, m3d);
@@ -6012,7 +5989,7 @@ fn m3dColor(value: u32) Color {
     return std.mem.bytesToValue(Color, std.mem.asBytes(&value));
 }
 
-fn loadM3dMaterial(m3d: *const m3d_t, m3dMaterial: m3dm_t, maps: [*c]MaterialMap) void {
+fn loadM3dMaterial(m3d: *const m3d_t, m3dMaterial: m3dm_t, maps: []MaterialMap) void {
     for (cgltfItems(m3dp_t, m3dMaterial.prop, m3dMaterial.numprop)) |prop| {
         switch (prop.type) {
             m3dp_Kd => {
@@ -6128,7 +6105,7 @@ fn loadM3dSkeleton(model: *Model, m3d: *const m3d_t) error{OutOfMemory}!void {
 const M3D_ANIMDELAY: u32 = 17; // Animation frames delay, (~1000 ms/60 FPS = 16.666666 ms)
 
 // Load M3D animation data
-fn loadModelAnimationsM3d(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
+fn loadModelAnimationsM3d(fileName: [*:0]const u8, animCount: *c_int) ?[]ModelAnimation {
     animCount.* = 0;
 
     const file = openM3d(fileName) orelse return null;
@@ -6145,10 +6122,10 @@ fn loadModelAnimationsM3d(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mode
         animCount.* = 0;
         return null;
     };
-    return animations.ptr;
+    return animations;
 }
 
-fn m3dAnimations(fileName: [*c]const u8, m3d: *m3d_t, animCount: [*c]c_int) error{OutOfMemory}![]ModelAnimation {
+fn m3dAnimations(fileName: [*:0]const u8, m3d: *m3d_t, animCount: *c_int) error{OutOfMemory}![]ModelAnimation {
     const animations = try cmem.alloc(ModelAnimation, m3d.numaction);
     errdefer UnloadModelAnimations(animations.ptr, @intCast(animations.len));
     animCount.* = @intCast(m3d.numaction);
