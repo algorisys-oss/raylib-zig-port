@@ -8,7 +8,8 @@ the rules of docs/zig-api.md ("raygui" section), reusing gen_api.py's parser:
   const char *             ->  ?[:0]const u8                 (raygui accepts NULL text)
   int*/float*/bool* out    ->  *i32 / *f32 / *bool
   T* (struct)              ->  *T
-  char *text, int textSize ->  []u8 (edit buffer; raygui keeps it NUL-terminated)
+  char *text, int textSize ->  ?[]u8 (edit buffer; raygui keeps it NUL-terminated;
+                               null = nothing to show, as raygui accepts NULL)
   char **text, int count   ->  []const [*:0]const u8
   state / control / iconId ->  State / Control / IconName enums
   property                 ->  any raygui property enum (or a raw i32)
@@ -71,16 +72,16 @@ class Gen:
             if p.stars == 0 and p.name in PARAM_ENUMS:
                 sig.append(f"{pn}: {PARAM_ENUMS[p.name]}")
                 call.append(f"@backingInt({pn})")
-            elif p.stars == 0 and p.name == "property":
+            elif p.stars == 0 and (p.name == "property" or (fname == "GuiSetStyle" and p.name == "value")):
                 sig.append(f"{pn}: anytype")
-                call.append(f"propertyValue({pn})")
+                call.append(f"styleValue({pn})")
             elif p.base == "char" and p.stars == 1 and p.is_const:
                 sig.append(f"{pn}: ?[:0]const u8")
                 call.append(f"if ({pn}) |s| s.ptr else null")
             elif p.base == "char" and p.stars == 1 and nxt is not None and nxt.name == "textSize":
-                sig.append(f"{pn}: []u8")
-                call.append(f"{pn}.ptr")
-                call.append(f"@intCast({pn}.len)")
+                sig.append(f"{pn}: ?[]u8")
+                call.append(f"if ({pn}) |s| s.ptr else null")
+                call.append(f"if ({pn}) |s| @intCast(s.len) else 0")
                 i += 2
                 continue
             elif p.base == "char" and p.stars == 2 and nxt is not None and nxt.name == "count":
@@ -196,12 +197,13 @@ const Rectangle = rl.Rectangle;
 const Font = rl.Font;
 
 /// Style property ids are per-control enums (`DefaultProperty.text_size`,
-/// `SliderProperty.width`, …); any of them, or a raw integer, is accepted.
-fn propertyValue(property: anytype) c_int {
-    return switch (@typeInfo(@TypeOf(property))) {
-        .@"enum" => @backingInt(property),
-        .int, .comptime_int => property,
-        else => @compileError("raygui property must be a property enum or an integer"),
+/// `SliderProperty.width`, …) and some style values are enums too
+/// (`TextAlignment.center`); any of them, or a raw integer, is accepted.
+fn styleValue(value: anytype) c_int {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .@"enum" => @backingInt(value),
+        .int, .comptime_int => value,
+        else => @compileError("raygui style property/value must be an enum or an integer"),
     };
 }
 '''

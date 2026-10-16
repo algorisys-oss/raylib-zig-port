@@ -22,12 +22,13 @@ const Rectangle = rl.Rectangle;
 const Font = rl.Font;
 
 /// Style property ids are per-control enums (`DefaultProperty.text_size`,
-/// `SliderProperty.width`, …); any of them, or a raw integer, is accepted.
-fn propertyValue(property: anytype) c_int {
-    return switch (@typeInfo(@TypeOf(property))) {
-        .@"enum" => @backingInt(property),
-        .int, .comptime_int => property,
-        else => @compileError("raygui property must be a property enum or an integer"),
+/// `SliderProperty.width`, …) and some style values are enums too
+/// (`TextAlignment.center`); any of them, or a raw integer, is accepted.
+fn styleValue(value: anytype) c_int {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .@"enum" => @backingInt(value),
+        .int, .comptime_int => value,
+        else => @compileError("raygui style property/value must be an enum or an integer"),
     };
 }
 
@@ -507,13 +508,13 @@ pub fn getFont() Font {
 }
 
 /// Set one style property
-pub fn setStyle(control: Control, property: anytype, value: i32) void {
-    c.GuiSetStyle(@backingInt(control), propertyValue(property), value);
+pub fn setStyle(control: Control, property: anytype, value: anytype) void {
+    c.GuiSetStyle(@backingInt(control), styleValue(property), styleValue(value));
 }
 
 /// Get one style property
 pub fn getStyle(control: Control, property: anytype) i32 {
-    return c.GuiGetStyle(@backingInt(control), propertyValue(property));
+    return c.GuiGetStyle(@backingInt(control), styleValue(property));
 }
 
 /// Load style file over global style variable (.rgs)
@@ -667,8 +668,8 @@ pub fn valueBoxFloat(bounds: Rectangle, text: ?[:0]const u8, textValue: [*]u8, v
 }
 
 /// Text Box control, updates input text
-pub fn textBox(bounds: Rectangle, text: []u8, editMode: bool) i32 {
-    return c.GuiTextBox(bounds, text.ptr, @intCast(text.len), editMode);
+pub fn textBox(bounds: Rectangle, text: ?[]u8, editMode: bool) i32 {
+    return c.GuiTextBox(bounds, if (text) |s| s.ptr else null, if (text) |s| @intCast(s.len) else 0, editMode);
 }
 
 /// Slider control
@@ -727,8 +728,8 @@ pub fn messageBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u
 }
 
 /// Text Input Box control, ask for text, supports secret
-pub fn textInputBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u8, text: []u8, btnText: ?[:0]const u8, btnActive: *i32, secretViewActive: *bool) i32 {
-    return c.GuiTextInputBox(bounds, if (title) |s| s.ptr else null, if (message) |s| s.ptr else null, text.ptr, @intCast(text.len), if (btnText) |s| s.ptr else null, @ptrCast(btnActive), @ptrCast(secretViewActive));
+pub fn textInputBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u8, text: ?[]u8, btnText: ?[:0]const u8, btnActive: *i32, secretViewActive: *bool) i32 {
+    return c.GuiTextInputBox(bounds, if (title) |s| s.ptr else null, if (message) |s| s.ptr else null, if (text) |s| s.ptr else null, if (text) |s| @intCast(s.len) else 0, if (btnText) |s| s.ptr else null, @ptrCast(btnActive), @ptrCast(secretViewActive));
 }
 
 /// Color Picker control, includes Color bar controls
