@@ -292,7 +292,15 @@ before claiming a module done.
   see it pass against the old code. Lessons: docs/idioms.md. Zig 0.18 notes
   from that work: `**` array repetition is gone (use `@splat`); a multiline
   `\\` literal's last line has no trailing newline; an `anytype` visitor from
-  another file needs `pub` decls.
+  another file needs `pub` decls; `zig fmt` strips trailing spaces inside
+  `\\` lines (use a plain string when they matter).
+- **Never `Allocator.free` memory a C caller hands back.** Its length comes
+  from a caller-mutable struct field, and safe builds write over that many
+  bytes. Memory crossing the C ABI goes through `src/cmem.zig` (alloc/realloc/
+  free on the C heap); scratch memory uses an `Allocator` with `defer`.
+- **Keep the process clock on libc.** tools/exdiff/fakeclock.c freezes time by
+  preloading libc `clock_gettime`/`time`; a std.Io clock that skips libc would
+  make the examples gate nondeterministic.
 - **`Color` is 4×`u8` packed; `Vector*`/`Matrix` are `f32`.** Match field types
   and struct packing exactly; raylib passes these **by value** across the ABI
   (e.g. `DrawRectangle(..., Color)`), which is calling-convention-sensitive for

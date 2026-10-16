@@ -226,9 +226,81 @@ const effectiveFilter: [*c]const u8 = if (filter != null and filter[0] == 0) nul
 
 `test/cdiff/core_fileio.c` pins every one of these against the C library.
 
+## 10. One owner for the C heap
+
+raylib hands buffers to C callers and promises they can be released with
+`free` (MemFree, UnloadFileData, UnloadImage...). Before, every module called
+`RL_CALLOC`/`RL_FREE` itself. Now `src/cmem.zig` is the only file that touches
+the C heap:
+
+```zig
+const locs = cmem.alloc(c_int, RL_MAX_SHADER_LOCATIONS) catch return null;
+@memset(locs, -1);
+return locs.ptr;
+```
+
+`cmem.alloc` returns a slice, and even an empty result is a real heap
+pointer, because a C caller may `free` it. Memory that never leaves Zig uses
+an `Allocator` (`std.heap.c_allocator`, or a parameter) with `defer`.
+
+One trap: **never `Allocator.free` memory a C caller hands back.** The
+length you'd pass comes from a struct the caller can change (`count`,
+`capacity`), and in safe builds `Allocator.free` writes over that many bytes
+before releasing them. `cmem.free` takes just the pointer.
+
+## 11. Delete the algorithm when std has it
+
+rcore carried hand-written MD5, SHA-1, SHA-256, CRC32 and base64 encode,
+about 300 lines. Each became a few lines over std:
+
+```zig
+export fn ComputeSHA256(data: [*c]const u8, dataSize: c_int) callconv(.c) [*c]c_uint {
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    var digest: [Sha256.digest_length]u8 = undefined;
+    Sha256.hash(cBytes(data, dataSize), &digest, .{});
+    sha256Hash = digestWords(8, digest, .big);
+    return &sha256Hash;
+}
+```
+
+raylib returns the hash state words rather than digest bytes, so
+`digestWords` reads them back: little-endian for MD5, big-endian for SHA.
+The existing cdiff (every input length 0..200) proved it identical. raylib's
+base64 *decoder* stayed hand-written, on slices, because raylib accepts input
+`std.base64` rightly rejects.
+
+## 12. C that stays, and says why
+
+Some calls are C because the job is C. Each stays with a comment naming the
+reason:
+
+- `vprintf` in `TraceLog`: the message is a C printf format with C variadic
+  arguments. Only libc can format it.
+- `time`, `clock_gettime`, `nanosleep`: the examples gate freezes the clock
+  by preloading replacement libc symbols. A `std.Io` clock that skipped libc
+  would make the gate nondeterministic. They are reached through `std.c`
+  declarations, not hand-written `extern fn`s.
+- libm (`tan`, `atan2f`...): the same libm as C, for bit-exact output. The
+  builtins that are bit-identical (`@abs`, `@round`, `@floor`, `@sqrt`)
+  replaced their libm twins.
+- stb, miniaudio, cgltf and the other vendored libraries: `extern fn` is the
+  boundary by design.
+
+And one C call went because the Zig version is simply safer: `OpenURL`
+built `"xdg-open '%s'"` with `sprintf` and ran it through `system()`, a
+shell. It now starts `xdg-open` with an argv, so no shell ever parses the
+URL.
+
+## 13. `zig fmt` and multiline strings
+
+`zig fmt` strips trailing whitespace from `\\` lines. A test expecting
+`"// Event: "` (with a trailing space) silently lost the space and failed.
+When trailing spaces matter, use an ordinary `"...\n"` string.
+
 ## How this stays true
 
 - `python3 tools/idiomaudit.py` counts libc externs, libc calls and `[*c]`
   per file against `tools/idiomaudit.baseline.json`. Counts may only go down.
+  `src/cmem.zig` is listed as the C-heap boundary: counted, never failed.
 - The C-vs-Zig gates (`zig build cdiff`, `zig build test`, `tools/exdiff.sh`)
   prove each rewrite left behaviour byte-identical.
