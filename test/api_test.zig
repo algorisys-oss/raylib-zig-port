@@ -54,6 +54,12 @@ test "all API wrappers compile" {
     std.testing.refAllDecls(rl.gl);
 }
 
+test "generic wrappers instantiate (refAllDecls skips anytype functions)" {
+    try std.testing.expectEqualStrings("7 pts, 3.50", rl.textFormat("{d} pts, {d:.2}", .{ 7, 3.5 }));
+    rl.setTraceLogLevel(.none);
+    rl.traceLog(.info, "{s}", .{"unused"});
+}
+
 test "colors and enums match raylib.h" {
     try std.testing.expectEqual(rl.Color{ .r = 245, .g = 245, .b = 245, .a = 255 }, rl.Color.ray_white);
     try std.testing.expectEqual(c.KEY_LEFT_SHIFT, @backingInt(rl.KeyboardKey.left_shift));
