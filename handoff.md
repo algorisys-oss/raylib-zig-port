@@ -1,4 +1,4 @@
-# handoff.md — fresh-session bootstrap (written 2026-10-16 17:10 IST)
+# handoff.md — fresh-session bootstrap (written 2026-10-16 18:50 IST)
 
 > Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
@@ -10,7 +10,7 @@
   src/c_va.zig; that change is identical machine code on x86-64, and the cheap
   gates plus cdiff text_strings re-ran green after it.)
 - **Phase W (web target) started** — see PROGRESS.md "Phase W" and docs/web.md.
-  `zig build webexamples -Demsdk=$HOME/emsdk`: browser gate **1/1**
+  `zig build webexamples -Demsdk=$HOME/emsdk`: browser gate **46/46**
   (core_basic_window), Debug and ReleaseFast. `zig build webdemos` feeds the
   site (raylib-zig-web, `npm run sync`).
 - Committed at the end of this run (see git log); not pushed (pushing needs the
@@ -31,8 +31,8 @@
 
 ## 3. Next step on resume
 
-1. Grow `web_examples` in build.zig category by category (start with shapes,
-   then textures/text), recording each browser exclusion with its reason.
+1. Grow `web_examples` in build.zig category by category (core_basic_window
+   and all 45 shapes are in, 0dba149; next textures, then text), recording each browser exclusion with its reason.
 2. GLSL version as one comptime constant for the web (examples load
    resources/shaders/glsl100 or glsl300es there), then the shaders category.
 3. Per-example .data with only the files the example loads (now: whole
