@@ -16,6 +16,13 @@ const std = @import("std");
 pub const c = @import("raylib_c");
 
 // --------------------------------------------------------------------------
+// Constants
+// --------------------------------------------------------------------------
+pub const pi: f32 = 3.14159265358979323846;
+pub const deg2rad: f32 = pi / 180.0;
+pub const rad2deg: f32 = 180.0 / pi;
+
+// --------------------------------------------------------------------------
 // Structures
 // --------------------------------------------------------------------------
 pub const Vector2 = extern struct {
@@ -1282,7 +1289,7 @@ pub fn setTraceLogLevel(logLevel: TraceLogLevel) void {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -3129,7 +3136,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };

@@ -72,6 +72,32 @@ const c_defines = [_][]const u8{
 /// gated by `zig build apiexamples` against the original C example.
 const api_examples = [_][]const u8{
     "core/core_basic_window",
+    "others/embedded_files_loading",
+    "shapes/shapes_ball_physics",
+    "shapes/shapes_basic_shapes",
+    "shapes/shapes_bouncing_ball",
+    "shapes/shapes_bullet_hell",
+    "shapes/shapes_clock_of_clocks",
+    "shapes/shapes_collision_area",
+    "shapes/shapes_colors_palette",
+    "shapes/shapes_dashed_line",
+    "shapes/shapes_digital_clock",
+    "shapes/shapes_double_pendulum",
+    "shapes/shapes_drag_puzzle",
+    "shapes/shapes_ellipse_collision",
+    "shapes/shapes_following_eyes",
+    "shapes/shapes_lines_bezier",
+    "shapes/shapes_lines_drawing",
+    "shapes/shapes_logo_raylib",
+    "shapes/shapes_logo_raylib_anim",
+    "shapes/shapes_math_angle_rotation",
+    "shapes/shapes_mouse_trail",
+    "shapes/shapes_penrose_tile",
+    "shapes/shapes_polygon_lines",
+    "shapes/shapes_rectangle_scaling",
+    "shapes/shapes_simple_particles",
+    "shapes/shapes_starfield_effect",
+    "shapes/shapes_vector_angle",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
