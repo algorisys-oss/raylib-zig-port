@@ -5,8 +5,8 @@
 //! parses each line with `sscanf`, so the results follow glibc's rules: `%i`
 //! reads hex ("0x") and octal (leading "0") numbers, a space in the format
 //! matches any run of whitespace (or none), and a field that fails to parse
-//! ends the line. `Scanner` reproduces exactly the part of `sscanf` raylib's
-//! formats use; test/cdiff/text_fonts.c compares the result with the C library
+//! ends the line. `cscan.Scanner` (shared with automation.zig) reproduces those rules; the
+//! format strings here are raylib's. test/cdiff/text_fonts.c compares the result with the C library
 //! over crafted files.
 //!
 //! A file looks like:
@@ -18,6 +18,7 @@
 //!     char id=32   x=9     y=304   width=7     height=36    xoffset=-3    yoffset=-2    xadvance=8     page=0  chnl=15
 
 const std = @import("std");
+const Scanner = @import("cscan.zig").Scanner;
 
 /// Line reader with raylib's GetLine rules: a line ends at '\n' or after
 /// `max_line_length` bytes, and the byte after it is always skipped (so the
@@ -111,128 +112,11 @@ pub fn scanChar(line: []const u8) ?Char {
     };
 }
 
-/// The part of glibc's `sscanf` raylib's BMFont formats use.
-const Scanner = struct {
-    text: []const u8,
-    pos: usize = 0,
-
-    /// A scanner starting at the first `key` in `line` (raylib's `strstr`;
-    /// raylib itself crashes when the key is missing).
-    fn from(line: []const u8, key: []const u8) ?Scanner {
-        const start = std.mem.find(u8, line, key) orelse return null;
-        return .{ .text = line, .pos = start };
-    }
-
-    /// Matches a format literal: a space matches any run of whitespace,
-    /// including none; other bytes match themselves.
-    fn literal(scanner: *Scanner, format: []const u8) bool {
-        for (format) |f| {
-            if (f == ' ') {
-                scanner.skipWhitespace();
-            } else if (scanner.pos < scanner.text.len and scanner.text[scanner.pos] == f) {
-                scanner.pos += 1;
-            } else return false;
-        }
-        return true;
-    }
-
-    /// `format` followed by `%i`.
-    fn intAfter(scanner: *Scanner, format: []const u8) ?i32 {
-        if (!scanner.literal(format)) return null;
-        return scanner.int();
-    }
-
-    fn skipWhitespace(scanner: *Scanner) void {
-        while (scanner.pos < scanner.text.len and std.ascii.isWhitespace(scanner.text[scanner.pos])) scanner.pos += 1;
-    }
-
-    /// `%i`: whitespace, a sign, then a number whose base follows its prefix
-    /// ("0x" hex, "0" octal). As in glibc, the value is read as a C `long`,
-    /// saturating on overflow, then truncated to 32 bits, and "0x" without hex
-    /// digits reads as 0 and is consumed. Null, nothing consumed, without
-    /// digits.
-    fn int(scanner: *Scanner) ?i32 {
-        scanner.skipWhitespace();
-        const text = scanner.text;
-        var i = scanner.pos;
-
-        const negative = i < text.len and text[i] == '-';
-        if (i < text.len and (text[i] == '-' or text[i] == '+')) i += 1;
-
-        var base: u8 = 10;
-        var matched = false;
-        if (i < text.len and text[i] == '0') {
-            i += 1;
-            matched = true;
-            base = 8;
-            if (i < text.len and std.ascii.toLower(text[i]) == 'x') {
-                i += 1;
-                base = 16;
-            }
-        }
-
-        const limit: u128 = 1 << 64; // beyond any C long: saturated anyway
-        var magnitude: u128 = 0;
-        while (i < text.len) : (i += 1) {
-            const digit = std.fmt.charToDigit(text[i], base) catch break;
-            if (magnitude < limit) magnitude = magnitude * base + digit;
-            matched = true;
-        }
-        if (!matched) return null;
-
-        scanner.pos = i;
-        const signed: i128 = if (negative) -@as(i128, @intCast(magnitude)) else @intCast(magnitude);
-        const long: i64 = @intCast(std.math.clamp(signed, std.math.minInt(i64), std.math.maxInt(i64)));
-        return @truncate(long);
-    }
-
-    /// `%N[^end]`: 1 to `max` bytes up to `end`; null when there are none.
-    fn until(scanner: *Scanner, end: u8, max: usize) ?[]const u8 {
-        const rest = scanner.text[scanner.pos..];
-        const window = rest[0..@min(rest.len, max)];
-        const len = std.mem.findScalar(u8, window, end) orelse window.len;
-        if (len == 0) return null;
-        scanner.pos += len;
-        return rest[0..len];
-    }
-};
-
 //------------------------------------------------------------------------------
 // Tests
 //------------------------------------------------------------------------------
 
 const testing = std.testing;
-
-fn testInt(text: []const u8) ?i32 {
-    var scanner: Scanner = .{ .text = text };
-    return scanner.int();
-}
-
-test "Scanner.int follows glibc %i" {
-    try testing.expectEqual(16, testInt(" 0x10"));
-    try testing.expectEqual(31, testInt("+0X1F"));
-    try testing.expectEqual(8, testInt("010"));
-    try testing.expectEqual(0, testInt("08"));
-    try testing.expectEqual(0, testInt("0x"));
-    try testing.expectEqual(-2, testInt("-0x2"));
-    try testing.expectEqual(null, testInt("-"));
-    try testing.expectEqual(null, testInt("x"));
-    try testing.expectEqual(-1, testInt("0xFFFFFFFF"));
-    try testing.expectEqual(-1, testInt("99999999999999999999"));
-}
-
-test "Scanner literals" {
-    // "0x" is consumed even without digits: the next literal starts after it
-    var scanner: Scanner = .{ .text = "id=0x x=5" };
-    try testing.expectEqual(0, scanner.intAfter("id="));
-    try testing.expectEqual(5, scanner.intAfter(" x="));
-    // A space in the format matches no whitespace too, and tabs
-    scanner = .{ .text = "a=1b=2\tc=3" };
-    try testing.expectEqual(1, scanner.intAfter("a="));
-    try testing.expectEqual(2, scanner.intAfter(" b="));
-    try testing.expectEqual(3, scanner.intAfter(" c="));
-    try testing.expectEqual(null, scanner.intAfter(" d="));
-}
 
 test Lines {
     var lines: Lines = .{ .rest = "ab\n\ncd" };

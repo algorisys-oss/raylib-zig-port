@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Scanner = @import("cscan.zig").Scanner;
 
 /// One recorded input event, laid out as raylib.h's `AutomationEvent`.
 pub const Event = extern struct {
@@ -129,57 +130,6 @@ fn scanEvent(line: []const u8, event: *Event) void {
     for (&event.params) |*param| param.* = scanner.int(.decimal) orelse return;
 }
 
-/// The part of `sscanf` raylib's format strings use: integers after optional
-/// whitespace.
-const Scanner = struct {
-    text: []const u8,
-    pos: usize,
-
-    const Base = enum {
-        /// `%d`
-        decimal,
-        /// `%i`: "0x" means hex, a leading "0" octal
-        auto,
-    };
-
-    /// The next integer, or null (and nothing consumed) if there is none.
-    /// As in glibc: the value is read as a C `long`, saturating on overflow,
-    /// then truncated to 32 bits; "0x" without hex digits reads as 0.
-    fn int(scanner: *Scanner, base_kind: Base) ?i32 {
-        var i = scanner.pos;
-        while (i < scanner.text.len and std.ascii.isWhitespace(scanner.text[i])) i += 1;
-
-        const negative = i < scanner.text.len and scanner.text[i] == '-';
-        if (i < scanner.text.len and (scanner.text[i] == '-' or scanner.text[i] == '+')) i += 1;
-
-        var base: u8 = 10;
-        var matched = false;
-        if (base_kind == .auto and i < scanner.text.len and scanner.text[i] == '0') {
-            i += 1;
-            matched = true;
-            base = 8;
-            if (i < scanner.text.len and std.ascii.toLower(scanner.text[i]) == 'x') {
-                i += 1;
-                base = 16;
-            }
-        }
-
-        const limit: u128 = 1 << 64; // beyond any C long: saturated anyway
-        var magnitude: u128 = 0;
-        while (i < scanner.text.len) : (i += 1) {
-            const digit = std.fmt.charToDigit(scanner.text[i], base) catch break;
-            if (magnitude < limit) magnitude = magnitude * base + digit;
-            matched = true;
-        }
-        if (!matched) return null;
-
-        scanner.pos = i;
-        const signed: i128 = if (negative) -@as(i128, @intCast(magnitude)) else @intCast(magnitude);
-        const long: i64 = @intCast(std.math.clamp(signed, std.math.minInt(i64), std.math.maxInt(i64)));
-        return @truncate(long);
-    }
-};
-
 //------------------------------------------------------------------------------
 // Writing
 //------------------------------------------------------------------------------
@@ -233,31 +183,6 @@ fn typeName(event_type: u32) []const u8 {
 //------------------------------------------------------------------------------
 
 const testing = std.testing;
-
-fn testInt(text: []const u8, base: Scanner.Base) ?i32 {
-    var scanner: Scanner = .{ .text = text, .pos = 0 };
-    return scanner.int(base);
-}
-
-test "Scanner.int follows glibc" {
-    try testing.expectEqual(16, testInt(" 0x10", .auto));
-    try testing.expectEqual(31, testInt("0X1F", .auto));
-    try testing.expectEqual(8, testInt("010", .auto));
-    try testing.expectEqual(0, testInt("09", .auto));
-    try testing.expectEqual(0, testInt("0x", .auto));
-    try testing.expectEqual(0, testInt("0xg", .auto));
-    try testing.expectEqual(-2, testInt("-0x2", .auto));
-    try testing.expectEqual(4, testInt("+4", .auto));
-    try testing.expectEqual(null, testInt("-", .auto));
-    try testing.expectEqual(null, testInt("x", .auto));
-    try testing.expectEqual(10, testInt("010", .decimal));
-    try testing.expectEqual(0, testInt("0x10", .decimal));
-    // Wider than 32 bits: truncated; wider than a C long: saturated first.
-    try testing.expectEqual(1215752191, testInt("99999999999", .decimal));
-    try testing.expectEqual(-1, testInt("0xFFFFFFFF", .auto));
-    try testing.expectEqual(-1, testInt("99999999999999999999", .decimal));
-    try testing.expectEqual(0, testInt("-99999999999999999999", .decimal));
-}
 
 test "Lines reads like fgets" {
     var buf: [line_capacity + 1]u8 = @splat(0);
