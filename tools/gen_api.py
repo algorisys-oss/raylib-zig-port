@@ -115,6 +115,13 @@ NULLABLE_STRINGS = {
     ("LoadShaderFromMemory", "vsCode"), ("LoadShaderFromMemory", "fsCode"),
 }
 
+# `T *p, int count` slice params that raylib documents as accepting NULL
+# (-> `?[]const T`; null passes NULL, 0). For fonts, NULL codepoints means
+# "the default set": an empty non-NULL slice would make raylib read garbage.
+NULLABLE_SLICES = {
+    ("LoadFontEx", "codepoints"), ("LoadFontFromMemory", "codepoints"),
+}
+
 # `const char *` returns that can be NULL.
 NULLABLE_STRING_RETURNS = {"GetClipboardText", "GetGamepadName", "GetKeyName"}
 
@@ -154,7 +161,7 @@ OVERRIDES = {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -172,7 +179,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -410,8 +417,9 @@ pub fn loadFontData(fileData: []const u8, fontSize: i32, codepoints: ?[]const i3
 ''',
     "GenImageFontAtlas": '''
 /// Generate image font atlas using chars info. `glyphRecs` receives a
-/// raylib-allocated rectangle array (free with `memFree`).
-pub fn genImageFontAtlas(glyphs: []const GlyphInfo, glyphRecs: *[*]Rectangle, fontSize: i32, padding: i32, packMethod: i32) Image {
+/// raylib-allocated rectangle array (typically `&font.recs`; freed by `unloadFont`,
+/// or with `memFree`).
+pub fn genImageFontAtlas(glyphs: []const GlyphInfo, glyphRecs: *?[*]Rectangle, fontSize: i32, padding: i32, packMethod: i32) Image {
     return c.GenImageFontAtlas(glyphs.ptr, @ptrCast(glyphRecs), @intCast(glyphs.len), fontSize, padding, packMethod);
 }
 ''',
@@ -791,14 +799,20 @@ class Gen:
                 elem = "u8" if p.base == "void" else self.api_scalar(p.base)
                 if p.base == "char":
                     raise ValueError("char slice")
-                sig.append(f"{pn}: []{'const ' if p.is_const else ''}{elem}")
-                ptr = f"{pn}.ptr"
+                nullable = (fname, p.name) in NULLABLE_SLICES
+                sig.append(f"{pn}: {'?' if nullable else ''}[]{'const ' if p.is_const else ''}{elem}")
+                src = "s" if nullable else pn
+                ptr = f"{src}.ptr"
                 if p.base == "void":
-                    ptr = f"@ptrCast({pn}.ptr)"
+                    ptr = f"@ptrCast({src}.ptr)"
                 elif p.base in C_SCALARS and C_SCALARS[p.base][0] != elem:
-                    ptr = f"@ptrCast({pn}.ptr)"
-                call.append(ptr)
-                call.append(f"@intCast({pn}.len)")
+                    ptr = f"@ptrCast({src}.ptr)"
+                if nullable:
+                    call.append(f"if ({pn}) |s| {ptr} else null")
+                    call.append(f"if ({pn}) |s| @intCast(s.len) else 0")
+                else:
+                    call.append(ptr)
+                    call.append(f"@intCast({pn}.len)")
                 i += 2
                 continue
             elif p.stars == 1 and p.base in self.struct_names:
@@ -892,6 +906,12 @@ class Gen:
         z = self.api_scalar(base) if base in C_SCALARS else base
         if base in C_SCALARS:
             z = {"int": "c_int", "unsigned int": "c_uint"}.get(base, z)
+        if base == "char" and stars:
+            # Plain `char *` fields are NUL-terminated strings (FilePathList.paths).
+            t = "[*:0]u8"
+            for _ in range(stars - 1):
+                t = f"[*]{t}"
+            return f"?{t}"
         if stars == 0:
             return f"[{array}]{z}" if array else z
         t = z

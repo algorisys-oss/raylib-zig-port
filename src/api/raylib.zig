@@ -302,7 +302,7 @@ pub const VrStereoConfig = extern struct {
 
 pub const FilePathList = extern struct {
     count: c_uint,
-    paths: ?[*]?[*]u8,
+    paths: ?[*][*:0]u8,
 };
 
 pub const AutomationEvent = extern struct {
@@ -1282,7 +1282,7 @@ pub fn setTraceLogLevel(logLevel: TraceLogLevel) void {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -2913,8 +2913,8 @@ pub fn loadFont(fileName: [:0]const u8) error{LoadFailed}!Font {
 }
 
 /// Load font from file with defined codepoints and generation size, use NULL for codepoints and 0 for codepointCount to load the default character set, font size is provided in pixels height
-pub fn loadFontEx(fileName: [:0]const u8, fontSize: i32, codepoints: []const i32) error{LoadFailed}!Font {
-    const result = c.LoadFontEx(fileName.ptr, fontSize, @ptrCast(codepoints.ptr), @intCast(codepoints.len));
+pub fn loadFontEx(fileName: [:0]const u8, fontSize: i32, codepoints: ?[]const i32) error{LoadFailed}!Font {
+    const result = c.LoadFontEx(fileName.ptr, fontSize, if (codepoints) |s| @ptrCast(s.ptr) else null, if (codepoints) |s| @intCast(s.len) else 0);
     if (!c.IsFontValid(result)) return error.LoadFailed;
     return result;
 }
@@ -2927,8 +2927,8 @@ pub fn loadFontFromImage(image: Image, key: Color, firstChar: i32) error{LoadFai
 }
 
 /// Load font from memory buffer, fileType refers to extension: i.e. '.ttf'
-pub fn loadFontFromMemory(fileType: [:0]const u8, fileData: []const u8, fontSize: i32, codepoints: []const i32) error{LoadFailed}!Font {
-    const result = c.LoadFontFromMemory(fileType.ptr, fileData.ptr, @intCast(fileData.len), fontSize, @ptrCast(codepoints.ptr), @intCast(codepoints.len));
+pub fn loadFontFromMemory(fileType: [:0]const u8, fileData: []const u8, fontSize: i32, codepoints: ?[]const i32) error{LoadFailed}!Font {
+    const result = c.LoadFontFromMemory(fileType.ptr, fileData.ptr, @intCast(fileData.len), fontSize, if (codepoints) |s| @ptrCast(s.ptr) else null, if (codepoints) |s| @intCast(s.len) else 0);
     if (!c.IsFontValid(result)) return error.LoadFailed;
     return result;
 }
@@ -2948,8 +2948,9 @@ pub fn loadFontData(fileData: []const u8, fontSize: i32, codepoints: ?[]const i3
 }
 
 /// Generate image font atlas using chars info. `glyphRecs` receives a
-/// raylib-allocated rectangle array (free with `memFree`).
-pub fn genImageFontAtlas(glyphs: []const GlyphInfo, glyphRecs: *[*]Rectangle, fontSize: i32, padding: i32, packMethod: i32) Image {
+/// raylib-allocated rectangle array (typically `&font.recs`; freed by `unloadFont`,
+/// or with `memFree`).
+pub fn genImageFontAtlas(glyphs: []const GlyphInfo, glyphRecs: *?[*]Rectangle, fontSize: i32, padding: i32, packMethod: i32) Image {
     return c.GenImageFontAtlas(glyphs.ptr, @ptrCast(glyphRecs), @intCast(glyphs.len), fontSize, padding, packMethod);
 }
 
@@ -3129,7 +3130,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
