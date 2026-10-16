@@ -1,4 +1,31 @@
-# Review response: from "C with Zig keywords" to idiomatic Zig
+# raylib-zig: migration status
+
+Status as of 2026-10-16.
+
+## Where the migration stands
+
+- **All raylib-authored code is Zig.** The 6 modules (rcore, rshapes,
+  rtextures, rtext, rmodels, raudio), the 4 header-only modules (raymath,
+  rlgl, rcamera, rgestures) and the desktop GLFW and web platform backends.
+  Vendored third-party libraries in `src/external` stay linked C by design.
+- **Tracking raylib 6.2**, with the same C ABI: unmodified raylib programs
+  compile against `raylib.h`, link against the Zig library and render the
+  same bytes. All 217 runnable upstream examples pixel-match C, in Debug and
+  ReleaseFast.
+- **The internals are idiomatic Zig** (round 2, this document): C shapes
+  only at the `export fn` edge; slices, error unions, `std.Io`, `Allocator`
+  and `defer` behind it.
+- **An idiomatic Zig API** (`@import("raylib")`) sits on top: 226 of the 227
+  upstream examples are translated to it, and 217 of those are gated against
+  C ([zig-api.md](zig-api.md)).
+- **Web target in progress**: 46 examples gated in the browser
+  ([web.md](web.md)).
+
+The rest of this document covers round 2: why it happened, what changed,
+what is still C and why, and how behaviour was kept identical. Code-level
+lessons with before/after snippets are in [idioms.md](idioms.md).
+
+## Why round 2 happened
 
 On 2026-10-16 an external reviewer read the port and wrote, in short:
 
@@ -8,12 +35,9 @@ On 2026-10-16 an external reviewer read the port and wrote, in short:
 > code written with Zig keywords, not Zig code. … you might just learn bad
 > habits from this codebase.
 
-They were right. This document records what we found, what we changed, how
-we kept behaviour identical while changing it, and what is still C on
-purpose. The code-level lessons, with before/after snippets, are in
-[idioms.md](idioms.md).
+They were right.
 
-## What the review found
+### What the review found
 
 The port was correct, but correct the wrong way. Every gate compared C and
 Zig output byte for byte and passed, yet the modules that handle files,
@@ -176,7 +200,7 @@ reads undefined memory, are listed in [compatibility.md](compatibility.md) §5.
 - Run `python3 tools/idiomaudit.py` before committing. If a count goes up,
   the change brought back a C idiom.
 
-## Reply sent to the reviewer
+## Appendix: reply to the reviewer
 
 > Thanks again for the review. You were right, and it's fixed now: every
 > module, not just the bits you quoted.
