@@ -2,9 +2,12 @@
 //!
 //! Zig port of raylib's `rtextures.c`. Every public raylib texture/image function is
 //! exported with its exact C name, byte-compatible signature, and C calling convention,
-//! so the rest of raylib (still C) links against it unchanged. Floating-point operation
-//! order matches the C source exactly to keep pixel output bit-identical, and libc/libm
-//! functions are called via extern declarations rather than `std.math`.
+//! so the rest of raylib links against it unchanged. Floating-point operation order
+//! matches the C source exactly to keep pixel output bit-identical, and libm is called
+//! rather than reimplemented. Pixel buffers handed to C (Image.data, LoadImageColors,
+//! LoadImagePalette...) live on the C heap through `cmem`; scratch buffers use
+//! `std.heap.c_allocator`. Half floats and ExportImageAsCode's text are built by the
+//! std-only `rtextures_encode.zig`.
 //!
 //! This build mirrors raylib's default `config.h`: enabled formats are PNG, BMP, GIF,
 //! QOI, DDS; image export (PNG/QOI/BMP) and procedural image generation are enabled.
@@ -14,46 +17,28 @@
 //! and only `extern`-declared and called here.
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const c_allocator = std.heap.c_allocator;
+const cmem = @import("cmem.zig");
+const encode = @import("rtextures_encode.zig");
 
 //----------------------------------------------------------------------------------
-// libc / libm functions, called directly so results are bit-identical to the C source.
+// libm, called rather than reimplemented so results stay bit-identical to C
+// (CLAUDE.md, "Float bit-exactness"). fabsf/floorf/ceilf/sqrtf/round are the
+// @abs/@floor/@ceil/@sqrt/@round builtins, which are exact.
 //----------------------------------------------------------------------------------
-extern fn malloc(usize) ?*anyopaque;
-extern fn calloc(usize, usize) ?*anyopaque;
-extern fn realloc(?*anyopaque, usize) ?*anyopaque;
-extern fn free(?*anyopaque) void;
-extern fn memcpy(noalias ?*anyopaque, noalias ?*const anyopaque, usize) ?*anyopaque;
-extern fn memset(?*anyopaque, c_int, usize) ?*anyopaque;
-extern fn strcmp([*c]const u8, [*c]const u8) c_int;
-extern fn strlen([*c]const u8) usize;
-extern fn strncpy(noalias [*c]u8, noalias [*c]const u8, usize) [*c]u8;
-extern fn sprintf(noalias [*c]u8, noalias [*c]const u8, ...) c_int;
-
 extern fn sinf(f32) f32;
 extern fn cosf(f32) f32;
-extern fn sqrtf(f32) f32;
 extern fn powf(f32, f32) f32;
-extern fn ceilf(f32) f32;
-extern fn floorf(f32) f32;
 extern fn logf(f32) f32;
-extern fn fabsf(f32) f32;
 extern fn fminf(f32, f32) f32;
 extern fn fmaxf(f32, f32) f32;
 extern fn fmodf(f32, f32) f32;
 extern fn hypotf(f32, f32) f32;
-// Double-precision libm (used verbatim where the C source used the non-f variants)
-extern fn round(f64) f64;
-extern fn pow(f64, f64) f64;
+// Double precision, where the C source calls the non-f variants
 extern fn fmin(f64, f64) f64;
 extern fn fmax(f64, f64) f64;
 extern fn hypot(f64, f64) f64;
-
-// raylib RL_MALLOC/RL_CALLOC/RL_FREE/RL_REALLOC map to malloc/calloc/free/realloc.
-const RL_MALLOC = malloc;
-const RL_CALLOC = calloc;
-inline fn RL_FREE(p: anytype) void {
-    free(@ptrCast(@constCast(p)));
-}
 
 const NAN: f32 = std.math.nan(f32);
 
@@ -61,12 +46,12 @@ const NAN: f32 = std.math.nan(f32);
 // Cross-module raylib C symbols (still C in this build) - extern declared and called.
 //----------------------------------------------------------------------------------
 extern fn TraceLog(logLevel: c_int, text: [*c]const u8, ...) void;
-extern fn LoadFileData(fileName: [*c]const u8, dataSize: [*c]c_int) [*c]u8;
+extern fn LoadFileData(fileName: [*c]const u8, dataSize: *c_int) ?[*]u8;
 extern fn SaveFileData(fileName: [*c]const u8, data: ?*const anyopaque, dataSize: c_int) bool;
-extern fn UnloadFileData(data: [*c]u8) void;
-extern fn SaveFileText(fileName: [*c]const u8, text: [*c]u8) bool;
-extern fn GetFileExtension(fileName: [*c]const u8) [*c]const u8;
-extern fn GetFileNameWithoutExt(filePath: [*c]const u8) [*c]const u8;
+extern fn UnloadFileData(data: ?[*]u8) void;
+extern fn SaveFileText(fileName: [*c]const u8, text: [*:0]const u8) bool;
+extern fn GetFileExtension(fileName: [*c]const u8) ?[*:0]const u8;
+extern fn GetFileNameWithoutExt(filePath: [*c]const u8) [*:0]const u8;
 extern fn IsFileExtension(fileName: [*c]const u8, ext: [*c]const u8) bool;
 extern fn GetRandomValue(min: c_int, max: c_int) c_int;
 extern fn GetRenderWidth() c_int;
@@ -77,7 +62,7 @@ extern fn LoadFontDefault() void;
 extern fn GetFontDefault() Font;
 extern fn GetGlyphIndex(font: Font, codepoint: c_int) c_int;
 extern fn MeasureTextEx(font: Font, text: [*c]const u8, fontSize: f32, spacing: f32) Vector2;
-extern fn GetCodepointNext(text: [*c]const u8, codepointSize: [*c]c_int) c_int;
+extern fn GetCodepointNext(text: [*:0]const u8, codepointSize: *c_int) c_int;
 
 //----------------------------------------------------------------------------------
 // rlgl functions, provided by other translation units in the build.
@@ -87,11 +72,11 @@ extern fn rlLoadTextureDepth(width: c_int, height: c_int, useRenderBuffer: bool)
 extern fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_int, mipmapCount: c_int) c_uint;
 extern fn rlUpdateTexture(id: c_uint, offsetX: c_int, offsetY: c_int, width: c_int, height: c_int, format: c_int, data: ?*const anyopaque) void;
 extern fn rlUnloadTexture(id: c_uint) void;
-extern fn rlGetPixelFormatName(format: c_uint) [*c]const u8;
+extern fn rlGetPixelFormatName(format: c_uint) [*:0]const u8;
 extern fn rlTextureParameters(id: c_uint, param: c_int, value: c_int) void;
-extern fn rlGenTextureMipmaps(id: c_uint, width: c_int, height: c_int, format: c_int, mipmaps: [*c]c_int) void;
+extern fn rlGenTextureMipmaps(id: c_uint, width: c_int, height: c_int, format: c_int, mipmaps: *c_int) void;
 extern fn rlReadTexturePixels(id: c_uint, width: c_int, height: c_int, format: c_int) ?*anyopaque;
-extern fn rlReadScreenPixels(width: c_int, height: c_int) [*c]u8;
+extern fn rlReadScreenPixels(width: c_int, height: c_int) ?[*]u8;
 extern fn rlLoadFramebuffer() c_uint;
 extern fn rlFramebufferAttach(id: c_uint, texId: c_uint, attachType: c_int, texType: c_int, mipLevel: c_int) void;
 extern fn rlFramebufferComplete(id: c_uint) bool;
@@ -113,21 +98,21 @@ extern fn rlRotatef(angle: f32, x: f32, y: f32, z: f32) void;
 //----------------------------------------------------------------------------------
 // Third-party single-file-lib functions (provided by src/c/rtextures_stb_impl.c).
 //----------------------------------------------------------------------------------
-extern fn stbi_load_from_memory(buffer: [*c]const u8, len: c_int, x: [*c]c_int, y: [*c]c_int, channels_in_file: [*c]c_int, desired_channels: c_int) [*c]u8;
-extern fn stbi_load_gif_from_memory(buffer: [*c]const u8, len: c_int, delays: [*c][*c]c_int, x: [*c]c_int, y: [*c]c_int, z: [*c]c_int, comp: [*c]c_int, req_comp: c_int) [*c]u8;
-extern fn stbi_write_png_to_mem(pixels: [*c]const u8, stride_bytes: c_int, x: c_int, y: c_int, n: c_int, out_len: [*c]c_int) [*c]u8;
+extern fn stbi_load_from_memory(buffer: [*]const u8, len: c_int, x: *c_int, y: *c_int, channels_in_file: *c_int, desired_channels: c_int) ?*anyopaque;
+extern fn stbi_load_gif_from_memory(buffer: [*]const u8, len: c_int, delays: *?[*]c_int, x: *c_int, y: *c_int, z: *c_int, comp: *c_int, req_comp: c_int) ?*anyopaque;
+extern fn stbi_write_png_to_mem(pixels: ?[*]const u8, stride_bytes: c_int, x: c_int, y: c_int, n: c_int, out_len: *c_int) ?[*]u8;
 extern fn stbi_write_bmp(filename: [*c]const u8, w: c_int, h: c_int, comp: c_int, data: ?*const anyopaque) c_int;
-extern fn stbir_resize_uint8_linear(input_pixels: [*c]const u8, input_w: c_int, input_h: c_int, input_stride_in_bytes: c_int, output_pixels: [*c]u8, output_w: c_int, output_h: c_int, output_stride_in_bytes: c_int, pixel_layout: c_int) [*c]u8;
-extern fn qoi_decode(data: ?*const anyopaque, size: c_int, desc: [*c]qoi_desc, channels: c_int) ?*anyopaque;
-extern fn qoi_write(filename: [*c]const u8, data: ?*const anyopaque, desc: [*c]const qoi_desc) c_int;
+extern fn stbir_resize_uint8_linear(input_pixels: ?[*]const u8, input_w: c_int, input_h: c_int, input_stride_in_bytes: c_int, output_pixels: [*]u8, output_w: c_int, output_h: c_int, output_stride_in_bytes: c_int, pixel_layout: c_int) ?[*]u8;
+extern fn qoi_decode(data: *const anyopaque, size: c_int, desc: *qoi_desc, channels: c_int) ?*anyopaque;
+extern fn qoi_write(filename: [*c]const u8, data: ?*const anyopaque, desc: *const qoi_desc) c_int;
 extern fn stb_perlin_fbm_noise3(x: f32, y: f32, z: f32, lacunarity: f32, gain: f32, octaves: c_int) f32;
-extern fn rl_load_dds_from_memory(file_data: [*c]const u8, file_size: c_uint, width: [*c]c_int, height: [*c]c_int, format: [*c]c_int, mips: [*c]c_int) ?*anyopaque;
+extern fn rl_load_dds_from_memory(file_data: [*]const u8, file_size: c_uint, width: *c_int, height: *c_int, format: *c_int, mips: *c_int) ?*anyopaque;
 
 const qoi_desc = extern struct {
-    width: c_uint,
-    height: c_uint,
-    channels: u8,
-    colorspace: u8,
+    width: c_uint = 0,
+    height: c_uint = 0,
+    channels: u8 = 0,
+    colorspace: u8 = 0,
 };
 
 //----------------------------------------------------------------------------------
@@ -267,27 +252,27 @@ pub const Rectangle = extern struct {
 };
 
 pub const Image = extern struct {
-    data: ?*anyopaque,
-    width: c_int,
-    height: c_int,
-    mipmaps: c_int,
-    format: c_int,
+    data: ?*anyopaque = null,
+    width: c_int = 0,
+    height: c_int = 0,
+    mipmaps: c_int = 0,
+    format: c_int = 0,
 };
 
 pub const Texture = extern struct {
-    id: c_uint,
-    width: c_int,
-    height: c_int,
-    mipmaps: c_int,
-    format: c_int,
+    id: c_uint = 0,
+    width: c_int = 0,
+    height: c_int = 0,
+    mipmaps: c_int = 0,
+    format: c_int = 0,
 };
 pub const Texture2D = Texture;
 pub const TextureCubemap = Texture;
 
 pub const RenderTexture = extern struct {
-    id: c_uint,
-    texture: Texture,
-    depth: Texture,
+    id: c_uint = 0,
+    texture: Texture = .{},
+    depth: Texture = .{},
 };
 pub const RenderTexture2D = RenderTexture;
 
@@ -338,165 +323,334 @@ inline fn f(v: anytype) f32 {
     return @floatFromInt(v);
 }
 
-// C `MIN(a,b)` macro for ints.
-inline fn MINi(a: c_int, b: c_int) c_int {
-    return if (a < b) a else b;
+//----------------------------------------------------------------------------------
+// Memory and C-string helpers
+//----------------------------------------------------------------------------------
+/// `count` zeroed items on the C heap, for a buffer a raylib caller (or
+/// UnloadImage) releases with free. Null for a negative count, or when out of
+/// memory.
+fn allocC(comptime T: type, count: c_int) ?[]T {
+    const n = std.math.cast(usize, count) orelse return null;
+    return cmem.alloc(T, n) catch null;
 }
 
-// C `abs()` for c_int.
-inline fn absi(v: c_int) c_int {
-    return if (v < 0) -v else v;
+/// Whether `fileType` is exactly one of `exts`: raylib compares with strcmp,
+/// so ".png" and ".PNG" match and ".Png" does not.
+fn isFileType(fileType: [*:0]const u8, exts: []const []const u8) bool {
+    const t = std.mem.span(fileType);
+    for (exts) |ext| {
+        if (std.mem.eql(u8, t, ext)) return true;
+    }
+    return false;
 }
 
-// C-style pointer arithmetic: ptr + (signed) element offset.
-inline fn ptrAdd(ptr: anytype, offset: c_int) @TypeOf(ptr) {
-    const Elem = @typeInfo(@TypeOf(ptr)).pointer.child;
-    const base = @intFromPtr(ptr);
-    const delta: isize = @as(isize, offset) * @as(isize, @sizeOf(Elem));
-    return @ptrFromInt(@as(usize, @bitCast(@as(isize, @bitCast(base)) +% delta)));
+/// raylib's `width*height` pixel count.
+fn pixelCount(image: Image) usize {
+    return @intCast(image.width * image.height);
+}
+
+/// The first `len` bytes at `data`.
+fn bytesAt(data: ?*anyopaque, len: c_int) []u8 {
+    const ptr: [*]u8 = @ptrCast(data orelse return &.{});
+    return ptr[0..@intCast(len)];
+}
+
+/// Replaces an image's pixels with `pixels` (R8G8B8A8, which it takes over)
+/// and converts them back to the image's format: the common tail of the
+/// image operations that work on colors.
+fn setColorsKeepFormat(image: *Image, pixels: []Color) void {
+    const format = image.format;
+    cmem.free(image.data);
+    image.data = pixels.ptr;
+    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    ImageFormat(image, format);
 }
 
 //----------------------------------------------------------------------------------
-// Module Internal Functions Definition
+// Pixel codecs: one pixel of an uncompressed format, to and from Color/Vector4
 //----------------------------------------------------------------------------------
-// Convert half-float (stored as unsigned short) to float
-fn HalfToFloat(x: u16) f32 {
-    const e: c_uint = (@as(c_uint, x) & 0x7c00) >> 10; // Exponent
-    const m: c_uint = (@as(c_uint, x) & 0x03ff) << 13; // Mantissa
-    const fm: f32 = @floatFromInt(m);
-    const v: c_uint = @as(c_uint, @bitCast(fm)) >> 23; // log2 bit hack to count leading zeros
-    const sign: c_uint = (@as(c_uint, x) & 0x8000) << 16;
-    const norm: c_uint = @intFromBool(e != 0) * (((e + 112) << 23) | m);
-    const denorm: c_uint = (@intFromBool(e == 0) & @intFromBool(m != 0)) *
-        (((v - 37) << 23) | ((m << @intCast(150 - v)) & 0x007fe000));
-    const ui: c_uint = sign | norm | denorm;
-    return @bitCast(ui);
+/// Bytes per pixel of an uncompressed format; 0 for any other format.
+fn bytesPerPixel(format: c_int) usize {
+    return switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => 1,
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA,
+        PIXELFORMAT_UNCOMPRESSED_R5G6B5,
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1,
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4,
+        PIXELFORMAT_UNCOMPRESSED_R16,
+        => 2,
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => 3,
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, PIXELFORMAT_UNCOMPRESSED_R32 => 4,
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => 6,
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => 8,
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => 12,
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => 16,
+        else => 0,
+    };
 }
 
-// Convert float to half-float (stored as unsigned short)
-fn FloatToHalf(x: f32) u16 {
-    const b: c_uint = @as(c_uint, @bitCast(x)) +% 0x00001000; // Round-to-nearest-even
-    const e: c_uint = (b & 0x7f800000) >> 23; // Exponent
-    const m: c_uint = b & 0x007fffff; // Mantissa
-    const sign: c_uint = (b & 0x80000000) >> 16;
-    const norm: c_uint = @intFromBool(e > 112) * ((((e - 112) << 10) & 0x7c00) | (m >> 13));
-    const denorm: c_uint = (@intFromBool(e < 113) & @intFromBool(e > 101)) *
-        ((((0x007ff000 + m) >> @intCast(125 - e)) + 1) >> 1);
-    const sat: c_uint = @as(c_uint, @intFromBool(e > 143)) * 0x7fff;
-    return @truncate(sign | norm | denorm | sat);
+// Typed views of one pixel. Each codec takes them only in the format arms
+// that use them: a 1-byte format can sit at an odd address, where an eager
+// @alignCast traps (CLAUDE.md, "Casts C performs freely must stay lazy").
+fn u16s(ptr: [*]const u8) [*]const u16 {
+    return @ptrCast(@alignCast(ptr));
+}
+fn f32s(ptr: [*]const u8) [*]const f32 {
+    return @ptrCast(@alignCast(ptr));
+}
+fn u16sOut(ptr: [*]u8) [*]u16 {
+    return @ptrCast(@alignCast(ptr));
+}
+fn f32sOut(ptr: [*]u8) [*]f32 {
+    return @ptrCast(@alignCast(ptr));
 }
 
-// Get pixel data from image as Vector4 array (float normalized)
-fn LoadImageDataNormalized(image: Image) [*c]Vector4 {
-    const pixels: [*c]Vector4 = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.width * image.height * @as(c_int, @sizeOf(Vector4))))));
+/// One pixel as normalized floats, as LoadImageDataNormalized decodes it;
+/// null for a format it does not decode.
+fn readNormalized(src: [*]const u8, format: c_int) ?Vector4 {
+    return switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => .{ .x = f(src[0]) / 255.0, .y = f(src[0]) / 255.0, .z = f(src[0]) / 255.0, .w = 1.0 },
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => .{ .x = f(src[0]) / 255.0, .y = f(src[0]) / 255.0, .z = f(src[0]) / 255.0, .w = f(src[1]) / 255.0 },
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => blk: {
+            const pixel = u16s(src)[0];
+            break :blk .{
+                .x = f((pixel & 0b1111100000000000) >> 11) * (1.0 / 31.0),
+                .y = f((pixel & 0b0000011111000000) >> 6) * (1.0 / 31.0),
+                .z = f((pixel & 0b0000000000111110) >> 1) * (1.0 / 31.0),
+                .w = if ((pixel & 0b0000000000000001) == 0) 0.0 else 1.0,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => blk: {
+            const pixel = u16s(src)[0];
+            break :blk .{
+                .x = f((pixel & 0b1111100000000000) >> 11) * (1.0 / 31.0),
+                .y = f((pixel & 0b0000011111100000) >> 5) * (1.0 / 63.0),
+                .z = f(pixel & 0b0000000000011111) * (1.0 / 31.0),
+                .w = 1.0,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => blk: {
+            const pixel = u16s(src)[0];
+            break :blk .{
+                .x = f((pixel & 0b1111000000000000) >> 12) * (1.0 / 15.0),
+                .y = f((pixel & 0b0000111100000000) >> 8) * (1.0 / 15.0),
+                .z = f((pixel & 0b0000000011110000) >> 4) * (1.0 / 15.0),
+                .w = f(pixel & 0b0000000000001111) * (1.0 / 15.0),
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => .{ .x = f(src[0]) / 255.0, .y = f(src[1]) / 255.0, .z = f(src[2]) / 255.0, .w = f(src[3]) / 255.0 },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => .{ .x = f(src[0]) / 255.0, .y = f(src[1]) / 255.0, .z = f(src[2]) / 255.0, .w = 1.0 },
+        PIXELFORMAT_UNCOMPRESSED_R32 => .{ .x = f32s(src)[0], .y = 0.0, .z = 0.0, .w = 1.0 },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => .{ .x = f32s(src)[0], .y = f32s(src)[1], .z = f32s(src)[2], .w = 1.0 },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => .{ .x = f32s(src)[0], .y = f32s(src)[1], .z = f32s(src)[2], .w = f32s(src)[3] },
+        PIXELFORMAT_UNCOMPRESSED_R16 => .{ .x = encode.halfToFloat(u16s(src)[0]), .y = 0.0, .z = 0.0, .w = 1.0 },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => .{
+            .x = encode.halfToFloat(u16s(src)[0]),
+            .y = encode.halfToFloat(u16s(src)[1]),
+            .z = encode.halfToFloat(u16s(src)[2]),
+            .w = 1.0,
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => .{
+            .x = encode.halfToFloat(u16s(src)[0]),
+            .y = encode.halfToFloat(u16s(src)[1]),
+            .z = encode.halfToFloat(u16s(src)[2]),
+            .w = encode.halfToFloat(u16s(src)[3]),
+        },
+        else => null,
+    };
+}
+
+/// Gray as raylib weighs it: ITU-R BT.601 luma.
+fn luma(p: Vector4) f32 {
+    return p.x * 0.299 + p.y * 0.587 + p.z * 0.114;
+}
+
+/// Writes one pixel from normalized floats, as ImageFormat encodes it.
+fn writeNormalized(dst: [*]u8, p: Vector4, format: c_int) void {
+    switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => dst[0] = tuc(luma(p) * 255.0),
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
+            dst[0] = tuc(luma(p) * 255.0);
+            dst[1] = tuc(p.w * 255.0);
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
+            const r: u16 = tuc(@round(p.x * 31.0));
+            const g: u16 = tuc(@round(p.y * 63.0));
+            const b: u16 = tuc(@round(p.z * 31.0));
+            u16sOut(dst)[0] = (r << 11) | (g << 5) | b;
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
+            dst[0] = tuc(p.x * 255.0);
+            dst[1] = tuc(p.y * 255.0);
+            dst[2] = tuc(p.z * 255.0);
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
+            const r: u16 = tuc(@round(p.x * 31.0));
+            const g: u16 = tuc(@round(p.y * 31.0));
+            const b: u16 = tuc(@round(p.z * 31.0));
+            const a: u16 = if (p.w > (f(PIXELFORMAT_UNCOMPRESSED_R5G5B5A1_ALPHA_THRESHOLD) / 255.0)) 1 else 0;
+            u16sOut(dst)[0] = (r << 11) | (g << 6) | (b << 1) | a;
+        },
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
+            const r: u16 = tuc(@round(p.x * 15.0));
+            const g: u16 = tuc(@round(p.y * 15.0));
+            const b: u16 = tuc(@round(p.z * 15.0));
+            const a: u16 = tuc(@round(p.w * 15.0));
+            u16sOut(dst)[0] = (r << 12) | (g << 8) | (b << 4) | a;
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
+            dst[0] = tuc(p.x * 255.0);
+            dst[1] = tuc(p.y * 255.0);
+            dst[2] = tuc(p.z * 255.0);
+            dst[3] = tuc(p.w * 255.0);
+        },
+        PIXELFORMAT_UNCOMPRESSED_R32 => f32sOut(dst)[0] = luma(p),
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => f32sOut(dst)[0..3].* = .{ p.x, p.y, p.z },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => f32sOut(dst)[0..4].* = .{ p.x, p.y, p.z, p.w },
+        PIXELFORMAT_UNCOMPRESSED_R16 => u16sOut(dst)[0] = encode.floatToHalf(luma(p)),
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => u16sOut(dst)[0..3].* = .{
+            encode.floatToHalf(p.x),
+            encode.floatToHalf(p.y),
+            encode.floatToHalf(p.z),
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => u16sOut(dst)[0..4].* = .{
+            encode.floatToHalf(p.x),
+            encode.floatToHalf(p.y),
+            encode.floatToHalf(p.z),
+            encode.floatToHalf(p.w),
+        },
+        else => {},
+    }
+}
+
+/// `color` as normalized floats.
+fn toNormalized(color: Color) Vector4 {
+    return .{ .x = f(color.r) / 255.0, .y = f(color.g) / 255.0, .z = f(color.b) / 255.0, .w = f(color.a) / 255.0 };
+}
+
+/// Writes one pixel from a Color, as ImageDrawPixel does: 8-bit channels are
+/// stored as they are, everything else goes through the normalized encoder.
+fn writeColor(dst: [*]u8, color: Color, format: c_int) void {
+    switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
+            dst[0] = tuc(luma(toNormalized(color)) * 255.0);
+            dst[1] = color.a;
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => dst[0..3].* = .{ color.r, color.g, color.b },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => dst[0..4].* = .{ color.r, color.g, color.b, color.a },
+        else => writeNormalized(dst, toNormalized(color), format),
+    }
+}
+
+/// One pixel as a Color, as LoadImageColors and GetImageColor decode it; null
+/// for a format they do not decode.
+fn readColor(src: [*]const u8, format: c_int) ?Color {
+    // NOTE: raylib scales 5- and 6-bit channels by the integers 255/31 (8) and
+    // 255/63 (4), not by 8.23 and 4.05: white reads back as 248. Deliberate.
+    return switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => .{ .r = src[0], .g = src[0], .b = src[0], .a = 255 },
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => .{ .r = src[0], .g = src[0], .b = src[0], .a = src[1] },
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => blk: {
+            const pixel = u16s(src)[0];
+            break :blk .{
+                .r = tuc(f((pixel & 0b1111100000000000) >> 11) * @divTrunc(255, 31)),
+                .g = tuc(f((pixel & 0b0000011111000000) >> 6) * @divTrunc(255, 31)),
+                .b = tuc(f((pixel & 0b0000000000111110) >> 1) * @divTrunc(255, 31)),
+                .a = iuc((pixel & 0b0000000000000001) * 255),
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => blk: {
+            const pixel = u16s(src)[0];
+            break :blk .{
+                .r = tuc(f((pixel & 0b1111100000000000) >> 11) * @divTrunc(255, 31)),
+                .g = tuc(f((pixel & 0b0000011111100000) >> 5) * @divTrunc(255, 63)),
+                .b = tuc(f(pixel & 0b0000000000011111) * @divTrunc(255, 31)),
+                .a = 255,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => blk: {
+            const pixel = u16s(src)[0];
+            break :blk .{
+                .r = tuc(f((pixel & 0b1111000000000000) >> 12) * @divTrunc(255, 15)),
+                .g = tuc(f((pixel & 0b0000111100000000) >> 8) * @divTrunc(255, 15)),
+                .b = tuc(f((pixel & 0b0000000011110000) >> 4) * @divTrunc(255, 15)),
+                .a = tuc(f(pixel & 0b0000000000001111) * @divTrunc(255, 15)),
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => .{ .r = src[0], .g = src[1], .b = src[2], .a = src[3] },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => .{ .r = src[0], .g = src[1], .b = src[2], .a = 255 },
+        PIXELFORMAT_UNCOMPRESSED_R32 => .{ .r = tuc(f32s(src)[0] * 255.0), .g = 0, .b = 0, .a = 255 },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => .{
+            .r = tuc(f32s(src)[0] * 255.0),
+            .g = tuc(f32s(src)[1] * 255.0),
+            .b = tuc(f32s(src)[2] * 255.0),
+            .a = 255,
+        },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => .{
+            .r = tuc(f32s(src)[0] * 255.0),
+            .g = tuc(f32s(src)[1] * 255.0),
+            .b = tuc(f32s(src)[2] * 255.0),
+            .a = tuc(f32s(src)[3] * 255.0),
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16 => .{ .r = tuc(encode.halfToFloat(u16s(src)[0]) * 255.0), .g = 0, .b = 0, .a = 255 },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => .{
+            .r = tuc(encode.halfToFloat(u16s(src)[0]) * 255.0),
+            .g = tuc(encode.halfToFloat(u16s(src)[1]) * 255.0),
+            .b = tuc(encode.halfToFloat(u16s(src)[2]) * 255.0),
+            .a = 255,
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => .{
+            .r = tuc(encode.halfToFloat(u16s(src)[0]) * 255.0),
+            .g = tuc(encode.halfToFloat(u16s(src)[1]) * 255.0),
+            .b = tuc(encode.halfToFloat(u16s(src)[2]) * 255.0),
+            .a = tuc(encode.halfToFloat(u16s(src)[3]) * 255.0),
+        },
+        else => null,
+    };
+}
+
+/// The pixels of `image` as normalized floats, in scratch memory the caller
+/// frees with `gpa`. Pixels of a format it cannot decode are left undefined.
+fn loadNormalized(gpa: Allocator, image: Image) Allocator.Error![]Vector4 {
+    const pixels = try gpa.alloc(Vector4, pixelCount(image));
 
     if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
-    } else {
-        const d8: [*]const u8 = @ptrCast(image.data);
-        const d16: [*]const u16 = @ptrCast(@alignCast(image.data));
-        const d32: [*]const f32 = @ptrCast(@alignCast(image.data));
-
-        var i: usize = 0;
-        var k: usize = 0;
-        const total: usize = @intCast(image.width * image.height);
-        while (i < total) : (i += 1) {
-            switch (image.format) {
-                PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-                    pixels[i].x = @as(f32, @floatFromInt(d8[i])) / 255.0;
-                    pixels[i].y = @as(f32, @floatFromInt(d8[i])) / 255.0;
-                    pixels[i].z = @as(f32, @floatFromInt(d8[i])) / 255.0;
-                    pixels[i].w = 1.0;
-                },
-                PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-                    pixels[i].x = @as(f32, @floatFromInt(d8[k])) / 255.0;
-                    pixels[i].y = @as(f32, @floatFromInt(d8[k])) / 255.0;
-                    pixels[i].z = @as(f32, @floatFromInt(d8[k])) / 255.0;
-                    pixels[i].w = @as(f32, @floatFromInt(d8[k + 1])) / 255.0;
-                    k += 2;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-                    const pixel = d16[i];
-                    pixels[i].x = @as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (1.0 / 31.0);
-                    pixels[i].y = @as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * (1.0 / 31.0);
-                    pixels[i].z = @as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * (1.0 / 31.0);
-                    pixels[i].w = if ((pixel & 0b0000000000000001) == 0) 0.0 else 1.0;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-                    const pixel = d16[i];
-                    pixels[i].x = @as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (1.0 / 31.0);
-                    pixels[i].y = @as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * (1.0 / 63.0);
-                    pixels[i].z = @as(f32, @floatFromInt(pixel & 0b0000000000011111)) * (1.0 / 31.0);
-                    pixels[i].w = 1.0;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-                    const pixel = d16[i];
-                    pixels[i].x = @as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * (1.0 / 15.0);
-                    pixels[i].y = @as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * (1.0 / 15.0);
-                    pixels[i].z = @as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * (1.0 / 15.0);
-                    pixels[i].w = @as(f32, @floatFromInt(pixel & 0b0000000000001111)) * (1.0 / 15.0);
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-                    pixels[i].x = @as(f32, @floatFromInt(d8[k])) / 255.0;
-                    pixels[i].y = @as(f32, @floatFromInt(d8[k + 1])) / 255.0;
-                    pixels[i].z = @as(f32, @floatFromInt(d8[k + 2])) / 255.0;
-                    pixels[i].w = @as(f32, @floatFromInt(d8[k + 3])) / 255.0;
-                    k += 4;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-                    pixels[i].x = @as(f32, @floatFromInt(d8[k])) / 255.0;
-                    pixels[i].y = @as(f32, @floatFromInt(d8[k + 1])) / 255.0;
-                    pixels[i].z = @as(f32, @floatFromInt(d8[k + 2])) / 255.0;
-                    pixels[i].w = 1.0;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32 => {
-                    pixels[i].x = d32[k];
-                    pixels[i].y = 0.0;
-                    pixels[i].z = 0.0;
-                    pixels[i].w = 1.0;
-                    k += 1;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-                    pixels[i].x = d32[k];
-                    pixels[i].y = d32[k + 1];
-                    pixels[i].z = d32[k + 2];
-                    pixels[i].w = 1.0;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-                    pixels[i].x = d32[k];
-                    pixels[i].y = d32[k + 1];
-                    pixels[i].z = d32[k + 2];
-                    pixels[i].w = d32[k + 3];
-                    k += 4;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    pixels[i].x = HalfToFloat(d16[k]);
-                    pixels[i].y = 0.0;
-                    pixels[i].z = 0.0;
-                    pixels[i].w = 1.0;
-                    k += 1;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    pixels[i].x = HalfToFloat(d16[k]);
-                    pixels[i].y = HalfToFloat(d16[k + 1]);
-                    pixels[i].z = HalfToFloat(d16[k + 2]);
-                    pixels[i].w = 1.0;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    pixels[i].x = HalfToFloat(d16[k]);
-                    pixels[i].y = HalfToFloat(d16[k + 1]);
-                    pixels[i].z = HalfToFloat(d16[k + 2]);
-                    pixels[i].w = HalfToFloat(d16[k + 3]);
-                    k += 4;
-                },
-                else => {},
-            }
-        }
+        return pixels;
     }
 
+    const src: [*]const u8 = @ptrCast(image.data);
+    const size = bytesPerPixel(image.format);
+    for (pixels, 0..) |*pixel, i| {
+        pixel.* = readNormalized(src + i * size, image.format) orelse continue;
+    }
+    return pixels;
+}
+
+/// The pixels of `image` as R8G8B8A8, on the C heap; LoadImageColors' result.
+fn loadColors(image: Image) ?[]Color {
+    if ((image.width == 0) or (image.height == 0)) return null; // Security check
+
+    const pixels = allocC(Color, image.width * image.height) orelse return null;
+
+    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+        TraceLog(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
+        return pixels;
+    }
+
+    if ((image.format == PIXELFORMAT_UNCOMPRESSED_R32) or
+        (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32) or
+        (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32A32)) TraceLog(LOG_WARNING, "IMAGE: Pixel format converted from 32bit to 8bit per channel");
+
+    if ((image.format == PIXELFORMAT_UNCOMPRESSED_R16) or
+        (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16) or
+        (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16A16)) TraceLog(LOG_WARNING, "IMAGE: Pixel format converted from 16bit to 8bit per channel");
+
+    const src: [*]const u8 = @ptrCast(image.data);
+    const size = bytesPerPixel(image.format);
+    for (pixels, 0..) |*pixel, i| {
+        pixel.* = readColor(src + i * size, image.format) orelse continue;
+    }
     return pixels;
 }
 
@@ -505,151 +659,108 @@ fn LoadImageDataNormalized(image: Image) [*c]Vector4 {
 //----------------------------------------------------------------------------------
 // Load image from file into CPU memory (RAM)
 export fn LoadImage(fileName: [*c]const u8) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
-
-    // Loading file to memory
     var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
+    const fileData = LoadFileData(fileName, &dataSize) orelse return .{};
+    defer UnloadFileData(fileData);
 
-    if (fileData != null) {
-        image = LoadImageFromMemory(GetFileExtension(fileName), fileData, dataSize);
-        UnloadFileData(fileData);
-    }
-
-    return image;
+    return LoadImageFromMemory(GetFileExtension(fileName), fileData, dataSize);
 }
 
 // Load an image from RAW file data
 export fn LoadImageRaw(fileName: [*c]const u8, width: c_int, height: c_int, format: c_int, headerSize: c_int) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
-
     var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
+    const fileData = LoadFileData(fileName, &dataSize) orelse return .{};
+    defer UnloadFileData(fileData);
 
-    if (fileData != null) {
-        var dataPtr: [*c]u8 = fileData;
-        const size = GetPixelDataSize(width, height, format);
+    const size = GetPixelDataSize(width, height, format);
+    if (size > dataSize) return .{}; // Security check
 
-        if (size <= dataSize) { // Security check
-            if ((headerSize > 0) and ((headerSize + size) <= dataSize)) dataPtr = ptrAdd(dataPtr, headerSize);
+    // NOTE: A header that would leave too few bytes is ignored, as raylib does
+    const offset: usize = if ((headerSize > 0) and ((headerSize + size) <= dataSize)) @intCast(headerSize) else 0;
+    const pixels = allocC(u8, size) orelse return .{};
+    @memcpy(pixels, fileData[offset..][0..pixels.len]);
 
-            image.data = RL_MALLOC(@intCast(size)); // Allocate required memory in bytes
-            _ = memcpy(image.data, dataPtr, @intCast(size)); // Copy required data to image
-            image.width = width;
-            image.height = height;
-            image.mipmaps = 1;
-            image.format = format;
-        }
-
-        UnloadFileData(fileData);
-    }
-
-    return image;
+    return .{ .data = pixels.ptr, .width = width, .height = height, .mipmaps = 1, .format = format };
 }
 
 // Load animated image data
 export fn LoadImageAnim(fileName: [*c]const u8, frames: [*c]c_int) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
-    var frameCount: c_int = 0;
-
-    if (IsFileExtension(fileName, ".gif")) {
-        var dataSize: c_int = 0;
-        const fileData = LoadFileData(fileName, &dataSize);
-
-        if (fileData != null) {
-            var comp: c_int = 0;
-            var delays: [*c]c_int = null;
-            image.data = stbi_load_gif_from_memory(fileData, dataSize, &delays, &image.width, &image.height, &frameCount, &comp, 4);
-
-            image.mipmaps = 1;
-            image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-            UnloadFileData(fileData);
-            RL_FREE(delays); // NOTE: Frames delays are discarded
-        }
-    } else {
-        image = LoadImage(fileName);
-        frameCount = 1;
+    if (!IsFileExtension(fileName, ".gif")) {
+        frames.* = 1;
+        return LoadImage(fileName);
     }
 
-    frames.* = frameCount;
-    return image;
+    var dataSize: c_int = 0;
+    const fileData = LoadFileData(fileName, &dataSize) orelse {
+        frames.* = 0;
+        return .{};
+    };
+    defer UnloadFileData(fileData);
+
+    return loadGif(fileData, dataSize, frames);
 }
 
 // Load animated image data from memory
 export fn LoadImageAnimFromMemory(fileType: [*c]const u8, fileData: [*c]const u8, dataSize: c_int, frames: [*c]c_int) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
-    var frameCount: c_int = 0;
+    // NOTE: `frames` is left untouched by a failed security check, as in raylib
+    if ((fileType == null) or (fileData == null) or (dataSize == 0)) return .{}; // Security check
 
-    if ((fileType == null) or (fileData == null) or (dataSize == 0)) return image; // Security check
-
-    if ((strcmp(fileType, ".gif") == 0) or (strcmp(fileType, ".GIF") == 0)) {
-        if (fileData != null) {
-            var comp: c_int = 0;
-            var delays: [*c]c_int = null;
-            image.data = stbi_load_gif_from_memory(fileData, dataSize, &delays, &image.width, &image.height, &frameCount, &comp, 4);
-
-            image.mipmaps = 1;
-            image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-            RL_FREE(delays); // NOTE: Frames delays are discarded
-        }
-    } else {
-        image = LoadImageFromMemory(fileType, fileData, dataSize);
-        frameCount = 1;
+    if (!isFileType(fileType, &.{ ".gif", ".GIF" })) {
+        frames.* = 1;
+        return LoadImageFromMemory(fileType, fileData, dataSize);
     }
+    return loadGif(fileData, dataSize, frames);
+}
 
-    frames.* = frameCount;
+/// Every frame of a GIF, stacked vertically in one R8G8B8A8 image.
+fn loadGif(fileData: [*]const u8, dataSize: c_int, frames: *c_int) Image {
+    var image: Image = .{ .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    var comp: c_int = 0;
+    var delays: ?[*]c_int = null;
+    frames.* = 0;
+    image.data = stbi_load_gif_from_memory(fileData, dataSize, &delays, &image.width, &image.height, frames, &comp, 4);
+    cmem.free(delays); // NOTE: Frames delays are discarded
     return image;
 }
 
 // Load image from memory buffer, fileType refers to extension: i.e. ".png"
 export fn LoadImageFromMemory(fileType: [*c]const u8, fileData: [*c]const u8, dataSize: c_int) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
-
     // Security checks for input data
     if ((fileData == null) or (dataSize == 0)) {
         TraceLog(LOG_WARNING, "IMAGE: Invalid file data");
-        return image;
+        return .{};
     }
     if (fileType == null) {
         TraceLog(LOG_WARNING, "IMAGE: Missing file extension");
-        return image;
+        return .{};
     }
 
-    if ((strcmp(fileType, ".png") == 0) or (strcmp(fileType, ".PNG") == 0) or
-        (strcmp(fileType, ".bmp") == 0) or (strcmp(fileType, ".BMP") == 0) or
-        (strcmp(fileType, ".gif") == 0) or (strcmp(fileType, ".GIF") == 0))
-    {
+    var image: Image = .{};
+
+    if (isFileType(fileType, &.{ ".png", ".PNG", ".bmp", ".BMP", ".gif", ".GIF" })) {
         // NOTE: Using stb_image to load images (Supports multiple image formats)
-        if (fileData != null) {
-            var comp: c_int = 0;
-            image.data = stbi_load_from_memory(fileData, dataSize, &image.width, &image.height, &comp, 0);
+        var comp: c_int = 0;
+        image.data = stbi_load_from_memory(fileData, dataSize, &image.width, &image.height, &comp, 0);
 
-            if (image.data != null) {
-                image.mipmaps = 1;
-
-                if (comp == 1) {
-                    image.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
-                } else if (comp == 2) {
-                    image.format = PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA;
-                } else if (comp == 3) {
-                    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8;
-                } else if (comp == 4) {
-                    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-                }
-            }
-        }
-    } else if ((strcmp(fileType, ".qoi") == 0) or (strcmp(fileType, ".QOI") == 0)) {
-        if (fileData != null) {
-            var desc: qoi_desc = std.mem.zeroes(qoi_desc);
-            image.data = qoi_decode(fileData, dataSize, &desc, @as(c_int, fileData[12]));
-            image.width = @intCast(desc.width);
-            image.height = @intCast(desc.height);
-            image.format = if (desc.channels == 4) PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 else PIXELFORMAT_UNCOMPRESSED_R8G8B8;
+        if (image.data != null) {
             image.mipmaps = 1;
+            image.format = switch (comp) {
+                1 => PIXELFORMAT_UNCOMPRESSED_GRAYSCALE,
+                2 => PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA,
+                3 => PIXELFORMAT_UNCOMPRESSED_R8G8B8,
+                4 => PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+                else => 0,
+            };
         }
-    } else if ((strcmp(fileType, ".dds") == 0) or (strcmp(fileType, ".DDS") == 0)) {
+    } else if (isFileType(fileType, &.{ ".qoi", ".QOI" })) {
+        var desc: qoi_desc = .{};
+        // The channel count is read from the QOI header itself
+        image.data = qoi_decode(fileData, dataSize, &desc, fileData[12]);
+        image.width = @intCast(desc.width);
+        image.height = @intCast(desc.height);
+        image.format = if (desc.channels == 4) PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 else PIXELFORMAT_UNCOMPRESSED_R8G8B8;
+        image.mipmaps = 1;
+    } else if (isFileType(fileType, &.{ ".dds", ".DDS" })) {
         image.data = rl_load_dds_from_memory(fileData, @intCast(dataSize), &image.width, &image.height, &image.format, &image.mipmaps);
     } else TraceLog(LOG_WARNING, "IMAGE: Data format not supported");
 
@@ -662,195 +773,135 @@ export fn LoadImageFromMemory(fileType: [*c]const u8, fileData: [*c]const u8, da
 
 // Load image from GPU texture data
 export fn LoadImageFromTexture(texture: Texture2D) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
+    if (texture.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+        TraceLog(LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve compressed pixel data", texture.id);
+        return .{};
+    }
 
-    if (texture.format < PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        image.data = rlReadTexturePixels(texture.id, texture.width, texture.height, texture.format);
+    const data = rlReadTexturePixels(texture.id, texture.width, texture.height, texture.format) orelse {
+        TraceLog(LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve pixel data", texture.id);
+        return .{};
+    };
 
-        if (image.data != null) {
-            image.width = texture.width;
-            image.height = texture.height;
-            image.format = texture.format;
-            image.mipmaps = 1;
-
-            TraceLog(LOG_INFO, "TEXTURE: [ID %i] Pixel data retrieved successfully", texture.id);
-        } else TraceLog(LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve pixel data", texture.id);
-    } else TraceLog(LOG_WARNING, "TEXTURE: [ID %i] Failed to retrieve compressed pixel data", texture.id);
-
-    return image;
+    TraceLog(LOG_INFO, "TEXTURE: [ID %i] Pixel data retrieved successfully", texture.id);
+    return .{ .data = data, .width = texture.width, .height = texture.height, .mipmaps = 1, .format = texture.format };
 }
 
 // Load image from screen buffer (screenshot)
 export fn LoadImageFromScreen() callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
-
-    image.width = GetRenderWidth();
-    image.height = GetRenderHeight();
-    image.mipmaps = 1;
-    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    image.data = rlReadScreenPixels(image.width, image.height);
-
-    return image;
+    const width = GetRenderWidth();
+    const height = GetRenderHeight();
+    return .{
+        .data = rlReadScreenPixels(width, height),
+        .width = width,
+        .height = height,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    };
 }
 
 // Check if an image is valid
 export fn IsImageValid(image: Image) callconv(.c) bool {
-    var result = false;
-
-    if ((image.data != null) and
+    return (image.data != null) and
         (image.width > 0) and
         (image.height > 0) and
         (image.format > 0) and
-        (image.mipmaps > 0)) result = true;
-
-    return result;
+        (image.mipmaps > 0);
 }
 
 // Unload image from CPU memory (RAM)
 export fn UnloadImage(image: Image) callconv(.c) void {
-    RL_FREE(image.data);
+    cmem.free(image.data);
+}
+
+/// Channel count of the 8-bit-per-channel formats stb_image_write takes as
+/// they are; null for any other format.
+fn stbChannels(format: c_int) ?c_int {
+    return switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => 1,
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => 2,
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => 3,
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => 4,
+        else => null,
+    };
 }
 
 // Export image data to file
 export fn ExportImage(image: Image, fileName: [*c]const u8) callconv(.c) bool {
-    var result: c_int = 0;
+    if ((image.width == 0) or (image.height == 0) or (image.data == null)) return false; // Security check
 
-    if ((image.width == 0) or (image.height == 0) or (image.data == null)) return result != 0; // Security check
+    // NOTE: Any other format is exported as RGBA unsigned char values
+    const colors: ?[]Color = if (stbChannels(image.format) == null) loadColors(image) else null;
+    defer if (colors) |pixels| cmem.free(pixels.ptr);
+    const channels = stbChannels(image.format) orelse 4;
+    const imgData: ?*const anyopaque = if (colors) |pixels| pixels.ptr else image.data;
 
-    var channels: c_int = 4;
-    var allocatedData = false;
-    var imgData: [*c]u8 = @ptrCast(image.data);
-
-    if (image.format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
-        channels = 1;
-    } else if (image.format == PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA) {
-        channels = 2;
-    } else if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8) {
-        channels = 3;
-    } else if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
-        channels = 4;
-    } else {
-        // NOTE: Getting Color array as RGBA unsigned char values
-        imgData = @ptrCast(LoadImageColors(image));
-        allocatedData = true;
-    }
-
-    if (false) {} else if (IsFileExtension(fileName, ".png")) {
+    const result = if (IsFileExtension(fileName, ".png")) png: {
         var dataSize: c_int = 0;
-        const fileData = stbi_write_png_to_mem(imgData, image.width * channels, image.width, image.height, channels, &dataSize);
-        result = @intFromBool(SaveFileData(fileName, fileData, dataSize));
-        RL_FREE(fileData);
-    } else if (IsFileExtension(fileName, ".bmp")) {
-        result = stbi_write_bmp(fileName, image.width, image.height, channels, imgData);
-    } else if (IsFileExtension(fileName, ".qoi")) {
-        channels = 0;
-        if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8) {
-            channels = 3;
-        } else if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
-            channels = 4;
-        } else TraceLog(LOG_WARNING, "IMAGE: Image pixel format must be R8G8B8 or R8G8B8A8");
-
-        if ((channels == 3) or (channels == 4)) {
-            var desc: qoi_desc = std.mem.zeroes(qoi_desc);
-            desc.width = @intCast(image.width);
-            desc.height = @intCast(image.height);
-            desc.channels = @intCast(channels);
-            desc.colorspace = 0; // QOI_SRGB
-
-            result = qoi_write(fileName, imgData, &desc);
-        }
-    } else if (IsFileExtension(fileName, ".raw")) {
+        const fileData = stbi_write_png_to_mem(@ptrCast(imgData), image.width * channels, image.width, image.height, channels, &dataSize);
+        defer cmem.free(fileData);
+        break :png SaveFileData(fileName, fileData, dataSize);
+    } else if (IsFileExtension(fileName, ".bmp"))
+        stbi_write_bmp(fileName, image.width, image.height, channels, imgData) != 0
+    else if (IsFileExtension(fileName, ".qoi")) qoi: {
+        const qoiChannels: u8 = switch (image.format) {
+            PIXELFORMAT_UNCOMPRESSED_R8G8B8 => 3,
+            PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => 4,
+            else => {
+                TraceLog(LOG_WARNING, "IMAGE: Image pixel format must be R8G8B8 or R8G8B8A8");
+                break :qoi false;
+            },
+        };
+        const desc: qoi_desc = .{
+            .width = @intCast(image.width),
+            .height = @intCast(image.height),
+            .channels = qoiChannels,
+            .colorspace = 0, // QOI_SRGB
+        };
+        break :qoi qoi_write(fileName, imgData, &desc) != 0;
+    } else if (IsFileExtension(fileName, ".raw"))
         // Export raw pixel data (without header)
-        result = @intFromBool(SaveFileData(fileName, image.data, GetPixelDataSize(image.width, image.height, image.format)));
-    } else TraceLog(LOG_WARNING, "IMAGE: Export image format requested not supported");
+        SaveFileData(fileName, image.data, GetPixelDataSize(image.width, image.height, image.format))
+    else unsupported: {
+        TraceLog(LOG_WARNING, "IMAGE: Export image format requested not supported");
+        break :unsupported false;
+    };
 
-    if (allocatedData) RL_FREE(imgData);
-
-    if (result != 0) {
+    if (result) {
         TraceLog(LOG_INFO, "FILEIO: [%s] Image exported successfully", fileName);
     } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to export image", fileName);
 
-    return result != 0;
+    return result;
 }
 
 // Export image to memory buffer
 export fn ExportImageToMemory(image: Image, fileType: [*c]const u8, dataSize: [*c]c_int) callconv(.c) [*c]u8 {
-    var fileData: [*c]u8 = null;
     dataSize.* = 0;
 
-    if ((image.width == 0) or (image.height == 0) or (image.data == null)) return fileData; // Security check
+    if ((image.width == 0) or (image.height == 0) or (image.data == null)) return null; // Security check
+    if (!isFileType(fileType, &.{ ".png", ".PNG" })) return null;
 
-    var channels: c_int = 4;
-
-    if (image.format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
-        channels = 1;
-    } else if (image.format == PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA) {
-        channels = 2;
-    } else if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8) {
-        channels = 3;
-    } else if (image.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
-        channels = 4;
-    }
-
-    if ((strcmp(fileType, ".png") == 0) or (strcmp(fileType, ".PNG") == 0)) {
-        fileData = stbi_write_png_to_mem(@ptrCast(image.data), image.width * channels, image.width, image.height, channels, dataSize);
-    }
-
-    return fileData;
+    // NOTE: Unlike ExportImage, other formats are not converted: their data is
+    // read as 4 channels (raylib behaviour)
+    const channels = stbChannels(image.format) orelse 4;
+    return stbi_write_png_to_mem(@ptrCast(image.data), image.width * channels, image.width, image.height, channels, dataSize);
 }
 
 // Export image as code file (.h) defining an array of bytes
 export fn ExportImageAsCode(image: Image, fileName: [*c]const u8) callconv(.c) bool {
-    var result = false;
-
     const dataSize = GetPixelDataSize(image.width, image.height, image.format);
 
-    // NOTE: Text data buffer size is estimated considering image data size in bytes
-    // and requiring 6 char bytes for every byte: "0x00, "
-    const txtData: [*c]u8 = @ptrCast(RL_CALLOC(@intCast(dataSize * 6 + 2000), @sizeOf(u8)));
+    const result = saved: {
+        // NOTE: raylib reads one byte before the data of an empty image
+        // (undefined behaviour); here that export fails instead
+        if ((dataSize <= 0) or (image.data == null)) break :saved false;
 
-    var byteCount: c_int = 0;
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "////////////////////////////////////////////////////////////////////////////////////////\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "//                                                                                    //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "// ImageAsCode exporter v1.0 - Image pixel data exported as an array of bytes         //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "//                                                                                    //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "// more info and bugs-report:  github.com/raysan5/raylib                              //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "// feedback and support:       ray[at]raylib.com                                      //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "//                                                                                    //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "// Copyright (c) 2018-2026 Ramon Santamaria (@raysan5)                                //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "//                                                                                    //\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "////////////////////////////////////////////////////////////////////////////////////////\n\n");
-
-    // Get file name from path and convert variable name to uppercase
-    var varFileName = std.mem.zeroes([256]u8);
-    _ = strncpy(&varFileName, GetFileNameWithoutExt(fileName), 256 - 1);
-    {
-        var i: usize = 0;
-        while (varFileName[i] != 0) : (i += 1) {
-            if ((varFileName[i] >= 'a') and (varFileName[i] <= 'z')) varFileName[i] = varFileName[i] - 32;
-        }
-    }
-
-    // Add image information
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "// Image data information\n");
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "#define %s_WIDTH    %i\n", &varFileName, image.width);
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "#define %s_HEIGHT   %i\n", &varFileName, image.height);
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "#define %s_FORMAT   %i          // raylib internal pixel format\n\n", &varFileName, image.format);
-
-    byteCount += sprintf(ptrAdd(txtData, byteCount), "static unsigned char %s_DATA[%i] = { ", &varFileName, dataSize);
-    {
-        const d8: [*]const u8 = @ptrCast(image.data);
-        var i: c_int = 0;
-        while (i < dataSize - 1) : (i += 1) {
-            byteCount += sprintf(ptrAdd(txtData, byteCount), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "0x%x,\n" else "0x%x, ", @as(c_uint, d8[@intCast(i)]));
-        }
-        byteCount += sprintf(ptrAdd(txtData, byteCount), "0x%x };\n", @as(c_uint, d8[@intCast(dataSize - 1)]));
-    }
-
-    // NOTE: Text data size exported is determined by '\0' (NULL) character
-    result = SaveFileText(fileName, txtData);
-
-    RL_FREE(txtData);
+        const info: encode.ImageInfo = .{ .width = image.width, .height = image.height, .format = image.format };
+        const stem = std.mem.span(GetFileNameWithoutExt(fileName));
+        const text = encode.imageAsCode(c_allocator, bytesAt(image.data, dataSize), info, stem) catch break :saved false;
+        defer c_allocator.free(text);
+        break :saved SaveFileText(fileName, text.ptr);
+    };
 
     if (result) {
         TraceLog(LOG_INFO, "FILEIO: [%s] Image as code exported successfully", fileName);
@@ -862,18 +913,16 @@ export fn ExportImageAsCode(image: Image, fileName: [*c]const u8) callconv(.c) b
 //------------------------------------------------------------------------------------
 // Image generation functions
 //------------------------------------------------------------------------------------
-// Generate image: plain color
-export fn GenImageColor(width: c_int, height: c_int, color: Color) callconv(.c) Image {
-    const dataSize = GetPixelDataSize(width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-    const pixels: ?[*]Color = @ptrCast(@alignCast(RL_CALLOC(@intCast(dataSize), 1)));
+/// A C `int` dimension as a loop bound: C loops `for (i = 0; i < n; i++)`
+/// never run for a negative `n`.
+fn dim(n: c_int) usize {
+    return std.math.cast(usize, n) orelse 0;
+}
 
-    if (pixels) |p| {
-        var i: c_int = 0;
-        while (i < width * height) : (i += 1) p[@intCast(i)] = color;
-    }
-
+/// A generated R8G8B8A8 image over `pixels`.
+fn rgbaImage(pixels: ?[]Color, width: c_int, height: c_int) Image {
     return .{
-        .data = pixels,
+        .data = if (pixels) |p| p.ptr else null,
         .width = width,
         .height = height,
         .mipmaps = 1,
@@ -881,231 +930,211 @@ export fn GenImageColor(width: c_int, height: c_int, color: Color) callconv(.c) 
     };
 }
 
+/// C `(unsigned char)(a*factor + b*(1.0f - factor))` for each channel.
+fn blendColors(a: Color, b: Color, factor: f32) Color {
+    return .{
+        .r = tuc(f(a.r) * factor + f(b.r) * (1.0 - factor)),
+        .g = tuc(f(a.g) * factor + f(b.g) * (1.0 - factor)),
+        .b = tuc(f(a.b) * factor + f(b.b) * (1.0 - factor)),
+        .a = tuc(f(a.a) * factor + f(b.a) * (1.0 - factor)),
+    };
+}
+
+// Generate image: plain color
+export fn GenImageColor(width: c_int, height: c_int, color: Color) callconv(.c) Image {
+    // NOTE: Sized by GetPixelDataSize, so an oversized request (>2GB) gets an
+    // empty buffer
+    const dataSize = GetPixelDataSize(width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    const pixels = allocC(Color, @divTrunc(dataSize, @sizeOf(Color)));
+    if (pixels) |p| @memset(p, color);
+    return rgbaImage(pixels, width, height);
+}
+
 // Generate image: linear gradient
 export fn GenImageGradientLinear(width: c_int, height: c_int, direction: c_int, start: Color, end: Color) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
 
-    const radianDirection: f32 = @as(f32, @floatFromInt(90 - direction)) / 180.0 * 3.14159;
+    const radianDirection: f32 = f(90 - direction) / 180.0 * 3.14159;
     const cosDir = cosf(radianDirection);
     const sinDir = sinf(radianDirection);
 
-    const startingPos: f32 = 0.5 - (cosDir * @as(f32, @floatFromInt(width)) / 2) - (sinDir * @as(f32, @floatFromInt(height)) / 2);
+    const startingPos: f32 = 0.5 - (cosDir * f(width) / 2) - (sinDir * f(height) / 2);
 
     const maxPosValue: f32 = if ((std.math.signbit(sinDir)) == (std.math.signbit(cosDir)))
-        fabsf(startingPos)
+        @abs(startingPos)
     else
-        fabsf(startingPos + @as(f32, @floatFromInt(width)) * cosDir);
+        @abs(startingPos + f(width) * cosDir);
 
-    var i: c_int = 0;
-    while (i < width) : (i += 1) {
-        var j: c_int = 0;
-        while (j < height) : (j += 1) {
-            const pos: f32 = (startingPos + (@as(f32, @floatFromInt(i)) * cosDir + @as(f32, @floatFromInt(j)) * sinDir)) / maxPosValue;
+    for (0..dim(height)) |j| {
+        for (0..dim(width)) |i| {
+            const pos: f32 = (startingPos + (f(i) * cosDir + f(j) * sinDir)) / maxPosValue;
 
+            // NOTE: Ternaries rather than std.math.clamp, which would turn NaN into a bound
             var factor = pos;
             factor = if (factor > 1.0) 1.0 else factor;
             factor = if (factor < -1.0) -1.0 else factor;
             factor = factor / 2.0 + 0.5;
 
-            const idx: usize = @intCast(j * width + i);
-            pixels[idx].r = tuc(@as(f32, @floatFromInt(end.r)) * factor + @as(f32, @floatFromInt(start.r)) * (1.0 - factor));
-            pixels[idx].g = tuc(@as(f32, @floatFromInt(end.g)) * factor + @as(f32, @floatFromInt(start.g)) * (1.0 - factor));
-            pixels[idx].b = tuc(@as(f32, @floatFromInt(end.b)) * factor + @as(f32, @floatFromInt(start.b)) * (1.0 - factor));
-            pixels[idx].a = tuc(@as(f32, @floatFromInt(end.a)) * factor + @as(f32, @floatFromInt(start.a)) * (1.0 - factor));
+            pixels[j * dim(width) + i] = blendColors(end, start, factor);
         }
     }
 
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
 // Generate image: radial gradient
 export fn GenImageGradientRadial(width: c_int, height: c_int, density: f32, inner: Color, outer: Color) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
-    const radius: f32 = if (width < height) @as(f32, @floatFromInt(width)) / 2.0 else @as(f32, @floatFromInt(height)) / 2.0;
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
+    const radius: f32 = if (width < height) f(width) / 2.0 else f(height) / 2.0;
 
-    const centerX: f32 = @as(f32, @floatFromInt(width)) / 2.0;
-    const centerY: f32 = @as(f32, @floatFromInt(height)) / 2.0;
+    const centerX: f32 = f(width) / 2.0;
+    const centerY: f32 = f(height) / 2.0;
 
-    var y: c_int = 0;
-    while (y < height) : (y += 1) {
-        var x: c_int = 0;
-        while (x < width) : (x += 1) {
-            const dist = hypotf(@as(f32, @floatFromInt(x)) - centerX, @as(f32, @floatFromInt(y)) - centerY);
+    for (0..dim(height)) |y| {
+        for (0..dim(width)) |x| {
+            const dist = hypotf(f(x) - centerX, f(y) - centerY);
             var factor = (dist - radius * density) / (radius * (1.0 - density));
 
-            factor = @floatCast(fmax(@floatCast(factor), 0.0));
-            factor = @floatCast(fmin(@floatCast(factor), 1.0));
+            factor = @floatCast(fmax(factor, 0.0));
+            factor = @floatCast(fmin(factor, 1.0)); // dist can be bigger than radius, so we have to check
 
-            const idx: usize = @intCast(y * width + x);
-            pixels[idx].r = tuc(@as(f32, @floatFromInt(outer.r)) * factor + @as(f32, @floatFromInt(inner.r)) * (1.0 - factor));
-            pixels[idx].g = tuc(@as(f32, @floatFromInt(outer.g)) * factor + @as(f32, @floatFromInt(inner.g)) * (1.0 - factor));
-            pixels[idx].b = tuc(@as(f32, @floatFromInt(outer.b)) * factor + @as(f32, @floatFromInt(inner.b)) * (1.0 - factor));
-            pixels[idx].a = tuc(@as(f32, @floatFromInt(outer.a)) * factor + @as(f32, @floatFromInt(inner.a)) * (1.0 - factor));
+            pixels[y * dim(width) + x] = blendColors(outer, inner, factor);
         }
     }
 
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
 // Generate image: square gradient
 export fn GenImageGradientSquare(width: c_int, height: c_int, density: f32, inner: Color, outer: Color) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
 
-    const centerX: f32 = @as(f32, @floatFromInt(width)) / 2.0;
-    const centerY: f32 = @as(f32, @floatFromInt(height)) / 2.0;
+    const centerX: f32 = f(width) / 2.0;
+    const centerY: f32 = f(height) / 2.0;
 
-    var y: c_int = 0;
-    while (y < height) : (y += 1) {
-        var x: c_int = 0;
-        while (x < width) : (x += 1) {
+    for (0..dim(height)) |y| {
+        for (0..dim(width)) |x| {
             // Calculate the Manhattan distance from the center
-            const distX = fabsf(@as(f32, @floatFromInt(x)) - centerX);
-            const distY = fabsf(@as(f32, @floatFromInt(y)) - centerY);
+            const distX = @abs(f(x) - centerX);
+            const distY = @abs(f(y) - centerY);
 
+            // Normalize the distances by the dimensions of the gradient rectangle
             const normalizedDistX = distX / centerX;
             const normalizedDistY = distY / centerY;
 
+            // Calculate the total normalized Manhattan distance
             const manhattanDist = fmaxf(normalizedDistX, normalizedDistY);
 
+            // Subtract the density from the manhattanDist, then divide by (1 - density)
+            // This makes the gradient start from the center when density is 0, and from the edge when density is 1
             const factor = (manhattanDist - density) / (1.0 - density);
 
+            // Clamp the factor between 0 and 1
             const clamped = fminf(fmaxf(factor, 0.0), 1.0);
 
-            const idx: usize = @intCast(y * width + x);
-            pixels[idx].r = tuc(@as(f32, @floatFromInt(outer.r)) * clamped + @as(f32, @floatFromInt(inner.r)) * (1.0 - clamped));
-            pixels[idx].g = tuc(@as(f32, @floatFromInt(outer.g)) * clamped + @as(f32, @floatFromInt(inner.g)) * (1.0 - clamped));
-            pixels[idx].b = tuc(@as(f32, @floatFromInt(outer.b)) * clamped + @as(f32, @floatFromInt(inner.b)) * (1.0 - clamped));
-            pixels[idx].a = tuc(@as(f32, @floatFromInt(outer.a)) * clamped + @as(f32, @floatFromInt(inner.a)) * (1.0 - clamped));
+            pixels[y * dim(width) + x] = blendColors(outer, inner, clamped);
         }
     }
 
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
 // Generate image: checked
 export fn GenImageChecked(width: c_int, height: c_int, checksX: c_int, checksY: c_int, col1: Color, col2: Color) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
 
-    var y: c_int = 0;
-    while (y < height) : (y += 1) {
-        var x: c_int = 0;
-        while (x < width) : (x += 1) {
-            const idx: usize = @intCast(y * width + x);
-            if (@rem(@divTrunc(x, checksX) + @divTrunc(y, checksY), 2) == 0) pixels[idx] = col1 else pixels[idx] = col2;
+    for (0..dim(height)) |yi| {
+        for (0..dim(width)) |xi| {
+            // C int division: negative check sizes keep their sign
+            const x: c_int = @intCast(xi);
+            const y: c_int = @intCast(yi);
+            pixels[yi * dim(width) + xi] = if (@rem(@divTrunc(x, checksX) + @divTrunc(y, checksY), 2) == 0) col1 else col2;
         }
     }
 
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
 // Generate image: white noise
 export fn GenImageWhiteNoise(width: c_int, height: c_int, factor: f32) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
 
-    var i: usize = 0;
-    const total: usize = @intCast(width * height);
-    while (i < total) : (i += 1) {
-        if (GetRandomValue(0, 99) < ti(factor * 100.0)) pixels[i] = WHITE else pixels[i] = BLACK;
-    }
+    for (pixels) |*pixel| pixel.* = if (GetRandomValue(0, 99) < ti(factor * 100.0)) WHITE else BLACK;
 
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
 // Generate image: perlin noise
 export fn GenImagePerlinNoise(width: c_int, height: c_int, offsetX: c_int, offsetY: c_int, scale: f32) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
 
-    const aspectRatio: f32 = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
+    const aspectRatio: f32 = f(width) / f(height);
 
-    var y: c_int = 0;
-    while (y < height) : (y += 1) {
-        var x: c_int = 0;
-        while (x < width) : (x += 1) {
-            var nx: f32 = @as(f32, @floatFromInt(x + offsetX)) * (scale / @as(f32, @floatFromInt(width)));
-            var ny: f32 = @as(f32, @floatFromInt(y + offsetY)) * (scale / @as(f32, @floatFromInt(height)));
+    for (0..dim(height)) |yi| {
+        for (0..dim(width)) |xi| {
+            const x: c_int = @intCast(xi);
+            const y: c_int = @intCast(yi);
+            var nx: f32 = f(x + offsetX) * (scale / f(width));
+            var ny: f32 = f(y + offsetY) * (scale / f(height));
 
+            // Apply aspect ratio compensation to wider side
             if (width > height) nx *= aspectRatio else ny /= aspectRatio;
 
+            // Basic perlin noise implementation (not used)
+            // Calculate a better perlin noise using fbm (fractal brownian motion)
+            // Typical values to start playing with:
+            //   lacunarity = ~2.0   -- spacing between successive octaves (use exactly 2.0 for wrapping output)
+            //   gain       =  0.5   -- relative weighting applied to each successive octave
+            //   octaves    =  6     -- number of "octaves" of noise3() to sum
             var p = stb_perlin_fbm_noise3(nx, ny, 1.0, 2.0, 0.5, 6);
 
+            // Clamp between -1.0f and 1.0f
             if (p < -1.0) p = -1.0;
             if (p > 1.0) p = 1.0;
 
+            // We need to normalize the data from [-1..1] to [0..1]
             const np: f32 = (p + 1.0) / 2.0;
 
             const intensity: u8 = tuc(np * 255.0);
-            pixels[@intCast(y * width + x)] = .{ .r = intensity, .g = intensity, .b = intensity, .a = 255 };
+            pixels[yi * dim(width) + xi] = .{ .r = intensity, .g = intensity, .b = intensity, .a = 255 };
         }
     }
 
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
-// Generate image: cellular algorithm
+// Generate image: cellular algorithm. Bigger tileSize means bigger cells
 export fn GenImageCellular(width: c_int, height: c_int, tileSize: c_int) callconv(.c) Image {
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(width * height * @as(c_int, @sizeOf(Color))))));
+    const pixels = allocC(Color, width * height) orelse return rgbaImage(null, width, height);
 
     const seedsPerRow = @divTrunc(width, tileSize);
     const seedsPerCol = @divTrunc(height, tileSize);
     const seedCount = seedsPerRow * seedsPerCol;
 
-    const seeds: [*c]Vector2 = @ptrCast(@alignCast(RL_MALLOC(@intCast(seedCount * @as(c_int, @sizeOf(Vector2))))));
+    const seeds = c_allocator.alloc(Vector2, dim(seedCount)) catch {
+        cmem.free(pixels.ptr);
+        return rgbaImage(null, width, height);
+    };
+    defer c_allocator.free(seeds);
 
-    {
-        var i: c_int = 0;
-        while (i < seedCount) : (i += 1) {
-            const yy = @divTrunc(i, seedsPerRow) * tileSize + GetRandomValue(0, tileSize - 1);
-            const xx = @rem(i, seedsPerRow) * tileSize + GetRandomValue(0, tileSize - 1);
-            seeds[@intCast(i)] = .{ .x = @floatFromInt(xx), .y = @floatFromInt(yy) };
-        }
+    for (seeds, 0..) |*seed, n| {
+        const i: c_int = @intCast(n);
+        const y = @divTrunc(i, seedsPerRow) * tileSize + GetRandomValue(0, tileSize - 1);
+        const x = @rem(i, seedsPerRow) * tileSize + GetRandomValue(0, tileSize - 1);
+        seed.* = .{ .x = @floatFromInt(x), .y = @floatFromInt(y) };
     }
 
-    var y: c_int = 0;
-    while (y < height) : (y += 1) {
+    for (0..dim(height)) |yi| {
+        const y: c_int = @intCast(yi);
         const tileY = @divTrunc(y, tileSize);
 
-        var x: c_int = 0;
-        while (x < width) : (x += 1) {
+        for (0..dim(width)) |xi| {
+            const x: c_int = @intCast(xi);
             const tileX = @divTrunc(x, tileSize);
 
-            var minDistance: f32 = 65536.0;
+            var minDistance: f32 = 65536.0; //std::numeric_limits<float>::max();
 
+            // Check all adjacent tiles
             var i: c_int = -1;
             while (i < 2) : (i += 1) {
                 if ((tileX + i < 0) or (tileX + i >= seedsPerRow)) continue;
@@ -1117,94 +1146,80 @@ export fn GenImageCellular(width: c_int, height: c_int, tileSize: c_int) callcon
                     const neighborSeed = seeds[@intCast((tileY + j) * seedsPerRow + tileX + i)];
 
                     const dist: f32 = @floatCast(hypot(@floatFromInt(x - ti(neighborSeed.x)), @floatFromInt(y - ti(neighborSeed.y))));
-                    minDistance = @floatCast(fmin(@floatCast(minDistance), @floatCast(dist)));
+                    minDistance = @floatCast(fmin(minDistance, dist));
                 }
             }
 
-            var intensity = ti(minDistance * 256.0 / @as(f32, @floatFromInt(tileSize)));
-            if (intensity > 255) intensity = 255;
+            // I made this up, but it seems to give good results at all tile sizes
+            const intensity = @min(ti(minDistance * 256.0 / f(tileSize)), 255);
 
             const intensityUC: u8 = iuc(intensity);
-            pixels[@intCast(y * width + x)] = .{ .r = intensityUC, .g = intensityUC, .b = intensityUC, .a = 255 };
+            pixels[yi * dim(width) + xi] = .{ .r = intensityUC, .g = intensityUC, .b = intensityUC, .a = 255 };
         }
     }
 
-    RL_FREE(seeds);
-
-    return .{
-        .data = pixels,
-        .width = width,
-        .height = height,
-        .mipmaps = 1,
-        .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
-    };
+    return rgbaImage(pixels, width, height);
 }
 
 // Generate image: grayscale image from text data
 export fn GenImageText(width: c_int, height: c_int, text: [*c]const u8) callconv(.c) Image {
-    var image: Image = std.mem.zeroes(Image);
+    const pixels = allocC(u8, width * height);
 
-    const imageSize = width * height;
-    image.width = width;
-    image.height = height;
-    image.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
-    image.data = RL_CALLOC(@intCast(imageSize), 1);
-    image.mipmaps = 1;
-
-    if (text != null) {
-        const textLength: c_int = @intCast(strlen(text));
-        _ = memcpy(image.data, text, @intCast(if (textLength > imageSize) imageSize else textLength));
+    if (pixels) |p| {
+        if (text != null) {
+            const bytes = std.mem.span(text);
+            const len = @min(bytes.len, p.len);
+            @memcpy(p[0..len], bytes[0..len]);
+        }
     }
 
-    return image;
+    return .{
+        .data = if (pixels) |p| p.ptr else null,
+        .width = width,
+        .height = height,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE,
+    };
 }
 
 //------------------------------------------------------------------------------------
 // Image manipulation functions
 //------------------------------------------------------------------------------------
+/// The base-level pixels of an uncompressed `image`, each viewed as a `P`
+/// (u8, u16, [4]u8, [4]f32...).
+fn pixelData(comptime P: type, image: Image) []P {
+    const ptr: [*]P = @ptrCast(@alignCast(image.data));
+    return ptr[0..pixelCount(image)];
+}
+
 // Copy an image to a new image
 export fn ImageCopy(image: Image) callconv(.c) Image {
-    var newImage: Image = std.mem.zeroes(Image);
-
     var width = image.width;
     var height = image.height;
     var size: c_int = 0;
 
-    var i: c_int = 0;
-    while (i < image.mipmaps) : (i += 1) {
+    // Every mipmap level
+    for (0..dim(image.mipmaps)) |_| {
         size += GetPixelDataSize(width, height, image.format);
 
-        width = @divTrunc(width, 2);
-        height = @divTrunc(height, 2);
-
-        if (width < 1) width = 1;
-        if (height < 1) height = 1;
+        width = @max(@divTrunc(width, 2), 1);
+        height = @max(@divTrunc(height, 2), 1);
     }
 
-    newImage.data = RL_CALLOC(@intCast(size), 1);
+    const data = allocC(u8, size) orelse return .{};
+    @memcpy(data, bytesAt(image.data, size));
 
-    if (newImage.data != null) {
-        _ = memcpy(newImage.data, image.data, @intCast(size));
-
-        newImage.width = image.width;
-        newImage.height = image.height;
-        newImage.mipmaps = image.mipmaps;
-        newImage.format = image.format;
-    }
-
-    return newImage;
+    return .{ .data = data.ptr, .width = image.width, .height = image.height, .mipmaps = image.mipmaps, .format = image.format };
 }
 
 // Create an image from another image piece
 export fn ImageFromImage(image: Image, rec: Rectangle) callconv(.c) Image {
-    var result: Image = std.mem.zeroes(Image);
-
     // Security check to avoid program crash
-    if ((image.data == null) or (image.width == 0) or (image.height == 0)) return result;
+    if ((image.data == null) or (image.width == 0) or (image.height == 0)) return .{};
 
     if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "IMAGE: Image manipulation not supported for compressed formats");
-        return result;
+        return .{};
     }
 
     // Basic rectangle validation: size smaller than image size
@@ -1213,39 +1228,77 @@ export fn ImageFromImage(image: Image, rec: Rectangle) callconv(.c) Image {
         ((ti(rec.y) + ti(rec.height)) <= image.height);
     if (!valid) {
         TraceLog(LOG_WARNING, "IMAGE: ImageFromImage(), rectangle provided not valid");
-        return result;
+        return .{};
     }
 
-    const bytesPerPixel = GetPixelDataSize(1, 1, image.format);
+    const pixelSize = GetPixelDataSize(1, 1, image.format);
+    const width = ti(rec.width);
+    const height = ti(rec.height);
+    const data = allocC(u8, width * height * pixelSize) orelse return .{};
 
-    result.width = ti(rec.width);
-    result.height = ti(rec.height);
-    result.data = RL_CALLOC(@intCast(ti(rec.width) * ti(rec.height) * bytesPerPixel), 1);
-    result.format = image.format;
-    result.mipmaps = 1;
-
-    const dst8: [*]u8 = @ptrCast(result.data);
-    const src8: [*]const u8 = @ptrCast(image.data);
-
-    var y: c_int = 0;
-    while (y < ti(rec.height)) : (y += 1) {
-        _ = memcpy(
-            dst8 + @as(usize, @intCast(y * ti(rec.width) * bytesPerPixel)),
-            src8 + @as(usize, @intCast(((y + ti(rec.y)) * image.width + ti(rec.x)) * bytesPerPixel)),
-            @intCast(ti(rec.width) * bytesPerPixel),
-        );
+    const src: [*]const u8 = @ptrCast(image.data);
+    const rowSize: usize = @intCast(width * pixelSize);
+    for (0..dim(height)) |y| {
+        const from: usize = @intCast(((@as(c_int, @intCast(y)) + ti(rec.y)) * image.width + ti(rec.x)) * pixelSize);
+        @memcpy(data[y * rowSize ..][0..rowSize], src[from..][0..rowSize]);
     }
 
-    return result;
+    return .{ .data = data.ptr, .width = width, .height = height, .mipmaps = 1, .format = image.format };
+}
+
+/// One channel of a pixel, normalized, as ImageFromChannel reads it; -1 when
+/// the format has no such channel.
+fn channelValue(src: [*]const u8, format: c_int, channel: usize) f32 {
+    return switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE,
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA,
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8,
+        => f(src[channel]) / 255.0,
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
+            const pixel = u16s(src)[0];
+            return switch (channel) {
+                0 => f((pixel & 0b1111100000000000) >> 11) * (1.0 / 31.0),
+                1 => f((pixel & 0b0000011111000000) >> 6) * (1.0 / 31.0),
+                2 => f((pixel & 0b0000000000111110) >> 1) * (1.0 / 31.0),
+                3 => if ((pixel & 0b0000000000000001) == 0) 0.0 else 1.0,
+                else => -1,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
+            const pixel = u16s(src)[0];
+            return switch (channel) {
+                0 => f((pixel & 0b1111100000000000) >> 11) * (1.0 / 31.0),
+                1 => f((pixel & 0b0000011111100000) >> 5) * (1.0 / 63.0),
+                2 => f(pixel & 0b0000000000011111) * (1.0 / 31.0),
+                else => -1,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
+            const pixel = u16s(src)[0];
+            return switch (channel) {
+                0 => f((pixel & 0b1111000000000000) >> 12) * (1.0 / 15.0),
+                1 => f((pixel & 0b0000111100000000) >> 8) * (1.0 / 15.0),
+                2 => f((pixel & 0b0000000011110000) >> 4) * (1.0 / 15.0),
+                3 => f(pixel & 0b0000000000001111) * (1.0 / 15.0),
+                else => -1,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R32 => f32s(src)[0],
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32, PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => f32s(src)[channel],
+        PIXELFORMAT_UNCOMPRESSED_R16 => encode.halfToFloat(u16s(src)[0]),
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16, PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => encode.halfToFloat(u16s(src)[channel]),
+        else => -1,
+    };
 }
 
 // Create an image from a selected channel of another image
 export fn ImageFromChannel(image: Image, selectedChannel_in: c_int) callconv(.c) Image {
-    var result: Image = std.mem.zeroes(Image);
     var selectedChannel = selectedChannel_in;
 
-    if ((image.data == null) or (image.width == 0) or (image.height == 0)) return result; // Security check
+    if ((image.data == null) or (image.width == 0) or (image.height == 0)) return .{}; // Security check
 
+    // Check selected channel is valid
     if (selectedChannel < 0) {
         TraceLog(LOG_WARNING, "Channel cannot be negative. Setting channel to 0.");
         selectedChannel = 0;
@@ -1275,122 +1328,42 @@ export fn ImageFromChannel(image: Image, selectedChannel_in: c_int) callconv(.c)
         }
     }
 
+    // Check for RGBA formats
     if (selectedChannel > 3) {
         TraceLog(LOG_WARNING, "ImageFromChannel supports channels 0 to 3 (RGBA). Setting channel to alpha.");
         selectedChannel = 3;
     }
 
-    result.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
-    result.height = image.height;
-    result.width = image.width;
-    result.mipmaps = 1;
-
-    const pixels: [*c]u8 = @ptrCast(RL_CALLOC(@intCast(image.width * image.height), @sizeOf(u8)));
+    const pixels = allocC(u8, image.width * image.height) orelse return .{};
 
     if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
     } else {
-        const d8: [*]const u8 = @ptrCast(image.data);
-        const d16: [*]const u16 = @ptrCast(@alignCast(image.data));
-        const d32: [*]const f32 = @ptrCast(@alignCast(image.data));
-        const sc: usize = @intCast(selectedChannel);
-
-        var i: usize = 0;
-        var k: usize = 0;
-        const total: usize = @intCast(image.width * image.height);
-        while (i < total) : (i += 1) {
-            var pixelValue: f32 = -1;
-            switch (image.format) {
-                PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-                    pixelValue = @as(f32, @floatFromInt(d8[i + sc])) / 255.0;
-                },
-                PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-                    pixelValue = @as(f32, @floatFromInt(d8[k + sc])) / 255.0;
-                    k += 2;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-                    const pixel = d16[i];
-                    if (selectedChannel == 0) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (1.0 / 31.0);
-                    } else if (selectedChannel == 1) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * (1.0 / 31.0);
-                    } else if (selectedChannel == 2) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * (1.0 / 31.0);
-                    } else if (selectedChannel == 3) {
-                        pixelValue = if ((pixel & 0b0000000000000001) == 0) 0.0 else 1.0;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-                    const pixel = d16[i];
-                    if (selectedChannel == 0) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (1.0 / 31.0);
-                    } else if (selectedChannel == 1) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * (1.0 / 63.0);
-                    } else if (selectedChannel == 2) {
-                        pixelValue = @as(f32, @floatFromInt(pixel & 0b0000000000011111)) * (1.0 / 31.0);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-                    const pixel = d16[i];
-                    if (selectedChannel == 0) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * (1.0 / 15.0);
-                    } else if (selectedChannel == 1) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * (1.0 / 15.0);
-                    } else if (selectedChannel == 2) {
-                        pixelValue = @as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * (1.0 / 15.0);
-                    } else if (selectedChannel == 3) {
-                        pixelValue = @as(f32, @floatFromInt(pixel & 0b0000000000001111)) * (1.0 / 15.0);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-                    pixelValue = @as(f32, @floatFromInt(d8[k + sc])) / 255.0;
-                    k += 4;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-                    pixelValue = @as(f32, @floatFromInt(d8[k + sc])) / 255.0;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32 => {
-                    pixelValue = d32[k];
-                    k += 1;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-                    pixelValue = d32[k + sc];
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-                    pixelValue = d32[k + sc];
-                    k += 4;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    pixelValue = HalfToFloat(d16[k]);
-                    k += 1;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    pixelValue = HalfToFloat(d16[k + sc]);
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    pixelValue = HalfToFloat(d16[k + sc]);
-                    k += 4;
-                },
-                else => {},
-            }
-
-            pixels[i] = tuc(pixelValue * 255);
+        const src: [*]const u8 = @ptrCast(image.data);
+        const size = bytesPerPixel(image.format);
+        for (pixels, 0..) |*pixel, i| {
+            pixel.* = tuc(channelValue(src + i * size, image.format, @intCast(selectedChannel)) * 255);
         }
     }
 
-    result.data = pixels;
-
-    return result;
+    return .{
+        .data = pixels.ptr,
+        .width = image.width,
+        .height = image.height,
+        .mipmaps = 1,
+        .format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE,
+    };
 }
 
 // Crop an image to area defined by a rectangle
+// NOTE: Security checks are performed in case rectangle goes out of bounds
 export fn ImageCrop(image: [*c]Image, crop_in: Rectangle) callconv(.c) void {
     var crop = crop_in;
+
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
+    // Security checks to validate crop rectangle
     if (crop.x < 0) {
         crop.width += crop.x;
         crop.x = 0;
@@ -1399,9 +1372,9 @@ export fn ImageCrop(image: [*c]Image, crop_in: Rectangle) callconv(.c) void {
         crop.height += crop.y;
         crop.y = 0;
     }
-    if ((crop.x + crop.width) > @as(f32, @floatFromInt(image.*.width))) crop.width = @as(f32, @floatFromInt(image.*.width)) - crop.x;
-    if ((crop.y + crop.height) > @as(f32, @floatFromInt(image.*.height))) crop.height = @as(f32, @floatFromInt(image.*.height)) - crop.y;
-    if ((crop.x > @as(f32, @floatFromInt(image.*.width))) or (crop.y > @as(f32, @floatFromInt(image.*.height)))) {
+    if ((crop.x + crop.width) > f(image.*.width)) crop.width = f(image.*.width) - crop.x;
+    if ((crop.y + crop.height) > f(image.*.height)) crop.height = f(image.*.height) - crop.y;
+    if ((crop.x > f(image.*.width)) or (crop.y > f(image.*.height))) {
         TraceLog(LOG_WARNING, "IMAGE: Failed to crop, rectangle out of bounds");
         return;
     }
@@ -1409,270 +1382,121 @@ export fn ImageCrop(image: [*c]Image, crop_in: Rectangle) callconv(.c) void {
     if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
     if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-
-        const croppedData: [*]u8 = @ptrCast(RL_MALLOC(@intCast(ti(crop.width * crop.height) * bytesPerPixel)));
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-
-        var y: c_int = ti(crop.y);
-        var offsetSize: c_int = 0;
-        while (y < ti(crop.y + crop.height)) : (y += 1) {
-            _ = memcpy(
-                croppedData + @as(usize, @intCast(offsetSize)),
-                src8 + @as(usize, @intCast((y * image.*.width + ti(crop.x)) * bytesPerPixel)),
-                @intCast(ti(crop.width) * bytesPerPixel),
-            );
-            offsetSize += (ti(crop.width) * bytesPerPixel);
-        }
-
-        RL_FREE(image.*.data);
-        image.*.data = croppedData;
-        image.*.width = ti(crop.width);
-        image.*.height = ti(crop.height);
+        return;
     }
+
+    const pixelSize = GetPixelDataSize(1, 1, image.*.format);
+    const cropped = allocC(u8, ti(crop.width * crop.height) * pixelSize) orelse return;
+
+    const src: [*]const u8 = @ptrCast(image.*.data);
+    const rowSize: usize = @intCast(ti(crop.width) * pixelSize);
+    var offset: usize = 0;
+    var y = ti(crop.y);
+    while (y < ti(crop.y + crop.height)) : (y += 1) {
+        const from: usize = @intCast((y * image.*.width + ti(crop.x)) * pixelSize);
+        @memcpy(cropped[offset..][0..rowSize], src[from..][0..rowSize]);
+        offset += rowSize;
+    }
+
+    cmem.free(image.*.data);
+    image.*.data = cropped.ptr;
+    image.*.width = ti(crop.width);
+    image.*.height = ti(crop.height);
 }
 
 // Convert image data to desired format
 export fn ImageFormat(image: [*c]Image, newFormat: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    if ((newFormat != 0) and (image.*.format != newFormat)) {
-        if ((image.*.format < PIXELFORMAT_COMPRESSED_DXT1_RGB) and (newFormat < PIXELFORMAT_COMPRESSED_DXT1_RGB)) {
-            const pixels = LoadImageDataNormalized(image.*); // Supports 8 to 32 bit per channel
+    if ((newFormat == 0) or (image.*.format == newFormat)) return;
 
-            RL_FREE(image.*.data);
-            image.*.data = null;
-            image.*.format = newFormat;
+    if ((image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) or (newFormat >= PIXELFORMAT_COMPRESSED_DXT1_RGB)) {
+        TraceLog(LOG_WARNING, "IMAGE: Data format is compressed, can not be converted");
+        return;
+    }
 
-            const total: usize = @intCast(image.*.width * image.*.height);
+    const pixels = loadNormalized(c_allocator, image.*) catch return; // Supports 8 to 32 bit per channel
+    defer c_allocator.free(pixels);
 
-            switch (image.*.format) {
-                PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(u8))));
-                    const o: [*]u8 = @ptrCast(image.*.data);
-                    var i: usize = 0;
-                    while (i < total) : (i += 1) {
-                        o[i] = tuc((pixels[i].x * 0.299 + pixels[i].y * 0.587 + pixels[i].z * 0.114) * 255.0);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 2 * @as(c_int, @sizeOf(u8))));
-                    const o: [*]u8 = @ptrCast(image.*.data);
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 2) : ({
-                        i += 2;
-                        k += 1;
-                    }) {
-                        o[i] = tuc((pixels[k].x * 0.299 + pixels[k].y * 0.587 + pixels[k].z * 0.114) * 255.0);
-                        o[i + 1] = tuc(pixels[k].w * 255.0);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(u16))));
-                    const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    while (i < total) : (i += 1) {
-                        const r: u16 = tuc(round(@floatCast(pixels[i].x * 31.0)));
-                        const g: u16 = tuc(round(@floatCast(pixels[i].y * 63.0)));
-                        const b: u16 = tuc(round(@floatCast(pixels[i].z * 31.0)));
-                        o[i] = (r << 11) | (g << 5) | b;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 3 * @as(c_int, @sizeOf(u8))));
-                    const o: [*]u8 = @ptrCast(image.*.data);
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 3) : ({
-                        i += 3;
-                        k += 1;
-                    }) {
-                        o[i] = tuc(pixels[k].x * 255.0);
-                        o[i + 1] = tuc(pixels[k].y * 255.0);
-                        o[i + 2] = tuc(pixels[k].z * 255.0);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(u16))));
-                    const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    while (i < total) : (i += 1) {
-                        const r: u16 = tuc(round(@floatCast(pixels[i].x * 31.0)));
-                        const g: u16 = tuc(round(@floatCast(pixels[i].y * 31.0)));
-                        const b: u16 = tuc(round(@floatCast(pixels[i].z * 31.0)));
-                        const a: u16 = if (pixels[i].w > (@as(f32, @floatFromInt(PIXELFORMAT_UNCOMPRESSED_R5G5B5A1_ALPHA_THRESHOLD)) / 255.0)) 1 else 0;
-                        o[i] = (r << 11) | (g << 6) | (b << 1) | a;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(u16))));
-                    const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    while (i < total) : (i += 1) {
-                        const r: u16 = tuc(round(@floatCast(pixels[i].x * 15.0)));
-                        const g: u16 = tuc(round(@floatCast(pixels[i].y * 15.0)));
-                        const b: u16 = tuc(round(@floatCast(pixels[i].z * 15.0)));
-                        const a: u16 = tuc(round(@floatCast(pixels[i].w * 15.0)));
-                        o[i] = (r << 12) | (g << 8) | (b << 4) | a;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 4 * @as(c_int, @sizeOf(u8))));
-                    const o: [*]u8 = @ptrCast(image.*.data);
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 4) : ({
-                        i += 4;
-                        k += 1;
-                    }) {
-                        o[i] = tuc(pixels[k].x * 255.0);
-                        o[i + 1] = tuc(pixels[k].y * 255.0);
-                        o[i + 2] = tuc(pixels[k].z * 255.0);
-                        o[i + 3] = tuc(pixels[k].w * 255.0);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(f32))));
-                    const o: [*]f32 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    while (i < total) : (i += 1) {
-                        o[i] = pixels[i].x * 0.299 + pixels[i].y * 0.587 + pixels[i].z * 0.114;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 3 * @as(c_int, @sizeOf(f32))));
-                    const o: [*]f32 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 3) : ({
-                        i += 3;
-                        k += 1;
-                    }) {
-                        o[i] = pixels[k].x;
-                        o[i + 1] = pixels[k].y;
-                        o[i + 2] = pixels[k].z;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 4 * @as(c_int, @sizeOf(f32))));
-                    const o: [*]f32 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 4) : ({
-                        i += 4;
-                        k += 1;
-                    }) {
-                        o[i] = pixels[k].x;
-                        o[i + 1] = pixels[k].y;
-                        o[i + 2] = pixels[k].z;
-                        o[i + 3] = pixels[k].w;
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(u16))));
-                    const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    while (i < total) : (i += 1) {
-                        o[i] = FloatToHalf(pixels[i].x * 0.299 + pixels[i].y * 0.587 + pixels[i].z * 0.114);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 3 * @as(c_int, @sizeOf(u16))));
-                    const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 3) : ({
-                        i += 3;
-                        k += 1;
-                    }) {
-                        o[i] = FloatToHalf(pixels[k].x);
-                        o[i + 1] = FloatToHalf(pixels[k].y);
-                        o[i + 2] = FloatToHalf(pixels[k].z);
-                    }
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * 4 * @as(c_int, @sizeOf(u16))));
-                    const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                    var i: usize = 0;
-                    var k: usize = 0;
-                    while (i < total * 4) : ({
-                        i += 4;
-                        k += 1;
-                    }) {
-                        o[i] = FloatToHalf(pixels[k].x);
-                        o[i + 1] = FloatToHalf(pixels[k].y);
-                        o[i + 2] = FloatToHalf(pixels[k].z);
-                        o[i + 3] = FloatToHalf(pixels[k].w);
-                    }
-                },
-                else => {},
-            }
+    cmem.free(image.*.data);
+    image.*.data = null;
+    image.*.format = newFormat;
 
-            RL_FREE(pixels);
+    // NOTE: A format with no encoder leaves the image without data, as in raylib
+    const size = bytesPerPixel(newFormat);
+    if (size > 0) {
+        const data = cmem.alloc(u8, pixels.len * size) catch return;
+        for (pixels, 0..) |pixel, i| writeNormalized(data[i * size ..].ptr, pixel, newFormat);
+        image.*.data = data.ptr;
+    }
 
-            if (image.*.mipmaps > 1) {
-                image.*.mipmaps = 1;
-                if (image.*.data != null) ImageMipmaps(image);
-            }
-        } else TraceLog(LOG_WARNING, "IMAGE: Data format is compressed, can not be converted");
+    // In case original image had mipmaps, generate mipmaps for formatted image
+    // NOTE: Original mipmaps are replaced by new ones, if custom mipmaps were used, they are lost
+    if (image.*.mipmaps > 1) {
+        image.*.mipmaps = 1;
+        if (image.*.data != null) ImageMipmaps(image);
     }
 }
 
 // Create an image from text (default font)
 export fn ImageText(text: [*c]const u8, fontSize: c_int, color: Color) callconv(.c) Image {
-    var imText: Image = std.mem.zeroes(Image);
-    const defaultFontSize: c_int = 10; // Default Font chars height in pixel
-    var fs = fontSize;
-    if (fs < defaultFontSize) fs = defaultFontSize;
-    const spacing = @divTrunc(fs, defaultFontSize);
-    imText = ImageTextEx(GetFontDefault(), text, @floatFromInt(fs), @floatFromInt(spacing), color);
-    return imText;
+    const defaultFontSize = 10; // Default Font chars height in pixel
+    const size = @max(fontSize, defaultFontSize);
+    const spacing = @divTrunc(size, defaultFontSize);
+
+    return ImageTextEx(GetFontDefault(), text, f(size), f(spacing), color);
 }
 
 // Create an image from text (custom sprite font)
+// WARNING: Module required: rtext
 export fn ImageTextEx(font: Font, text: [*c]const u8, fontSize: f32, spacing: f32, tint: Color) callconv(.c) Image {
-    var imText: Image = std.mem.zeroes(Image);
-    if (text == null) return imText;
+    if (text == null) return .{};
 
-    const textLength: c_int = @intCast(strlen(text)); // Get length of text in bytes
+    const bytes = std.mem.span(text);
     var textOffsetX: c_int = 0; // Image drawing position X
     var textOffsetY: c_int = 0; // Offset between lines (on linebreak '\n')
 
     // NOTE: Text image is generated at font base size, later scaled to desired font size
-    const imSize = MeasureTextEx(font, text, @floatFromInt(font.baseSize), spacing);
+    const imSize = MeasureTextEx(font, text, f(font.baseSize), spacing); // WARNING: Module required: rtext
     const textSize = MeasureTextEx(font, text, fontSize, spacing);
 
-    imText = GenImageColor(ti(imSize.x), ti(imSize.y), BLANK);
+    // Create image to store text
+    var imText = GenImageColor(ti(imSize.x), ti(imSize.y), BLANK);
 
-    var i: c_int = 0;
-    while (i < textLength) {
+    var i: usize = 0;
+    while (i < bytes.len) {
+        // Get next codepoint from byte string and glyph index in font
         var codepointByteCount: c_int = 0;
-        const codepoint = GetCodepointNext(ptrAdd(text, i), &codepointByteCount);
-        const index = GetGlyphIndex(font, codepoint);
-        const u: usize = @intCast(index);
+        const codepoint = GetCodepointNext(bytes[i..].ptr, &codepointByteCount); // WARNING: Module required: rtext
+        const glyph: usize = @intCast(GetGlyphIndex(font, codepoint)); // WARNING: Module required: rtext
+        i += @intCast(codepointByteCount);
 
         if (codepoint == '\n') {
+            // NOTE: Fixed line spacing of 1.5 line-height
+            // TODO: Support custom line spacing defined by user
             textOffsetY += (font.baseSize + @divTrunc(font.baseSize, 2));
             textOffsetX = 0;
-        } else {
-            if ((codepoint != ' ') and (codepoint != '\t')) {
-                const rec = Rectangle{
-                    .x = @floatFromInt(textOffsetX + font.glyphs[u].offsetX),
-                    .y = @floatFromInt(textOffsetY + font.glyphs[u].offsetY),
-                    .width = font.recs[u].width,
-                    .height = font.recs[u].height,
-                };
-                ImageDrawImagePro(&imText, font.glyphs[u].image, .{ .x = 0, .y = 0, .width = @floatFromInt(font.glyphs[u].image.width), .height = @floatFromInt(font.glyphs[u].image.height) }, rec, .{ .x = 0, .y = 0 }, 0.0, tint);
-            }
-
-            if (font.glyphs[u].advanceX == 0) {
-                textOffsetX += ti(font.recs[u].width + spacing);
-            } else textOffsetX += font.glyphs[u].advanceX + ti(spacing);
+            continue;
         }
 
-        i += codepointByteCount;
+        const info = font.glyphs[glyph];
+        const rec = font.recs[glyph];
+
+        if ((codepoint != ' ') and (codepoint != '\t')) {
+            const dstRec: Rectangle = .{
+                .x = f(textOffsetX + info.offsetX),
+                .y = f(textOffsetY + info.offsetY),
+                .width = rec.width,
+                .height = rec.height,
+            };
+            const srcRec: Rectangle = .{ .x = 0, .y = 0, .width = f(info.image.width), .height = f(info.image.height) };
+            ImageDrawImagePro(&imText, info.image, srcRec, dstRec, .{ .x = 0, .y = 0 }, 0.0, tint);
+        }
+
+        if (info.advanceX == 0) {
+            textOffsetX += ti(rec.width + spacing);
+        } else textOffsetX += info.advanceX + ti(spacing);
     }
 
     // Scale image depending on text size
@@ -1680,6 +1504,8 @@ export fn ImageTextEx(font: Font, text: [*c]const u8, fontSize: f32, spacing: f3
         const scaleFactor = textSize.y / imSize.y;
         TraceLog(LOG_INFO, "IMAGE: Text scaled by factor: %f", @as(f64, scaleFactor));
 
+        // Using nearest-neighbor scaling algorithm for default font
+        // TODO: Allow defining the preferred scaling mechanism externally
         if (font.texture.id == GetFontDefault().texture.id) {
             ImageResizeNN(&imText, ti(imSize.x * scaleFactor), ti(imSize.y * scaleFactor));
         } else ImageResize(&imText, ti(imSize.x * scaleFactor), ti(imSize.y * scaleFactor));
@@ -1690,509 +1516,359 @@ export fn ImageTextEx(font: Font, text: [*c]const u8, fontSize: f32, spacing: f3
 
 // Resize and image to new size using Nearest-Neighbor scaling algorithm
 export fn ImageResizeNN(image: [*c]Image, newWidth: c_int, newHeight: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    const pixels = LoadImageColors(image.*);
-    const output: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(newWidth * newHeight * @as(c_int, @sizeOf(Color))))));
+    const pixels = loadColors(image.*) orelse return;
+    defer cmem.free(pixels.ptr);
+    const output = allocC(Color, newWidth * newHeight) orelse return;
 
     // EDIT: added +1 to account for an early rounding problem
     const xRatio = @divTrunc(image.*.width << 16, newWidth) + 1;
     const yRatio = @divTrunc(image.*.height << 16, newHeight) + 1;
 
-    var y: c_int = 0;
-    while (y < newHeight) : (y += 1) {
-        var x: c_int = 0;
-        while (x < newWidth) : (x += 1) {
-            const x2 = (x * xRatio) >> 16;
-            const y2 = (y * yRatio) >> 16;
-            output[@intCast((y * newWidth) + x)] = pixels[@intCast((y2 * image.*.width) + x2)];
+    for (0..dim(newHeight)) |yi| {
+        for (0..dim(newWidth)) |xi| {
+            const x2 = (@as(c_int, @intCast(xi)) * xRatio) >> 16;
+            const y2 = (@as(c_int, @intCast(yi)) * yRatio) >> 16;
+            output[yi * dim(newWidth) + xi] = pixels[@intCast((y2 * image.*.width) + x2)];
         }
     }
 
-    const format = image.*.format;
-
-    RL_FREE(image.*.data);
-
-    image.*.data = output;
     image.*.width = newWidth;
     image.*.height = newHeight;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
-
-    UnloadImageColors(pixels);
+    setColorsKeepFormat(image, output);
 }
 
 // Resize and image to new size
+// NOTE: Uses stb default scaling filters (both bicubic):
+// STBIR_DEFAULT_FILTER_UPSAMPLE    STBIR_FILTER_CATMULLROM
+// STBIR_DEFAULT_FILTER_DOWNSAMPLE  STBIR_FILTER_MITCHELL   (high-quality Catmull-Rom)
 export fn ImageResize(image: [*c]Image, newWidth: c_int, newHeight: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    if ((image.*.format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) or
-        (image.*.format == PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA) or
-        (image.*.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8) or
-        (image.*.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8))
-    {
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const output: [*c]u8 = @ptrCast(RL_MALLOC(@intCast(newWidth * newHeight * bytesPerPixel)));
+    // 8-bit-per-channel formats are resized as they are; their channel count
+    // is also stb_image_resize2's pixel layout (STBIR_1CHANNEL...STBIR_RGBA)
+    if (stbChannels(image.*.format)) |layout| {
+        const pixelSize = GetPixelDataSize(1, 1, image.*.format);
+        const output = allocC(u8, newWidth * newHeight * pixelSize) orelse return;
 
-        switch (image.*.format) {
-            PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => _ = stbir_resize_uint8_linear(@ptrCast(image.*.data), image.*.width, image.*.height, 0, output, newWidth, newHeight, 0, 1),
-            PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => _ = stbir_resize_uint8_linear(@ptrCast(image.*.data), image.*.width, image.*.height, 0, output, newWidth, newHeight, 0, 2),
-            PIXELFORMAT_UNCOMPRESSED_R8G8B8 => _ = stbir_resize_uint8_linear(@ptrCast(image.*.data), image.*.width, image.*.height, 0, output, newWidth, newHeight, 0, 3),
-            PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => _ = stbir_resize_uint8_linear(@ptrCast(image.*.data), image.*.width, image.*.height, 0, output, newWidth, newHeight, 0, 4),
-            else => {},
-        }
+        _ = stbir_resize_uint8_linear(@ptrCast(image.*.data), image.*.width, image.*.height, 0, output.ptr, newWidth, newHeight, 0, layout);
 
-        RL_FREE(image.*.data);
-        image.*.data = output;
+        cmem.free(image.*.data);
+        image.*.data = output.ptr;
         image.*.width = newWidth;
         image.*.height = newHeight;
     } else {
-        const pixels = LoadImageColors(image.*);
-        const output: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(newWidth * newHeight * @as(c_int, @sizeOf(Color))))));
+        // Get data as Color pixels array to work with it
+        const pixels = loadColors(image.*) orelse return;
+        defer cmem.free(pixels.ptr);
+        const output = allocC(Color, newWidth * newHeight) orelse return;
 
-        _ = stbir_resize_uint8_linear(@ptrCast(pixels), image.*.width, image.*.height, 0, @ptrCast(output), newWidth, newHeight, 0, 4);
+        // NOTE: Color data is cast to (unsigned char *), there shouldn't been any problem...
+        _ = stbir_resize_uint8_linear(@ptrCast(pixels.ptr), image.*.width, image.*.height, 0, @ptrCast(output.ptr), newWidth, newHeight, 0, 4);
 
-        const format = image.*.format;
-
-        UnloadImageColors(pixels);
-        RL_FREE(image.*.data);
-
-        image.*.data = output;
         image.*.width = newWidth;
         image.*.height = newHeight;
-        image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-        ImageFormat(image, format);
+        setColorsKeepFormat(image, output);
     }
 }
 
 // Resize canvas and fill with color
+// NOTE: Resize offset is relative to the top-left corner of the original image
 export fn ImageResizeCanvas(image: [*c]Image, newWidth: c_int, newHeight: c_int, offsetX: c_int, offsetY: c_int, fill: Color) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
+    if ((newWidth == image.*.width) and (newHeight == image.*.height)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else if ((newWidth != image.*.width) or (newHeight != image.*.height)) {
-        var srcRec = Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(image.*.width), .height = @floatFromInt(image.*.height) };
-        var dstPos = Vector2{ .x = @floatFromInt(offsetX), .y = @floatFromInt(offsetY) };
+    var srcRec: Rectangle = .{ .x = 0, .y = 0, .width = f(image.*.width), .height = f(image.*.height) };
+    var dstPos: Vector2 = .{ .x = f(offsetX), .y = f(offsetY) };
 
-        if (offsetX < 0) {
-            srcRec.x = @floatFromInt(-offsetX);
-            srcRec.width += @floatFromInt(offsetX);
-            dstPos.x = 0;
-        } else if ((offsetX + image.*.width) > newWidth) srcRec.width = @floatFromInt(newWidth - offsetX);
+    if (offsetX < 0) {
+        srcRec.x = f(-offsetX);
+        srcRec.width += f(offsetX);
+        dstPos.x = 0;
+    } else if ((offsetX + image.*.width) > newWidth) srcRec.width = f(newWidth - offsetX);
 
-        if (offsetY < 0) {
-            srcRec.y = @floatFromInt(-offsetY);
-            srcRec.height += @floatFromInt(offsetY);
-            dstPos.y = 0;
-        } else if ((offsetY + image.*.height) > newHeight) srcRec.height = @floatFromInt(newHeight - offsetY);
+    if (offsetY < 0) {
+        srcRec.y = f(-offsetY);
+        srcRec.height += f(offsetY);
+        dstPos.y = 0;
+    } else if ((offsetY + image.*.height) > newHeight) srcRec.height = f(newHeight - offsetY);
 
-        if (@as(f32, @floatFromInt(newWidth)) < srcRec.width) srcRec.width = @floatFromInt(newWidth);
-        if (@as(f32, @floatFromInt(newHeight)) < srcRec.height) srcRec.height = @floatFromInt(newHeight);
+    if (f(newWidth) < srcRec.width) srcRec.width = f(newWidth);
+    if (f(newHeight) < srcRec.height) srcRec.height = f(newHeight);
 
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const resizedData: [*]u8 = @ptrCast(RL_CALLOC(@intCast(newWidth * newHeight * bytesPerPixel), 1));
+    const pixelSize = GetPixelDataSize(1, 1, image.*.format);
+    const resized = allocC(u8, newWidth * newHeight * pixelSize) orelse return;
+    const size: usize = @intCast(pixelSize);
+    const rowSize = dim(newWidth) * size;
 
-        // Fill resized canvas with fill color (set first pixel with image format)
-        SetPixelColor(resizedData, fill, image.*.format);
+    // Fill resized canvas with fill color: set the first pixel in the image
+    // format, then repeat it along the first row and that row down the canvas
+    SetPixelColor(resized.ptr, fill, image.*.format);
+    for (1..dim(newWidth)) |x| @memcpy(resized[x * size ..][0..size], resized[0..size]);
+    for (1..dim(newHeight)) |y| @memcpy(resized[y * rowSize ..][0..rowSize], resized[0..rowSize]);
 
-        var x: c_int = 1;
-        while (x < newWidth) : (x += 1) {
-            _ = memcpy(resizedData + @as(usize, @intCast(x * bytesPerPixel)), resizedData, @intCast(bytesPerPixel));
-        }
-        var yy: c_int = 1;
-        while (yy < newHeight) : (yy += 1) {
-            _ = memcpy(resizedData + @as(usize, @intCast(yy * newWidth * bytesPerPixel)), resizedData, @intCast(newWidth * bytesPerPixel));
-        }
-
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-        var dstOffsetSize: c_int = (ti(dstPos.y) * newWidth + ti(dstPos.x)) * bytesPerPixel;
-
-        var y: c_int = 0;
-        while (y < ti(srcRec.height)) : (y += 1) {
-            _ = memcpy(
-                resizedData + @as(usize, @intCast(dstOffsetSize)),
-                src8 + @as(usize, @intCast(((y + ti(srcRec.y)) * image.*.width + ti(srcRec.x)) * bytesPerPixel)),
-                @intCast(ti(srcRec.width) * bytesPerPixel),
-            );
-            dstOffsetSize += (newWidth * bytesPerPixel);
-        }
-
-        RL_FREE(image.*.data);
-        image.*.data = resizedData;
-        image.*.width = newWidth;
-        image.*.height = newHeight;
+    const src: [*]const u8 = @ptrCast(image.*.data);
+    const copySize: usize = @intCast(ti(srcRec.width) * pixelSize);
+    var dstOffset: usize = @intCast((ti(dstPos.y) * newWidth + ti(dstPos.x)) * pixelSize);
+    for (0..dim(ti(srcRec.height))) |yi| {
+        const y: c_int = @intCast(yi);
+        const from: usize = @intCast(((y + ti(srcRec.y)) * image.*.width + ti(srcRec.x)) * pixelSize);
+        @memcpy(resized[dstOffset..][0..copySize], src[from..][0..copySize]);
+        dstOffset += rowSize;
     }
+
+    cmem.free(image.*.data);
+    image.*.data = resized.ptr;
+    image.*.width = newWidth;
+    image.*.height = newHeight;
 }
 
 // Convert image to POT (power-of-two)
+// NOTE: It could be useful on OpenGL ES 2.0 (RPI, HTML5)
 export fn ImageToPOT(image: [*c]Image, fill: Color) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    const potWidth = ti(powf(2, ceilf(logf(@floatFromInt(image.*.width)) / logf(2))));
-    const potHeight = ti(powf(2, ceilf(logf(@floatFromInt(image.*.height)) / logf(2))));
+    // Calculate next power-of-two values
+    // NOTE: Just add the required amount of pixels at the right and bottom sides of image...
+    const potWidth = ti(powf(2, @ceil(logf(f(image.*.width)) / logf(2))));
+    const potHeight = ti(powf(2, @ceil(logf(f(image.*.height)) / logf(2))));
 
+    // Check if POT texture generation is required (if texture is not already POT)
     if ((potWidth != image.*.width) or (potHeight != image.*.height)) ImageResizeCanvas(image, potWidth, potHeight, 0, 0, fill);
 }
 
 // Crop image depending on alpha value
+// NOTE: Threshold is defined as a percentage: 0.0f -> 1.0f
 export fn ImageAlphaCrop(image: [*c]Image, threshold: f32) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
     const crop = GetImageAlphaBorder(image.*, threshold);
 
+    // Crop if rectangle is valid
     if ((ti(crop.width) != 0) and (ti(crop.height) != 0)) ImageCrop(image, crop);
 }
 
 // Clear alpha channel to desired color
+// NOTE: Threshold defines the alpha limit, 0.0f to 1.0f
 export fn ImageAlphaClear(image: [*c]Image, color: Color, threshold: f32) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const total: usize = @intCast(image.*.width * image.*.height);
-        switch (image.*.format) {
-            PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-                const d: [*]u8 = @ptrCast(image.*.data);
-                const thresholdValue: u8 = tuc(threshold * 255.0);
-                var i: usize = 1;
-                while (i < total * 2) : (i += 2) {
-                    if (d[i] <= thresholdValue) {
-                        d[i - 1] = color.r;
-                        d[i] = color.a;
-                    }
-                }
-            },
-            PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-                const d: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                const thresholdValue: u16 = if (threshold < 0.5) 0 else 1;
-                const r: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.r)) * 31.0)));
-                const g: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.g)) * 31.0)));
-                const b: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.b)) * 31.0)));
-                const a: u16 = if (color.a < 128) 0 else 1;
-                var i: usize = 0;
-                while (i < total) : (i += 1) {
-                    if ((d[i] & 0b0000000000000001) <= thresholdValue) {
-                        d[i] = (r << 11) | (g << 6) | (b << 1) | a;
-                    }
-                }
-            },
-            PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-                const d: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                const thresholdValue: u16 = tuc(threshold * 15.0);
-                const r: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.r)) * 15.0)));
-                const g: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.g)) * 15.0)));
-                const b: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.b)) * 15.0)));
-                const a: u16 = tuc(round(@floatCast(@as(f32, @floatFromInt(color.a)) * 15.0)));
-                var i: usize = 0;
-                while (i < total) : (i += 1) {
-                    if ((d[i] & 0x000f) <= thresholdValue) {
-                        d[i] = (r << 12) | (g << 8) | (b << 4) | a;
-                    }
-                }
-            },
-            PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-                const d: [*]u8 = @ptrCast(image.*.data);
-                const thresholdValue: u8 = tuc(threshold * 255.0);
-                var i: usize = 3;
-                while (i < total * 4) : (i += 4) {
-                    if (d[i] <= thresholdValue) {
-                        d[i - 3] = color.r;
-                        d[i - 2] = color.g;
-                        d[i - 1] = color.b;
-                        d[i] = color.a;
-                    }
-                }
-            },
-            PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-                const d: [*]f32 = @ptrCast(@alignCast(image.*.data));
-                var i: usize = 3;
-                while (i < total * 4) : (i += 4) {
-                    if (d[i] <= threshold) {
-                        d[i - 3] = @as(f32, @floatFromInt(color.r)) / 255.0;
-                        d[i - 2] = @as(f32, @floatFromInt(color.g)) / 255.0;
-                        d[i - 1] = @as(f32, @floatFromInt(color.b)) / 255.0;
-                        d[i] = @as(f32, @floatFromInt(color.a)) / 255.0;
-                    }
-                }
-            },
-            PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                const d: [*]u16 = @ptrCast(@alignCast(image.*.data));
-                var i: usize = 3;
-                while (i < total * 4) : (i += 4) {
-                    if (HalfToFloat(d[i]) <= threshold) {
-                        d[i - 3] = FloatToHalf(@as(f32, @floatFromInt(color.r)) / 255.0);
-                        d[i - 2] = FloatToHalf(@as(f32, @floatFromInt(color.g)) / 255.0);
-                        d[i - 1] = FloatToHalf(@as(f32, @floatFromInt(color.b)) / 255.0);
-                        d[i] = FloatToHalf(@as(f32, @floatFromInt(color.a)) / 255.0);
-                    }
-                }
-            },
-            else => {},
-        }
+    switch (image.*.format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
+            const thresholdValue: u8 = tuc(threshold * 255.0);
+            for (pixelData([2]u8, image.*)) |*pixel| {
+                if (pixel[1] <= thresholdValue) pixel.* = .{ color.r, color.a };
+            }
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
+            const thresholdValue: u16 = if (threshold < 0.5) 0 else 1;
+
+            const r: u16 = tuc(@round(f(color.r) * 31.0));
+            const g: u16 = tuc(@round(f(color.g) * 31.0));
+            const b: u16 = tuc(@round(f(color.b) * 31.0));
+            const a: u16 = if (color.a < 128) 0 else 1;
+
+            for (pixelData(u16, image.*)) |*pixel| {
+                if ((pixel.* & 0b0000000000000001) <= thresholdValue) pixel.* = (r << 11) | (g << 6) | (b << 1) | a;
+            }
+        },
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
+            const thresholdValue: u16 = tuc(threshold * 15.0);
+
+            const r: u16 = tuc(@round(f(color.r) * 15.0));
+            const g: u16 = tuc(@round(f(color.g) * 15.0));
+            const b: u16 = tuc(@round(f(color.b) * 15.0));
+            const a: u16 = tuc(@round(f(color.a) * 15.0));
+
+            for (pixelData(u16, image.*)) |*pixel| {
+                if ((pixel.* & 0x000f) <= thresholdValue) pixel.* = (r << 12) | (g << 8) | (b << 4) | a;
+            }
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
+            const thresholdValue: u8 = tuc(threshold * 255.0);
+            for (pixelData([4]u8, image.*)) |*pixel| {
+                if (pixel[3] <= thresholdValue) pixel.* = .{ color.r, color.g, color.b, color.a };
+            }
+        },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
+            for (pixelData([4]f32, image.*)) |*pixel| {
+                if (pixel[3] <= threshold) pixel.* = .{ f(color.r) / 255.0, f(color.g) / 255.0, f(color.b) / 255.0, f(color.a) / 255.0 };
+            }
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
+            for (pixelData([4]u16, image.*)) |*pixel| {
+                if (encode.halfToFloat(pixel[3]) <= threshold) pixel.* = .{
+                    encode.floatToHalf(f(color.r) / 255.0),
+                    encode.floatToHalf(f(color.g) / 255.0),
+                    encode.floatToHalf(f(color.b) / 255.0),
+                    encode.floatToHalf(f(color.a) / 255.0),
+                };
+            }
+        },
+        else => {},
     }
 }
 
 // Apply alpha mask to image
+// NOTE 1: Returned image is GRAY_ALPHA (16bit) or RGBA (32bit)
+// NOTE 2: alphaMask should be same size as image
 export fn ImageAlphaMask(image: [*c]Image, alphaMask: Image) callconv(.c) void {
     if ((image.*.width != alphaMask.width) or (image.*.height != alphaMask.height)) {
         TraceLog(LOG_WARNING, "IMAGE: Alpha mask must be same size as image");
-    } else if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+        return;
+    }
+    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "IMAGE: Alpha mask can not be applied to compressed data formats");
+        return;
+    }
+
+    // Force mask to be Grayscale
+    var mask = ImageCopy(alphaMask);
+    defer UnloadImage(mask);
+    if (mask.format != PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) ImageFormat(&mask, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+    const alphas = pixelData(u8, mask);
+
+    // In case image is only grayscale, we just add alpha channel
+    if (image.*.format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
+        const data = allocC([2]u8, image.*.width * image.*.height) orelse return;
+        for (data, pixelData(u8, image.*), alphas) |*pixel, gray, alpha| pixel.* = .{ gray, alpha };
+
+        cmem.free(image.*.data);
+        image.*.data = data.ptr;
+        image.*.format = PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA;
     } else {
-        var mask = ImageCopy(alphaMask);
-        if (mask.format != PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) ImageFormat(&mask, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+        // Convert image to RGBA
+        if (image.*.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) ImageFormat(image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
 
-        const maskTotal: usize = @intCast(mask.width * mask.height);
-        const imgTotal: usize = @intCast(image.*.width * image.*.height);
-        const maskData: [*]const u8 = @ptrCast(mask.data);
-
-        if (image.*.format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) {
-            const data: [*]u8 = @ptrCast(RL_MALLOC(@intCast(image.*.width * image.*.height * 2)));
-            const imgData: [*]const u8 = @ptrCast(image.*.data);
-
-            var i: usize = 0;
-            var k: usize = 0;
-            while ((i < maskTotal) or (i < imgTotal)) : ({
-                i += 1;
-                k += 2;
-            }) {
-                data[k] = imgData[i];
-                data[k + 1] = maskData[i];
-            }
-
-            RL_FREE(image.*.data);
-            image.*.data = data;
-            image.*.format = PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA;
-        } else {
-            if (image.*.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) ImageFormat(image, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
-
-            const imgData: [*]u8 = @ptrCast(image.*.data);
-            var i: usize = 0;
-            var k: usize = 3;
-            while ((i < maskTotal) or (i < imgTotal)) : ({
-                i += 1;
-                k += 4;
-            }) {
-                imgData[k] = maskData[i];
-            }
-        }
-
-        UnloadImage(mask);
+        // Apply alpha mask to alpha channel
+        for (pixelData([4]u8, image.*), alphas) |*pixel, alpha| pixel[3] = alpha;
     }
 }
 
 // Premultiply alpha channel
 export fn ImageAlphaPremultiply(image: [*c]Image) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    var alpha: f32 = 0.0;
-    const pixels = LoadImageColors(image.*);
+    const pixels = loadColors(image.*) orelse return;
 
-    var i: usize = 0;
-    const total: usize = @intCast(image.*.width * image.*.height);
-    while (i < total) : (i += 1) {
-        if (pixels[i].a == 0) {
-            pixels[i].r = 0;
-            pixels[i].g = 0;
-            pixels[i].b = 0;
-        } else if (pixels[i].a < 255) {
-            alpha = @as(f32, @floatFromInt(pixels[i].a)) / 255.0;
-            pixels[i].r = tuc(@as(f32, @floatFromInt(pixels[i].r)) * alpha);
-            pixels[i].g = tuc(@as(f32, @floatFromInt(pixels[i].g)) * alpha);
-            pixels[i].b = tuc(@as(f32, @floatFromInt(pixels[i].b)) * alpha);
+    for (pixels) |*pixel| {
+        if (pixel.a == 0) {
+            pixel.r = 0;
+            pixel.g = 0;
+            pixel.b = 0;
+        } else if (pixel.a < 255) {
+            const alpha = f(pixel.a) / 255.0;
+            pixel.r = tuc(f(pixel.r) * alpha);
+            pixel.g = tuc(f(pixel.g) * alpha);
+            pixel.b = tuc(f(pixel.b) * alpha);
         }
     }
 
-    RL_FREE(image.*.data);
-
-    const format = image.*.format;
-    image.*.data = pixels;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
+    setColorsKeepFormat(image, pixels);
 }
 
-// Apply box blur to image (Gaussian approximation)
+const Rgba = @Vector(4, f32);
+
+/// One box-blur pass along a line of `len` pixels starting at `start`, `stride`
+/// apart, from `src` into `dst`. Lane-wise float math is the same IEEE
+/// arithmetic as raylib's four scalar sums. `quantize` truncates results to
+/// whole channel values, as raylib's vertical pass does.
+fn boxBlurLine(src: []const Rgba, dst: []Rgba, start: usize, stride: usize, len: c_int, blurSize: c_int, quantize: bool) void {
+    var avg: Rgba = @splat(0.0);
+    var convolutionSize = blurSize;
+
+    for (0..dim(blurSize)) |i| avg += src[start + i * stride];
+
+    var x: c_int = 0;
+    while (x < len) : (x += 1) {
+        if (x - blurSize - 1 >= 0) {
+            avg -= src[start + @as(usize, @intCast(x - blurSize - 1)) * stride];
+            convolutionSize -= 1;
+        }
+        if (x + blurSize < len) {
+            avg += src[start + @as(usize, @intCast(x + blurSize)) * stride];
+            convolutionSize += 1;
+        }
+
+        const value = avg / @as(Rgba, @splat(f(convolutionSize)));
+        dst[start + @as(usize, @intCast(x)) * stride] = if (quantize)
+            .{ f(tuc(value[0])), f(tuc(value[1])), f(tuc(value[2])), f(tuc(value[3])) }
+        else
+            value;
+    }
+}
+
+// Apply box blur to image
 export fn ImageBlurGaussian(image: [*c]Image, blurSize: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
     ImageAlphaPremultiply(image);
 
-    const pixels = LoadImageColors(image.*);
+    const pixels = loadColors(image.*) orelse return;
 
-    const w: usize = @intCast(image.*.width);
-    const h: usize = @intCast(image.*.height);
+    // Loop switches between pixelsCopy1 and pixelsCopy2
+    const pixelsCopy1 = c_allocator.alloc(Rgba, pixels.len) catch return cmem.free(pixels.ptr);
+    defer c_allocator.free(pixelsCopy1);
+    const pixelsCopy2 = c_allocator.alloc(Rgba, pixels.len) catch return cmem.free(pixels.ptr);
+    defer c_allocator.free(pixelsCopy2);
 
-    const pixelsCopy1: [*c]Vector4 = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.*.height * image.*.width * @as(c_int, @sizeOf(Vector4))))));
-    const pixelsCopy2: [*c]Vector4 = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.*.height * image.*.width * @as(c_int, @sizeOf(Vector4))))));
+    for (pixelsCopy1, pixels) |*copy, pixel| copy.* = .{ f(pixel.r), f(pixel.g), f(pixel.b), f(pixel.a) };
 
-    {
-        var i: usize = 0;
-        while (i < h * w) : (i += 1) {
-            pixelsCopy1[i].x = @floatFromInt(pixels[i].r);
-            pixelsCopy1[i].y = @floatFromInt(pixels[i].g);
-            pixelsCopy1[i].z = @floatFromInt(pixels[i].b);
-            pixelsCopy1[i].w = @floatFromInt(pixels[i].a);
-        }
-    }
+    const width = dim(image.*.width);
+    const height = dim(image.*.height);
 
-    var j: c_int = 0;
-    while (j < GAUSSIAN_BLUR_ITERATIONS) : (j += 1) {
+    // Repeated convolution of rectangular window signal by itself converges to a gaussian distribution
+    for (0..GAUSSIAN_BLUR_ITERATIONS) |_| {
         // Horizontal motion blur
-        var row: c_int = 0;
-        while (row < image.*.height) : (row += 1) {
-            var avgR: f32 = 0.0;
-            var avgG: f32 = 0.0;
-            var avgB: f32 = 0.0;
-            var avgAlpha: f32 = 0.0;
-            var convolutionSize: c_int = blurSize;
-            const rw: usize = @intCast(row * image.*.width);
-
-            var i: c_int = 0;
-            while (i < blurSize) : (i += 1) {
-                avgR += pixelsCopy1[rw + @as(usize, @intCast(i))].x;
-                avgG += pixelsCopy1[rw + @as(usize, @intCast(i))].y;
-                avgB += pixelsCopy1[rw + @as(usize, @intCast(i))].z;
-                avgAlpha += pixelsCopy1[rw + @as(usize, @intCast(i))].w;
-            }
-
-            var x: c_int = 0;
-            while (x < image.*.width) : (x += 1) {
-                if (x - blurSize - 1 >= 0) {
-                    const idx = rw + @as(usize, @intCast(x - blurSize - 1));
-                    avgR -= pixelsCopy1[idx].x;
-                    avgG -= pixelsCopy1[idx].y;
-                    avgB -= pixelsCopy1[idx].z;
-                    avgAlpha -= pixelsCopy1[idx].w;
-                    convolutionSize -= 1;
-                }
-
-                if (x + blurSize < image.*.width) {
-                    const idx = rw + @as(usize, @intCast(x + blurSize));
-                    avgR += pixelsCopy1[idx].x;
-                    avgG += pixelsCopy1[idx].y;
-                    avgB += pixelsCopy1[idx].z;
-                    avgAlpha += pixelsCopy1[idx].w;
-                    convolutionSize += 1;
-                }
-
-                const o = rw + @as(usize, @intCast(x));
-                const cs: f32 = @floatFromInt(convolutionSize);
-                pixelsCopy2[o].x = avgR / cs;
-                pixelsCopy2[o].y = avgG / cs;
-                pixelsCopy2[o].z = avgB / cs;
-                pixelsCopy2[o].w = avgAlpha / cs;
-            }
-        }
+        for (0..height) |row| boxBlurLine(pixelsCopy1, pixelsCopy2, row * width, 1, image.*.width, blurSize, false);
 
         // Vertical motion blur
-        var col: c_int = 0;
-        while (col < image.*.width) : (col += 1) {
-            var avgR: f32 = 0.0;
-            var avgG: f32 = 0.0;
-            var avgB: f32 = 0.0;
-            var avgAlpha: f32 = 0.0;
-            var convolutionSize: c_int = blurSize;
-            const c: usize = @intCast(col);
-
-            var i: c_int = 0;
-            while (i < blurSize) : (i += 1) {
-                const idx = @as(usize, @intCast(i)) * w + c;
-                avgR += pixelsCopy2[idx].x;
-                avgG += pixelsCopy2[idx].y;
-                avgB += pixelsCopy2[idx].z;
-                avgAlpha += pixelsCopy2[idx].w;
-            }
-
-            var y: c_int = 0;
-            while (y < image.*.height) : (y += 1) {
-                if (y - blurSize - 1 >= 0) {
-                    const idx = @as(usize, @intCast(y - blurSize - 1)) * w + c;
-                    avgR -= pixelsCopy2[idx].x;
-                    avgG -= pixelsCopy2[idx].y;
-                    avgB -= pixelsCopy2[idx].z;
-                    avgAlpha -= pixelsCopy2[idx].w;
-                    convolutionSize -= 1;
-                }
-                if (y + blurSize < image.*.height) {
-                    const idx = @as(usize, @intCast(y + blurSize)) * w + c;
-                    avgR += pixelsCopy2[idx].x;
-                    avgG += pixelsCopy2[idx].y;
-                    avgB += pixelsCopy2[idx].z;
-                    avgAlpha += pixelsCopy2[idx].w;
-                    convolutionSize += 1;
-                }
-
-                const o = @as(usize, @intCast(y)) * w + c;
-                const cs: f32 = @floatFromInt(convolutionSize);
-                pixelsCopy1[o].x = @floatFromInt(tuc(avgR / cs));
-                pixelsCopy1[o].y = @floatFromInt(tuc(avgG / cs));
-                pixelsCopy1[o].z = @floatFromInt(tuc(avgB / cs));
-                pixelsCopy1[o].w = @floatFromInt(tuc(avgAlpha / cs));
-            }
-        }
+        for (0..width) |col| boxBlurLine(pixelsCopy2, pixelsCopy1, col, width, image.*.height, blurSize, true);
     }
 
     // Reverse premultiply
-    {
-        var i: usize = 0;
-        while (i < w * h) : (i += 1) {
-            if (pixelsCopy1[i].w == 0.0) {
-                pixels[i].r = 0;
-                pixels[i].g = 0;
-                pixels[i].b = 0;
-                pixels[i].a = 0;
-            } else if (pixelsCopy1[i].w <= 255.0) {
-                const alpha: f32 = pixelsCopy1[i].w / 255.0;
-                pixels[i].r = tuc(fminf(pixelsCopy1[i].x / alpha, 255.0));
-                pixels[i].g = tuc(fminf(pixelsCopy1[i].y / alpha, 255.0));
-                pixels[i].b = tuc(fminf(pixelsCopy1[i].z / alpha, 255.0));
-                pixels[i].a = tuc(pixelsCopy1[i].w);
-            }
+    for (pixels, pixelsCopy1) |*pixel, copy| {
+        if (copy[3] == 0.0) {
+            pixel.* = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+        } else if (copy[3] <= 255.0) {
+            const alpha: f32 = copy[3] / 255.0;
+            pixel.r = tuc(fminf(copy[0] / alpha, 255.0));
+            pixel.g = tuc(fminf(copy[1] / alpha, 255.0));
+            pixel.b = tuc(fminf(copy[2] / alpha, 255.0));
+            pixel.a = tuc(copy[3]);
         }
     }
 
-    const format = image.*.format;
-    RL_FREE(image.*.data);
-    RL_FREE(pixelsCopy1);
-    RL_FREE(pixelsCopy2);
-
-    image.*.data = pixels;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
+    setColorsKeepFormat(image, pixels);
 }
 
 // Apply custom square convolution kernel to image
+// NOTE: The convolution kernel matrix is expected to be square
 export fn ImageKernelConvolution(image: [*c]Image, kernel: [*c]const f32, kernelSize: c_int) callconv(.c) void {
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0) or kernel == null) return;
 
-    const kernelWidth = ti(sqrtf(@floatFromInt(kernelSize)));
+    const kernelWidth = ti(@sqrt(f(kernelSize)));
 
     if (kernelWidth * kernelWidth != kernelSize) {
         TraceLog(LOG_WARNING, "IMAGE: Convolution kernel must be square to be applied");
         return;
     }
 
-    const pixels = LoadImageColors(image.*);
-    const result: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.*.height * image.*.width * @as(c_int, @sizeOf(Color))))));
+    const weights = kernel[0..@intCast(kernelSize)];
+    const pixels = loadColors(image.*) orelse return;
+    defer cmem.free(pixels.ptr);
+    const result = allocC(Color, image.*.height * image.*.width) orelse return;
 
-    var startRange: c_int = 0;
-    var endRange: c_int = 0;
-
-    if (@rem(kernelWidth, 2) == 0) {
-        startRange = -@divTrunc(kernelWidth, 2);
-        endRange = @divTrunc(kernelWidth, 2);
-    } else {
-        startRange = -@divTrunc(kernelWidth, 2);
-        endRange = @divTrunc(kernelWidth, 2) + 1;
-    }
+    // An even kernel has one more row/column before its center than after
+    const startRange = -@divTrunc(kernelWidth, 2);
+    const endRange = if (@rem(kernelWidth, 2) == 0) @divTrunc(kernelWidth, 2) else @divTrunc(kernelWidth, 2) + 1;
 
     var x: c_int = 0;
     while (x < image.*.height) : (x += 1) {
@@ -2214,13 +1890,13 @@ export fn ImageKernelConvolution(image: [*c]Image, kernel: [*c]const f32, kernel
 
                     const xkabs = xk + @divTrunc(kernelWidth, 2);
                     const ykabs = yk + @divTrunc(kernelWidth, 2);
-                    const ker = kernel[@intCast(kernelWidth * xkabs + ykabs)];
-                    const px = pixels[@intCast(image.*.width * row + col)];
+                    const weight = weights[@intCast(kernelWidth * xkabs + ykabs)];
+                    const pixel = pixels[@intCast(image.*.width * row + col)];
 
-                    rRes += @as(f32, @floatFromInt(px.r)) / 255.0 * ker;
-                    gRes += @as(f32, @floatFromInt(px.g)) / 255.0 * ker;
-                    bRes += @as(f32, @floatFromInt(px.b)) / 255.0 * ker;
-                    aRes += @as(f32, @floatFromInt(px.a)) / 255.0 * ker;
+                    rRes += f(pixel.r) / 255.0 * weight;
+                    gRes += f(pixel.g) / 255.0 * weight;
+                    bRes += f(pixel.b) / 255.0 * weight;
+                    aRes += f(pixel.a) / 255.0 * weight;
                 }
             }
 
@@ -2238,77 +1914,84 @@ export fn ImageKernelConvolution(image: [*c]Image, kernel: [*c]const f32, kernel
         }
     }
 
-    const format = image.*.format;
-    RL_FREE(image.*.data);
-    RL_FREE(pixels);
-
-    image.*.data = result;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    ImageFormat(image, format);
+    setColorsKeepFormat(image, result);
 }
 
 // Generate all mipmap levels for a provided image
+// NOTE 1: Supports POT and NPOT images
+// NOTE 2: image.data is scaled to include mipmap levels
+// NOTE 3: Mipmaps format is the same as base image
 export fn ImageMipmaps(image: [*c]Image) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    var mipCount: c_int = 1;
-    var mipWidth = image.*.width;
-    var mipHeight = image.*.height;
-    var mipSize = GetPixelDataSize(mipWidth, mipHeight, image.*.format);
+    var mipCount: c_int = 1; // Required mipmap levels count (including base level)
+    var mipWidth = image.*.width; // Base image width
+    var mipHeight = image.*.height; // Base image height
+    var mipSize = GetPixelDataSize(mipWidth, mipHeight, image.*.format); // Image data size (in bytes)
 
+    // Count mipmap levels required
     while ((mipWidth != 1) or (mipHeight != 1)) {
         if (mipWidth != 1) mipWidth = @divTrunc(mipWidth, 2);
         if (mipHeight != 1) mipHeight = @divTrunc(mipHeight, 2);
 
+        // Security check for NPOT textures
         if (mipWidth < 1) mipWidth = 1;
         if (mipHeight < 1) mipHeight = 1;
 
         TraceLog(LOG_DEBUG, "IMAGE: Next mipmap level: %i x %i - current size %i", mipWidth, mipHeight, mipSize);
 
         mipCount += 1;
-        mipSize += GetPixelDataSize(mipWidth, mipHeight, image.*.format);
+        mipSize += GetPixelDataSize(mipWidth, mipHeight, image.*.format); // Add mipmap size (in bytes)
     }
 
-    if (image.*.mipmaps < mipCount) {
-        const temp = RL_CALLOC(@intCast(mipSize), 1);
-        _ = memcpy(temp, image.*.data, @intCast(GetPixelDataSize(image.*.width, image.*.height, image.*.format)));
-        RL_FREE(image.*.data);
-        image.*.data = temp;
+    if (image.*.mipmaps >= mipCount) {
+        TraceLog(LOG_WARNING, "IMAGE: Mipmaps already available");
+        return;
+    }
 
-        var nextmip: [*]u8 = @ptrCast(image.*.data);
+    const data = allocC(u8, mipSize) orelse return;
+    // NOTE: Only the base level is kept; existing levels are regenerated below
+    const baseSize = GetPixelDataSize(image.*.width, image.*.height, image.*.format);
+    @memcpy(data[0..@intCast(baseSize)], bytesAt(image.*.data, baseSize));
+    cmem.free(image.*.data);
+    image.*.data = data.ptr;
 
-        mipWidth = image.*.width;
-        mipHeight = image.*.height;
+    mipWidth = image.*.width;
+    mipHeight = image.*.height;
+    mipSize = GetPixelDataSize(mipWidth, mipHeight, image.*.format);
+    var offset: usize = 0;
+
+    var imCopy = ImageCopy(image.*);
+    defer UnloadImage(imCopy);
+
+    var i: c_int = 1;
+    while (i < mipCount) : (i += 1) {
+        offset += @intCast(mipSize);
+
+        mipWidth = @max(@divTrunc(mipWidth, 2), 1);
+        mipHeight = @max(@divTrunc(mipHeight, 2), 1);
+
         mipSize = GetPixelDataSize(mipWidth, mipHeight, image.*.format);
-        var imCopy = ImageCopy(image.*);
 
-        var i: c_int = 1;
-        while (i < mipCount) : (i += 1) {
-            nextmip += @intCast(mipSize);
+        // NOTE: Levels the image claimed to have are skipped (left zeroed), as raylib does
+        if (i < image.*.mipmaps) continue;
 
-            mipWidth = @divTrunc(mipWidth, 2);
-            mipHeight = @divTrunc(mipHeight, 2);
+        TraceLog(LOG_DEBUG, "IMAGE: Generating mipmap level: %i (%i x %i) - size: %i - offset: 0x%x", i, mipWidth, mipHeight, mipSize, data.ptr + offset);
 
-            if (mipWidth < 1) mipWidth = 1;
-            if (mipHeight < 1) mipHeight = 1;
+        ImageResize(&imCopy, mipWidth, mipHeight);
 
-            mipSize = GetPixelDataSize(mipWidth, mipHeight, image.*.format);
+        @memcpy(data[offset..][0..@intCast(mipSize)], bytesAt(imCopy.data, mipSize));
+    }
 
-            if (i < image.*.mipmaps) continue;
-
-            TraceLog(LOG_DEBUG, "IMAGE: Generating mipmap level: %i (%i x %i) - size: %i - offset: 0x%x", i, mipWidth, mipHeight, mipSize, nextmip);
-            ImageResize(&imCopy, mipWidth, mipHeight);
-            _ = memcpy(nextmip, imCopy.data, @intCast(mipSize));
-        }
-
-        UnloadImage(imCopy);
-
-        image.*.mipmaps = mipCount;
-    } else TraceLog(LOG_WARNING, "IMAGE: Mipmaps already available");
+    image.*.mipmaps = mipCount;
 }
 
 // Dither image data to 16bpp or lower (Floyd-Steinberg dithering)
+// NOTE: In case selected bpp do not represent a known 16bit format,
+// dithered data is stored in the LSB part of the unsigned short
 export fn ImageDither(image: [*c]Image, rBpp: c_int, gBpp: c_int, bBpp: c_int, aBpp: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
     if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
@@ -2318,326 +2001,262 @@ export fn ImageDither(image: [*c]Image, rBpp: c_int, gBpp: c_int, bBpp: c_int, a
 
     if ((rBpp + gBpp + bBpp + aBpp) > 16) {
         TraceLog(LOG_WARNING, "IMAGE: Unsupported dithering bpps (%ibpp), only 16bpp or lower modes supported", (rBpp + gBpp + bBpp + aBpp));
-    } else {
-        const pixels = LoadImageColors(image.*);
-
-        RL_FREE(image.*.data); // free old image data
-
-        if ((image.*.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8) and (image.*.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)) {
-            TraceLog(LOG_WARNING, "IMAGE: Format is already 16bpp or lower, dithering could have no effect");
-        }
-
-        if ((rBpp == 5) and (gBpp == 6) and (bBpp == 5) and (aBpp == 0)) {
-            image.*.format = PIXELFORMAT_UNCOMPRESSED_R5G6B5;
-        } else if ((rBpp == 5) and (gBpp == 5) and (bBpp == 5) and (aBpp == 1)) {
-            image.*.format = PIXELFORMAT_UNCOMPRESSED_R5G5B5A1;
-        } else if ((rBpp == 4) and (gBpp == 4) and (bBpp == 4) and (aBpp == 4)) {
-            image.*.format = PIXELFORMAT_UNCOMPRESSED_R4G4B4A4;
-        } else {
-            image.*.format = 0;
-            TraceLog(LOG_WARNING, "IMAGE: Unsupported dithered OpenGL internal format: %ibpp (R%iG%iB%iA%i)", (rBpp + gBpp + bBpp + aBpp), rBpp, gBpp, bBpp, aBpp);
-        }
-
-        image.*.data = RL_MALLOC(@intCast(image.*.width * image.*.height * @as(c_int, @sizeOf(u16))));
-        const out16: [*]u16 = @ptrCast(@alignCast(image.*.data));
-
-        var newPixel = WHITE;
-
-        const w = image.*.width;
-
-        var y: c_int = 0;
-        while (y < image.*.height) : (y += 1) {
-            var x: c_int = 0;
-            while (x < image.*.width) : (x += 1) {
-                const oldPixel = pixels[@intCast(y * w + x)];
-
-                // NOTE: New pixel obtained by bits truncate
-                newPixel.r = oldPixel.r >> @intCast(8 - rBpp);
-                newPixel.g = oldPixel.g >> @intCast(8 - gBpp);
-                newPixel.b = oldPixel.b >> @intCast(8 - bBpp);
-                newPixel.a = oldPixel.a >> @intCast(8 - aBpp);
-
-                const rError: c_int = @as(c_int, oldPixel.r) - @as(c_int, @intCast(@as(c_int, newPixel.r) << @intCast(8 - rBpp)));
-                const gError: c_int = @as(c_int, oldPixel.g) - @as(c_int, @intCast(@as(c_int, newPixel.g) << @intCast(8 - gBpp)));
-                const bError: c_int = @as(c_int, oldPixel.b) - @as(c_int, @intCast(@as(c_int, newPixel.b) << @intCast(8 - bBpp)));
-
-                pixels[@intCast(y * w + x)] = newPixel;
-
-                if (x < (image.*.width - 1)) {
-                    const p = &pixels[@intCast(y * w + x + 1)];
-                    p.r = iuc(MINi(@as(c_int, p.r) + ti(@as(f32, @floatFromInt(rError)) * 7.0 / 16), 0xff));
-                    p.g = iuc(MINi(@as(c_int, p.g) + ti(@as(f32, @floatFromInt(gError)) * 7.0 / 16), 0xff));
-                    p.b = iuc(MINi(@as(c_int, p.b) + ti(@as(f32, @floatFromInt(bError)) * 7.0 / 16), 0xff));
-                }
-
-                if ((x > 0) and (y < (image.*.height - 1))) {
-                    const p = &pixels[@intCast((y + 1) * w + x - 1)];
-                    p.r = iuc(MINi(@as(c_int, p.r) + ti(@as(f32, @floatFromInt(rError)) * 3.0 / 16), 0xff));
-                    p.g = iuc(MINi(@as(c_int, p.g) + ti(@as(f32, @floatFromInt(gError)) * 3.0 / 16), 0xff));
-                    p.b = iuc(MINi(@as(c_int, p.b) + ti(@as(f32, @floatFromInt(bError)) * 3.0 / 16), 0xff));
-                }
-
-                if (y < (image.*.height - 1)) {
-                    const p = &pixels[@intCast((y + 1) * w + x)];
-                    p.r = iuc(MINi(@as(c_int, p.r) + ti(@as(f32, @floatFromInt(rError)) * 5.0 / 16), 0xff));
-                    p.g = iuc(MINi(@as(c_int, p.g) + ti(@as(f32, @floatFromInt(gError)) * 5.0 / 16), 0xff));
-                    p.b = iuc(MINi(@as(c_int, p.b) + ti(@as(f32, @floatFromInt(bError)) * 5.0 / 16), 0xff));
-                }
-
-                if ((x < (image.*.width - 1)) and (y < (image.*.height - 1))) {
-                    const p = &pixels[@intCast((y + 1) * w + x + 1)];
-                    p.r = iuc(MINi(@as(c_int, p.r) + ti(@as(f32, @floatFromInt(rError)) * 1.0 / 16), 0xff));
-                    p.g = iuc(MINi(@as(c_int, p.g) + ti(@as(f32, @floatFromInt(gError)) * 1.0 / 16), 0xff));
-                    p.b = iuc(MINi(@as(c_int, p.b) + ti(@as(f32, @floatFromInt(bError)) * 1.0 / 16), 0xff));
-                }
-
-                const rPixel: u16 = newPixel.r;
-                const gPixel: u16 = newPixel.g;
-                const bPixel: u16 = newPixel.b;
-                const aPixel: u16 = newPixel.a;
-
-                out16[@intCast(y * w + x)] = (rPixel << @intCast(gBpp + bBpp + aBpp)) | (gPixel << @intCast(bBpp + aBpp)) | (bPixel << @intCast(aBpp)) | aPixel;
-            }
-        }
-
-        UnloadImageColors(pixels);
+        return;
     }
+
+    const pixels = loadColors(image.*) orelse return;
+    defer cmem.free(pixels.ptr);
+
+    cmem.free(image.*.data); // free old image data
+
+    if ((image.*.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8) and (image.*.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)) {
+        TraceLog(LOG_WARNING, "IMAGE: Format is already 16bpp or lower, dithering could have no effect");
+    }
+
+    // Define new image format, check if desired bpp match internal known format
+    if ((rBpp == 5) and (gBpp == 6) and (bBpp == 5) and (aBpp == 0)) {
+        image.*.format = PIXELFORMAT_UNCOMPRESSED_R5G6B5;
+    } else if ((rBpp == 5) and (gBpp == 5) and (bBpp == 5) and (aBpp == 1)) {
+        image.*.format = PIXELFORMAT_UNCOMPRESSED_R5G5B5A1;
+    } else if ((rBpp == 4) and (gBpp == 4) and (bBpp == 4) and (aBpp == 4)) {
+        image.*.format = PIXELFORMAT_UNCOMPRESSED_R4G4B4A4;
+    } else {
+        image.*.format = 0;
+        TraceLog(LOG_WARNING, "IMAGE: Unsupported dithered OpenGL internal format: %ibpp (R%iG%iB%iA%i)", (rBpp + gBpp + bBpp + aBpp), rBpp, gBpp, bBpp, aBpp);
+    }
+
+    // NOTE: We will store the dithered data as unsigned short (16bpp)
+    const output = allocC(u16, image.*.width * image.*.height);
+    image.*.data = if (output) |o| o.ptr else null;
+    const out = output orelse return;
+
+    const w = image.*.width;
+    var newPixel = WHITE;
+
+    var y: c_int = 0;
+    while (y < image.*.height) : (y += 1) {
+        var x: c_int = 0;
+        while (x < image.*.width) : (x += 1) {
+            const oldPixel = pixels[@intCast(y * w + x)];
+
+            // NOTE: New pixel obtained by bits truncate, it would be better to round values (check ImageFormat())
+            // (C shifts the int-promoted channel, so a 0-bit channel shifts by 8 to 0)
+            newPixel.r = iuc(@as(c_int, oldPixel.r) >> @intCast(8 - rBpp)); // R bits
+            newPixel.g = iuc(@as(c_int, oldPixel.g) >> @intCast(8 - gBpp)); // G bits
+            newPixel.b = iuc(@as(c_int, oldPixel.b) >> @intCast(8 - bBpp)); // B bits
+            newPixel.a = iuc(@as(c_int, oldPixel.a) >> @intCast(8 - aBpp)); // A bits (not used on dithering)
+
+            // NOTE: Error must be computed between new and old pixel but using same number of bits!
+            // We want to know how much color precision we have lost...
+            const rError: c_int = @as(c_int, oldPixel.r) - (@as(c_int, newPixel.r) << @intCast(8 - rBpp));
+            const gError: c_int = @as(c_int, oldPixel.g) - (@as(c_int, newPixel.g) << @intCast(8 - gBpp));
+            const bError: c_int = @as(c_int, oldPixel.b) - (@as(c_int, newPixel.b) << @intCast(8 - bBpp));
+
+            pixels[@intCast(y * w + x)] = newPixel;
+
+            // NOTE: Some cases are out of the array and should be ignored
+            if (x < (image.*.width - 1)) {
+                spreadError(&pixels[@intCast(y * w + x + 1)], rError, gError, bError, 7.0);
+            }
+
+            if ((x > 0) and (y < (image.*.height - 1))) {
+                spreadError(&pixels[@intCast((y + 1) * w + x - 1)], rError, gError, bError, 3.0);
+            }
+
+            if (y < (image.*.height - 1)) {
+                spreadError(&pixels[@intCast((y + 1) * w + x)], rError, gError, bError, 5.0);
+            }
+
+            if ((x < (image.*.width - 1)) and (y < (image.*.height - 1))) {
+                spreadError(&pixels[@intCast((y + 1) * w + x + 1)], rError, gError, bError, 1.0);
+            }
+
+            const rPixel: u16 = newPixel.r;
+            const gPixel: u16 = newPixel.g;
+            const bPixel: u16 = newPixel.b;
+            const aPixel: u16 = newPixel.a;
+
+            out[@intCast(y * w + x)] = (rPixel << @intCast(gBpp + bBpp + aBpp)) | (gPixel << @intCast(bBpp + aBpp)) | (bPixel << @intCast(aBpp)) | aPixel;
+        }
+    }
+}
+
+/// Floyd-Steinberg: adds `weight`/16 of the quantization error to a neighbour,
+/// saturating each channel at 0xff.
+fn spreadError(pixel: *Color, rError: c_int, gError: c_int, bError: c_int, comptime weight: f32) void {
+    pixel.r = iuc(@min(@as(c_int, pixel.r) + ti(f(rError) * weight / 16), 0xff));
+    pixel.g = iuc(@min(@as(c_int, pixel.g) + ti(f(gError) * weight / 16), 0xff));
+    pixel.b = iuc(@min(@as(c_int, pixel.b) + ti(f(bError) * weight / 16), 0xff));
+}
+
+/// The size in bytes of one pixel of an uncompressed `image`, and a new C-heap
+/// buffer for all its pixels: the start of every pixel-moving operation.
+fn movePixels(image: Image) ?struct { size: usize, src: []const u8, dst: []u8 } {
+    const pixelSize = GetPixelDataSize(1, 1, image.format);
+    const total = image.width * image.height * pixelSize;
+    const dst = allocC(u8, total) orelse return null;
+    return .{ .size = @intCast(pixelSize), .src = bytesAt(image.data, total), .dst = dst };
+}
+
+/// The checks that open every operation on the base level of an image:
+/// whether it has pixels, warning for mipmaps and refusing compressed data.
+fn editableBaseLevel(image: Image) bool {
+    // Security check to avoid program crash
+    if ((image.data == null) or (image.width == 0) or (image.height == 0)) return false;
+
+    if (image.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
+    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
+        return false;
+    }
+    return true;
 }
 
 // Flip image vertically
 export fn ImageFlipVertical(image: [*c]Image) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const flippedData: [*]u8 = @ptrCast(RL_MALLOC(@intCast(image.*.width * image.*.height * bytesPerPixel)));
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-
-        var i: c_int = image.*.height - 1;
-        var offsetSize: c_int = 0;
-        while (i >= 0) : (i -= 1) {
-            _ = memcpy(
-                flippedData + @as(usize, @intCast(offsetSize)),
-                src8 + @as(usize, @intCast(i * image.*.width * bytesPerPixel)),
-                @intCast(image.*.width * bytesPerPixel),
-            );
-            offsetSize += image.*.width * bytesPerPixel;
-        }
-
-        RL_FREE(image.*.data);
-        image.*.data = flippedData;
+    const move = movePixels(image.*) orelse return;
+    const rowSize = dim(image.*.width) * move.size;
+    const height = dim(image.*.height);
+    for (0..height) |y| {
+        @memcpy(move.dst[y * rowSize ..][0..rowSize], move.src[(height - 1 - y) * rowSize ..][0..rowSize]);
     }
+
+    cmem.free(image.*.data);
+    image.*.data = move.dst.ptr;
 }
 
 // Flip image horizontally
 export fn ImageFlipHorizontal(image: [*c]Image) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const flippedData: [*]u8 = @ptrCast(RL_MALLOC(@intCast(image.*.width * image.*.height * bytesPerPixel)));
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-        const w = image.*.width;
-
-        var y: c_int = 0;
-        while (y < image.*.height) : (y += 1) {
-            var x: c_int = 0;
-            while (x < w) : (x += 1) {
-                var i: c_int = 0;
-                while (i < bytesPerPixel) : (i += 1) {
-                    flippedData[@intCast((y * w + x) * bytesPerPixel + i)] = src8[@intCast((y * w + (w - 1 - x)) * bytesPerPixel + i)];
-                }
-            }
+    const move = movePixels(image.*) orelse return;
+    const width = dim(image.*.width);
+    const n = move.size;
+    for (0..dim(image.*.height)) |y| {
+        for (0..width) |x| {
+            @memcpy(move.dst[(y * width + x) * n ..][0..n], move.src[(y * width + (width - 1 - x)) * n ..][0..n]);
         }
-
-        RL_FREE(image.*.data);
-        image.*.data = flippedData;
     }
+
+    cmem.free(image.*.data);
+    image.*.data = move.dst.ptr;
 }
 
 // Rotate image in degrees
 export fn ImageRotate(image: [*c]Image, degrees: c_int) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const rad: f32 = @as(f32, @floatFromInt(degrees)) * PI / 180.0;
-        const sinRadius = sinf(rad);
-        const cosRadius = cosf(rad);
+    const rad: f32 = f(degrees) * PI / 180.0;
+    const sinRadius = sinf(rad);
+    const cosRadius = cosf(rad);
 
-        const width = ti(fabsf(@as(f32, @floatFromInt(image.*.width)) * cosRadius) + fabsf(@as(f32, @floatFromInt(image.*.height)) * sinRadius));
-        const height = ti(fabsf(@as(f32, @floatFromInt(image.*.height)) * cosRadius) + fabsf(@as(f32, @floatFromInt(image.*.width)) * sinRadius));
+    const width = ti(@abs(f(image.*.width) * cosRadius) + @abs(f(image.*.height) * sinRadius));
+    const height = ti(@abs(f(image.*.height) * cosRadius) + @abs(f(image.*.width) * sinRadius));
 
-        const dataSize = GetPixelDataSize(width, height, image.*.format);
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const rotatedData: [*]u8 = @ptrCast(RL_CALLOC(@intCast(dataSize), 1) orelse return);
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-        const iw = image.*.width;
+    const pixelSize = GetPixelDataSize(1, 1, image.*.format);
+    const rotated = allocC(u8, GetPixelDataSize(width, height, image.*.format)) orelse return;
+    const src: [*]const u8 = @ptrCast(image.*.data);
+    const iw = image.*.width;
 
-        var y: c_int = 0;
-        while (y < height) : (y += 1) {
-            var x: c_int = 0;
-            while (x < width) : (x += 1) {
-                const oldX = ((@as(f32, @floatFromInt(x)) - @as(f32, @floatFromInt(width)) / 2.0) * cosRadius + (@as(f32, @floatFromInt(y)) - @as(f32, @floatFromInt(height)) / 2.0) * sinRadius) + @as(f32, @floatFromInt(image.*.width)) / 2.0;
-                const oldY = ((@as(f32, @floatFromInt(y)) - @as(f32, @floatFromInt(height)) / 2.0) * cosRadius - (@as(f32, @floatFromInt(x)) - @as(f32, @floatFromInt(width)) / 2.0) * sinRadius) + @as(f32, @floatFromInt(image.*.height)) / 2.0;
+    var y: c_int = 0;
+    while (y < height) : (y += 1) {
+        var x: c_int = 0;
+        while (x < width) : (x += 1) {
+            const oldX = ((f(x) - f(width) / 2.0) * cosRadius + (f(y) - f(height) / 2.0) * sinRadius) + f(image.*.width) / 2.0;
+            const oldY = ((f(y) - f(height) / 2.0) * cosRadius - (f(x) - f(width) / 2.0) * sinRadius) + f(image.*.height) / 2.0;
 
-                if ((oldX >= 0) and (oldX < @as(f32, @floatFromInt(image.*.width))) and (oldY >= 0) and (oldY < @as(f32, @floatFromInt(image.*.height)))) {
-                    const x1 = ti(floorf(oldX));
-                    const y1 = ti(floorf(oldY));
-                    const x2 = MINi(x1 + 1, image.*.width - 1);
-                    const y2 = MINi(y1 + 1, image.*.height - 1);
+            if ((oldX >= 0) and (oldX < f(image.*.width)) and (oldY >= 0) and (oldY < f(image.*.height))) {
+                const x1 = ti(@floor(oldX));
+                const y1 = ti(@floor(oldY));
+                const x2 = @min(x1 + 1, image.*.width - 1);
+                const y2 = @min(y1 + 1, image.*.height - 1);
 
-                    const px = oldX - @as(f32, @floatFromInt(x1));
-                    const py = oldY - @as(f32, @floatFromInt(y1));
+                const px = oldX - f(x1);
+                const py = oldY - f(y1);
 
-                    var i: c_int = 0;
-                    while (i < bytesPerPixel) : (i += 1) {
-                        const f1: f32 = @floatFromInt(src8[@intCast((y1 * iw + x1) * bytesPerPixel + i)]);
-                        const f2: f32 = @floatFromInt(src8[@intCast((y1 * iw + x2) * bytesPerPixel + i)]);
-                        const f3: f32 = @floatFromInt(src8[@intCast((y2 * iw + x1) * bytesPerPixel + i)]);
-                        const f4: f32 = @floatFromInt(src8[@intCast((y2 * iw + x2) * bytesPerPixel + i)]);
+                var i: c_int = 0;
+                while (i < pixelSize) : (i += 1) {
+                    const f1: f32 = f(src[@intCast((y1 * iw + x1) * pixelSize + i)]);
+                    const f2: f32 = f(src[@intCast((y1 * iw + x2) * pixelSize + i)]);
+                    const f3: f32 = f(src[@intCast((y2 * iw + x1) * pixelSize + i)]);
+                    const f4: f32 = f(src[@intCast((y2 * iw + x2) * pixelSize + i)]);
 
-                        const val = f1 * (1 - px) * (1 - py) + f2 * px * (1 - py) + f3 * (1 - px) * py + f4 * px * py;
+                    const val = f1 * (1 - px) * (1 - py) + f2 * px * (1 - py) + f3 * (1 - px) * py + f4 * px * py;
 
-                        rotatedData[@intCast((y * width + x) * bytesPerPixel + i)] = tuc(val);
-                    }
+                    rotated[@intCast((y * width + x) * pixelSize + i)] = tuc(val);
                 }
             }
         }
-
-        RL_FREE(image.*.data);
-        image.*.data = rotatedData;
-        image.*.width = width;
-        image.*.height = height;
     }
+
+    cmem.free(image.*.data);
+    image.*.data = rotated.ptr;
+    image.*.width = width;
+    image.*.height = height;
 }
 
 // Rotate image clockwise 90deg
 export fn ImageRotateCW(image: [*c]Image) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const rotatedData: [*]u8 = @ptrCast(RL_MALLOC(@intCast(image.*.width * image.*.height * bytesPerPixel)));
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-        const w = image.*.width;
-        const hh = image.*.height;
-
-        var y: c_int = 0;
-        while (y < hh) : (y += 1) {
-            var x: c_int = 0;
-            while (x < w) : (x += 1) {
-                var i: c_int = 0;
-                while (i < bytesPerPixel) : (i += 1) {
-                    rotatedData[@intCast((x * hh + (hh - y - 1)) * bytesPerPixel + i)] = src8[@intCast((y * w + x) * bytesPerPixel + i)];
-                }
-            }
+    const move = movePixels(image.*) orelse return;
+    const width = dim(image.*.width);
+    const height = dim(image.*.height);
+    const n = move.size;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            @memcpy(move.dst[(x * height + (height - y - 1)) * n ..][0..n], move.src[(y * width + x) * n ..][0..n]);
         }
-
-        RL_FREE(image.*.data);
-        image.*.data = rotatedData;
-        const width = image.*.width;
-        const height = image.*.height;
-        image.*.width = height;
-        image.*.height = width;
     }
+
+    cmem.free(image.*.data);
+    image.*.data = move.dst.ptr;
+    std.mem.swap(c_int, &image.*.width, &image.*.height);
 }
 
 // Rotate image counter-clockwise 90deg
 export fn ImageRotateCCW(image: [*c]Image) callconv(.c) void {
-    if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
+    if (!editableBaseLevel(image.*)) return;
 
-    if (image.*.mipmaps > 1) TraceLog(LOG_WARNING, "Image manipulation only applied to base mipmap level");
-    if (image.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "Image manipulation not supported for compressed formats");
-    } else {
-        const bytesPerPixel = GetPixelDataSize(1, 1, image.*.format);
-        const rotatedData: [*]u8 = @ptrCast(RL_MALLOC(@intCast(image.*.width * image.*.height * bytesPerPixel)));
-        const src8: [*]const u8 = @ptrCast(image.*.data);
-        const w = image.*.width;
-        const hh = image.*.height;
-
-        var y: c_int = 0;
-        while (y < hh) : (y += 1) {
-            var x: c_int = 0;
-            while (x < w) : (x += 1) {
-                var i: c_int = 0;
-                while (i < bytesPerPixel) : (i += 1) {
-                    rotatedData[@intCast((x * hh + y) * bytesPerPixel + i)] = src8[@intCast((y * w + (w - x - 1)) * bytesPerPixel + i)];
-                }
-            }
+    const move = movePixels(image.*) orelse return;
+    const width = dim(image.*.width);
+    const height = dim(image.*.height);
+    const n = move.size;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            @memcpy(move.dst[(x * height + y) * n ..][0..n], move.src[(y * width + (width - x - 1)) * n ..][0..n]);
         }
-
-        RL_FREE(image.*.data);
-        image.*.data = rotatedData;
-        const width = image.*.width;
-        const height = image.*.height;
-        image.*.width = height;
-        image.*.height = width;
     }
+
+    cmem.free(image.*.data);
+    image.*.data = move.dst.ptr;
+    std.mem.swap(c_int, &image.*.width, &image.*.height);
 }
 
 // Modify image color: tint
 export fn ImageColorTint(image: [*c]Image, color: Color) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    const pixels = LoadImageColors(image.*);
-
-    var i: usize = 0;
-    const total: usize = @intCast(image.*.width * image.*.height);
-    while (i < total) : (i += 1) {
-        const r: u8 = iuc(@divTrunc(@as(c_int, pixels[i].r) * @as(c_int, color.r), 255));
-        const g: u8 = iuc(@divTrunc(@as(c_int, pixels[i].g) * @as(c_int, color.g), 255));
-        const b: u8 = iuc(@divTrunc(@as(c_int, pixels[i].b) * @as(c_int, color.b), 255));
-        const a: u8 = iuc(@divTrunc(@as(c_int, pixels[i].a) * @as(c_int, color.a), 255));
-
-        pixels[i].r = r;
-        pixels[i].g = g;
-        pixels[i].b = b;
-        pixels[i].a = a;
-    }
-
-    const format = image.*.format;
-    RL_FREE(image.*.data);
-
-    image.*.data = pixels;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
+    const pixels = loadColors(image.*) orelse return;
+    for (pixels) |*pixel| pixel.* = ColorTint(pixel.*, color);
+    setColorsKeepFormat(image, pixels);
 }
 
 // Modify image color: invert
 export fn ImageColorInvert(image: [*c]Image) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    const pixels = LoadImageColors(image.*);
-
-    var i: usize = 0;
-    const total: usize = @intCast(image.*.width * image.*.height);
-    while (i < total) : (i += 1) {
-        pixels[i].r = 255 - pixels[i].r;
-        pixels[i].g = 255 - pixels[i].g;
-        pixels[i].b = 255 - pixels[i].b;
+    const pixels = loadColors(image.*) orelse return;
+    for (pixels) |*pixel| {
+        pixel.r = 255 - pixel.r;
+        pixel.g = 255 - pixel.g;
+        pixel.b = 255 - pixel.b;
     }
-
-    const format = image.*.format;
-    RL_FREE(image.*.data);
-
-    image.*.data = pixels;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
+    setColorsKeepFormat(image, pixels);
 }
 
 // Modify image color: grayscale
@@ -2645,127 +2264,79 @@ export fn ImageColorGrayscale(image: [*c]Image) callconv(.c) void {
     ImageFormat(image, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
 }
 
+/// One channel with contrast `factor` applied around mid-gray, clamped.
+fn contrastChannel(channel: u8, factor: f32) u8 {
+    var p: f32 = f(channel) / 255.0;
+    p -= 0.5;
+    p *= factor;
+    p += 0.5;
+    p *= 255;
+    if (p < 0) p = 0;
+    if (p > 255) p = 255;
+    return tuc(p);
+}
+
 // Modify image color: contrast
-export fn ImageColorContrast(image: [*c]Image, contrast_in: c_int) callconv(.c) void {
+// NOTE: Contrast values between -100 and 100
+export fn ImageColorContrast(image: [*c]Image, contrast: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    var contrast = contrast_in;
-    if (contrast < -100) contrast = -100;
-    if (contrast > 100) contrast = 100;
-
-    var factor: f32 = @as(f32, @floatFromInt(100 + contrast)) / 100.0;
+    var factor: f32 = f(100 + std.math.clamp(contrast, -100, 100)) / 100.0;
     factor *= factor;
 
-    const pixels = LoadImageColors(image.*);
-
-    var i: usize = 0;
-    const total: usize = @intCast(image.*.width * image.*.height);
-    while (i < total) : (i += 1) {
-        var pR: f32 = @as(f32, @floatFromInt(pixels[i].r)) / 255.0;
-        pR -= 0.5;
-        pR *= factor;
-        pR += 0.5;
-        pR *= 255;
-        if (pR < 0) pR = 0;
-        if (pR > 255) pR = 255;
-
-        var pG: f32 = @as(f32, @floatFromInt(pixels[i].g)) / 255.0;
-        pG -= 0.5;
-        pG *= factor;
-        pG += 0.5;
-        pG *= 255;
-        if (pG < 0) pG = 0;
-        if (pG > 255) pG = 255;
-
-        var pB: f32 = @as(f32, @floatFromInt(pixels[i].b)) / 255.0;
-        pB -= 0.5;
-        pB *= factor;
-        pB += 0.5;
-        pB *= 255;
-        if (pB < 0) pB = 0;
-        if (pB > 255) pB = 255;
-
-        pixels[i].r = tuc(pR);
-        pixels[i].g = tuc(pG);
-        pixels[i].b = tuc(pB);
+    const pixels = loadColors(image.*) orelse return;
+    for (pixels) |*pixel| {
+        pixel.r = contrastChannel(pixel.r, factor);
+        pixel.g = contrastChannel(pixel.g, factor);
+        pixel.b = contrastChannel(pixel.b, factor);
     }
+    setColorsKeepFormat(image, pixels);
+}
 
-    const format = image.*.format;
-    RL_FREE(image.*.data);
-
-    image.*.data = pixels;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
+/// One channel shifted by `brightness`. NOTE: raylib clamps a negative result
+/// to 1, not 0 (deliberate).
+fn brightenChannel(channel: u8, brightness: c_int) u8 {
+    const value = @as(c_int, channel) + brightness;
+    if (value < 0) return 1;
+    return iuc(@min(value, 255));
 }
 
 // Modify image color: brightness
-export fn ImageColorBrightness(image: [*c]Image, brightness_in: c_int) callconv(.c) void {
+// NOTE: Brightness values between -255 and 255
+export fn ImageColorBrightness(image: [*c]Image, brightness: c_int) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    var brightness = brightness_in;
-    if (brightness < -255) brightness = -255;
-    if (brightness > 255) brightness = 255;
+    const amount = std.math.clamp(brightness, -255, 255);
 
-    const pixels = LoadImageColors(image.*);
-
-    var i: usize = 0;
-    const total: usize = @intCast(image.*.width * image.*.height);
-    while (i < total) : (i += 1) {
-        var cR: c_int = @as(c_int, pixels[i].r) + brightness;
-        var cG: c_int = @as(c_int, pixels[i].g) + brightness;
-        var cB: c_int = @as(c_int, pixels[i].b) + brightness;
-
-        if (cR < 0) cR = 1;
-        if (cR > 255) cR = 255;
-
-        if (cG < 0) cG = 1;
-        if (cG > 255) cG = 255;
-
-        if (cB < 0) cB = 1;
-        if (cB > 255) cB = 255;
-
-        pixels[i].r = iuc(cR);
-        pixels[i].g = iuc(cG);
-        pixels[i].b = iuc(cB);
+    const pixels = loadColors(image.*) orelse return;
+    for (pixels) |*pixel| {
+        pixel.r = brightenChannel(pixel.r, amount);
+        pixel.g = brightenChannel(pixel.g, amount);
+        pixel.b = brightenChannel(pixel.b, amount);
     }
-
-    const format = image.*.format;
-    RL_FREE(image.*.data);
-
-    image.*.data = pixels;
-    image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-
-    ImageFormat(image, format);
+    setColorsKeepFormat(image, pixels);
 }
 
 // Modify image color: replace color
 export fn ImageColorReplace(image: [*c]Image, color: Color, replace: Color) callconv(.c) void {
+    // Security check to avoid program crash
     if ((image.*.data == null) or (image.*.width == 0) or (image.*.height == 0)) return;
 
-    const pixels = LoadImageColors(image.*);
-
-    var i: usize = 0;
-    const total: usize = @intCast(image.*.width * image.*.height);
-    while (i < total) : (i += 1) {
-        if ((pixels[i].r == color.r) and
-            (pixels[i].g == color.g) and
-            (pixels[i].b == color.b) and
-            (pixels[i].a == color.a))
-        {
-            pixels[i].r = replace.r;
-            pixels[i].g = replace.g;
-            pixels[i].b = replace.b;
-            pixels[i].a = replace.a;
-        }
+    const pixels = loadColors(image.*) orelse return;
+    for (pixels) |*pixel| {
+        if (ColorIsEqual(pixel.*, color)) pixel.* = replace;
     }
 
     const format = image.*.format;
-    RL_FREE(image.*.data);
+    cmem.free(image.*.data);
 
-    image.*.data = pixels;
+    image.*.data = pixels.ptr;
     image.*.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
 
+    // NOTE: Only formats without alpha are converted back; the others stay
+    // R8G8B8A8 (raylib behaviour)
     if ((format == PIXELFORMAT_UNCOMPRESSED_R8G8B8) or
         (format == PIXELFORMAT_UNCOMPRESSED_R5G6B5) or
         (format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) or
@@ -2778,319 +2349,97 @@ export fn ImageColorReplace(image: [*c]Image, color: Color, replace: Color) call
 }
 
 // Load color data from image as a Color array (RGBA - 32bit)
+// NOTE: Memory allocated should be freed using UnloadImageColors();
 export fn LoadImageColors(image: Image) callconv(.c) [*c]Color {
-    if ((image.width == 0) or (image.height == 0)) return null; // Security check
-
-    const pixels: [*c]Color = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.width * image.height * @as(c_int, @sizeOf(Color))))));
-
-    if (image.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-        TraceLog(LOG_WARNING, "IMAGE: Pixel data retrieval not supported for compressed image formats");
-    } else {
-        if ((image.format == PIXELFORMAT_UNCOMPRESSED_R32) or
-            (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32) or
-            (image.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32A32)) TraceLog(LOG_WARNING, "IMAGE: Pixel format converted from 32bit to 8bit per channel");
-
-        if ((image.format == PIXELFORMAT_UNCOMPRESSED_R16) or
-            (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16) or
-            (image.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16A16)) TraceLog(LOG_WARNING, "IMAGE: Pixel format converted from 16bit to 8bit per channel");
-
-        const d8: [*]const u8 = @ptrCast(image.data);
-        const d16: [*]const u16 = @ptrCast(@alignCast(image.data));
-        const d32: [*]const f32 = @ptrCast(@alignCast(image.data));
-
-        var i: usize = 0;
-        var k: usize = 0;
-        const total: usize = @intCast(image.width * image.height);
-        while (i < total) : (i += 1) {
-            switch (image.format) {
-                PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-                    pixels[i].r = d8[i];
-                    pixels[i].g = d8[i];
-                    pixels[i].b = d8[i];
-                    pixels[i].a = 255;
-                },
-                PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-                    pixels[i].r = d8[k];
-                    pixels[i].g = d8[k];
-                    pixels[i].b = d8[k];
-                    pixels[i].a = d8[k + 1];
-                    k += 2;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-                    const pixel = d16[i];
-                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * (255.0 / 31.0));
-                    pixels[i].b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * (255.0 / 31.0));
-                    pixels[i].a = iuc((pixel & 0b0000000000000001) * 255);
-                },
-                PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-                    const pixel = d16[i];
-                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * (255.0 / 63.0));
-                    pixels[i].b = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000011111)) * (255.0 / 31.0));
-                    pixels[i].a = 255;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-                    const pixel = d16[i];
-                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * (255.0 / 15.0));
-                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * (255.0 / 15.0));
-                    pixels[i].b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * (255.0 / 15.0));
-                    pixels[i].a = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000001111)) * (255.0 / 15.0));
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-                    pixels[i].r = d8[k];
-                    pixels[i].g = d8[k + 1];
-                    pixels[i].b = d8[k + 2];
-                    pixels[i].a = d8[k + 3];
-                    k += 4;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-                    pixels[i].r = d8[k];
-                    pixels[i].g = d8[k + 1];
-                    pixels[i].b = d8[k + 2];
-                    pixels[i].a = 255;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32 => {
-                    pixels[i].r = tuc(d32[k] * 255.0);
-                    pixels[i].g = 0;
-                    pixels[i].b = 0;
-                    pixels[i].a = 255;
-                    k += 1;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-                    pixels[i].r = tuc(d32[k] * 255.0);
-                    pixels[i].g = tuc(d32[k + 1] * 255.0);
-                    pixels[i].b = tuc(d32[k + 2] * 255.0);
-                    pixels[i].a = 255;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-                    pixels[i].r = tuc(d32[k] * 255.0);
-                    pixels[i].g = tuc(d32[k + 1] * 255.0);
-                    pixels[i].b = tuc(d32[k + 2] * 255.0);
-                    pixels[i].a = tuc(d32[k + 3] * 255.0);
-                    k += 4;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    pixels[i].r = tuc(HalfToFloat(d16[k]) * 255.0);
-                    pixels[i].g = 0;
-                    pixels[i].b = 0;
-                    pixels[i].a = 255;
-                    k += 1;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    pixels[i].r = tuc(HalfToFloat(d16[k]) * 255.0);
-                    pixels[i].g = tuc(HalfToFloat(d16[k + 1]) * 255.0);
-                    pixels[i].b = tuc(HalfToFloat(d16[k + 2]) * 255.0);
-                    pixels[i].a = 255;
-                    k += 3;
-                },
-                PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    pixels[i].r = tuc(HalfToFloat(d16[k]) * 255.0);
-                    pixels[i].g = tuc(HalfToFloat(d16[k + 1]) * 255.0);
-                    pixels[i].b = tuc(HalfToFloat(d16[k + 2]) * 255.0);
-                    pixels[i].a = tuc(HalfToFloat(d16[k + 3]) * 255.0);
-                    k += 4;
-                },
-                else => {},
-            }
-        }
-    }
-
-    return pixels;
+    return if (loadColors(image)) |pixels| pixels.ptr else null;
 }
 
 // Load colors palette from image as a Color array (RGBA - 32bit)
+// NOTE: Memory allocated should be freed using UnloadImagePalette()
 export fn LoadImagePalette(image: Image, maxPaletteSize: c_int, colorCount: [*c]c_int) callconv(.c) [*c]Color {
-    var palCount: c_int = 0;
-    var palette: [*c]Color = null;
-    const pixels = LoadImageColors(image);
+    colorCount.* = 0;
+    const pixels = loadColors(image) orelse return null;
+    defer cmem.free(pixels.ptr);
 
-    if (pixels != null) {
-        palette = @ptrCast(@alignCast(RL_MALLOC(@intCast(maxPaletteSize * @as(c_int, @sizeOf(Color))))));
+    const palette = allocC(Color, maxPaletteSize) orelse return null;
+    @memset(palette, BLANK);
 
-        var j: usize = 0;
-        while (j < @as(usize, @intCast(maxPaletteSize))) : (j += 1) palette[j] = BLANK;
+    var count: usize = 0;
+    for (pixels) |pixel| {
+        if (pixel.a == 0) continue;
 
-        var i: c_int = 0;
-        const total: c_int = image.width * image.height;
-        while (i < total) : (i += 1) {
-            if (pixels[@intCast(i)].a > 0) {
-                var colorInPalette = false;
+        // NOTE: Searches the whole palette, unused BLANK entries included
+        const known = for (palette) |entry| {
+            if (ColorIsEqual(entry, pixel)) break true;
+        } else false;
+        if (known) continue;
 
-                var jj: c_int = 0;
-                while (jj < maxPaletteSize) : (jj += 1) {
-                    const c1 = pixels[@intCast(i)];
-                    const c2 = palette[@intCast(jj)];
-                    if ((c1.r == c2.r) and (c1.g == c2.g) and (c1.b == c2.b) and (c1.a == c2.a)) {
-                        colorInPalette = true;
-                        break;
-                    }
-                }
+        palette[count] = pixel;
+        count += 1;
 
-                if (!colorInPalette) {
-                    palette[@intCast(palCount)] = pixels[@intCast(i)];
-                    palCount += 1;
-
-                    if (palCount >= maxPaletteSize) {
-                        i = image.width * image.height;
-                        TraceLog(LOG_WARNING, "IMAGE: Palette is greater than %i colors", maxPaletteSize);
-                    }
-                }
-            }
+        if (count >= palette.len) {
+            TraceLog(LOG_WARNING, "IMAGE: Palette is greater than %i colors", maxPaletteSize);
+            break;
         }
-
-        UnloadImageColors(pixels);
     }
 
-    colorCount.* = palCount;
-
-    return palette;
+    colorCount.* = @intCast(count);
+    return palette.ptr;
 }
 
 // Unload color data loaded with LoadImageColors()
 export fn UnloadImageColors(colors: [*c]Color) callconv(.c) void {
-    RL_FREE(colors);
+    cmem.free(colors);
 }
 
 // Unload colors palette loaded with LoadImagePalette()
 export fn UnloadImagePalette(colors: [*c]Color) callconv(.c) void {
-    RL_FREE(colors);
+    cmem.free(colors);
 }
 
 // Get image alpha border rectangle
+// NOTE: Threshold is defined as a percentage: 0.0f -> 1.0f
 export fn GetImageAlphaBorder(image: Image, threshold: f32) callconv(.c) Rectangle {
-    var crop: Rectangle = std.mem.zeroes(Rectangle);
+    const pixels = loadColors(image) orelse return .{ .x = 0, .y = 0, .width = 0, .height = 0 };
+    defer cmem.free(pixels.ptr);
 
-    const pixels = LoadImageColors(image);
+    var xMin: c_int = 65536; // Define a big enough number
+    var xMax: c_int = 0;
+    var yMin: c_int = 65536;
+    var yMax: c_int = 0;
 
-    if (pixels != null) {
-        var xMin: c_int = 65536;
-        var xMax: c_int = 0;
-        var yMin: c_int = 65536;
-        var yMax: c_int = 0;
-
-        var y: c_int = 0;
-        while (y < image.height) : (y += 1) {
-            var x: c_int = 0;
-            while (x < image.width) : (x += 1) {
-                if (pixels[@intCast(y * image.width + x)].a > tuc(threshold * 255.0)) {
-                    if (x < xMin) xMin = x;
-                    if (x > xMax) xMax = x;
-                    if (y < yMin) yMin = y;
-                    if (y > yMax) yMax = y;
-                }
+    var y: c_int = 0;
+    while (y < image.height) : (y += 1) {
+        var x: c_int = 0;
+        while (x < image.width) : (x += 1) {
+            if (pixels[@intCast(y * image.width + x)].a > tuc(threshold * 255.0)) {
+                if (x < xMin) xMin = x;
+                if (x > xMax) xMax = x;
+                if (y < yMin) yMin = y;
+                if (y > yMax) yMax = y;
             }
         }
-
-        if ((xMin != 65536) and (xMax != 65536)) {
-            crop = .{ .x = @floatFromInt(xMin), .y = @floatFromInt(yMin), .width = @floatFromInt((xMax + 1) - xMin), .height = @floatFromInt((yMax + 1) - yMin) };
-        }
-
-        UnloadImageColors(pixels);
     }
 
-    return crop;
+    // Check for empty blank image
+    if ((xMin == 65536) or (xMax == 65536)) return .{ .x = 0, .y = 0, .width = 0, .height = 0 };
+
+    return .{ .x = f(xMin), .y = f(yMin), .width = f((xMax + 1) - xMin), .height = f((yMax + 1) - yMin) };
 }
 
 // Get image pixel color at (x, y) position
 export fn GetImageColor(image: Image, x: c_int, y: c_int) callconv(.c) Color {
-    var color: Color = std.mem.zeroes(Color);
+    if ((x < 0) or (x >= image.width) or (y < 0) or (y >= image.height)) {
+        TraceLog(LOG_WARNING, "Requested image pixel (%i, %i) out of bounds", x, y);
+        return BLANK;
+    }
 
-    if ((x >= 0) and (x < image.width) and (y >= 0) and (y < image.height)) {
-        const idx: usize = @intCast(y * image.width + x);
-        const d8: [*]const u8 = @ptrCast(image.data);
-        const d16: [*]const u16 = @ptrCast(@alignCast(image.data));
-        const d32: [*]const f32 = @ptrCast(@alignCast(image.data));
-
-        switch (image.format) {
-            PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-                color.r = d8[idx];
-                color.g = d8[idx];
-                color.b = d8[idx];
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-                color.r = d8[idx * 2];
-                color.g = d8[idx * 2];
-                color.b = d8[idx * 2];
-                color.a = d8[idx * 2 + 1];
-            },
-            PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-                const pixel = d16[idx];
-                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * (255.0 / 31.0));
-                color.b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * (255.0 / 31.0));
-                color.a = iuc((pixel & 0b0000000000000001) * 255);
-            },
-            PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-                const pixel = d16[idx];
-                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * (255.0 / 63.0));
-                color.b = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000011111)) * (255.0 / 31.0));
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-                const pixel = d16[idx];
-                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * (255.0 / 15.0));
-                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * (255.0 / 15.0));
-                color.b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * (255.0 / 15.0));
-                color.a = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000001111)) * (255.0 / 15.0));
-            },
-            PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-                color.r = d8[idx * 4];
-                color.g = d8[idx * 4 + 1];
-                color.b = d8[idx * 4 + 2];
-                color.a = d8[idx * 4 + 3];
-            },
-            PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-                color.r = d8[idx * 3];
-                color.g = d8[idx * 3 + 1];
-                color.b = d8[idx * 3 + 2];
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_R32 => {
-                color.r = tuc(d32[idx] * 255.0);
-                color.g = 0;
-                color.b = 0;
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-                color.r = tuc(d32[idx * 3] * 255.0);
-                color.g = tuc(d32[idx * 3 + 1] * 255.0);
-                color.b = tuc(d32[idx * 3 + 2] * 255.0);
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-                color.r = tuc(d32[idx * 4] * 255.0);
-                color.g = tuc(d32[idx * 4 + 1] * 255.0);
-                color.b = tuc(d32[idx * 4 + 2] * 255.0);
-                color.a = tuc(d32[idx * 4 + 3] * 255.0);
-            },
-            PIXELFORMAT_UNCOMPRESSED_R16 => {
-                color.r = tuc(HalfToFloat(d16[idx]) * 255.0);
-                color.g = 0;
-                color.b = 0;
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                color.r = tuc(HalfToFloat(d16[idx * 3]) * 255.0);
-                color.g = tuc(HalfToFloat(d16[idx * 3 + 1]) * 255.0);
-                color.b = tuc(HalfToFloat(d16[idx * 3 + 2]) * 255.0);
-                color.a = 255;
-            },
-            PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                color.r = tuc(HalfToFloat(d16[idx * 4]) * 255.0);
-                color.g = tuc(HalfToFloat(d16[idx * 4 + 1]) * 255.0);
-                color.b = tuc(HalfToFloat(d16[idx * 4 + 2]) * 255.0);
-                color.a = tuc(HalfToFloat(d16[idx * 4 + 3]) * 255.0);
-            },
-            else => TraceLog(LOG_WARNING, "Compressed image format does not support color reading"),
-        }
-    } else TraceLog(LOG_WARNING, "Requested image pixel (%i, %i) out of bounds", x, y);
-
-    return color;
+    const src: [*]const u8 = @ptrCast(image.data);
+    const i: usize = @intCast(y * image.width + x);
+    return readColor(src + i * bytesPerPixel(image.format), image.format) orelse {
+        TraceLog(LOG_WARNING, "Compressed image format does not support color reading");
+        return BLANK;
+    };
 }
 
 //------------------------------------------------------------------------------------
@@ -3098,123 +2447,34 @@ export fn GetImageColor(image: Image, x: c_int, y: c_int) callconv(.c) Color {
 //------------------------------------------------------------------------------------
 // Clear image background with given color
 export fn ImageClearBackground(dst: [*c]Image, color: Color) callconv(.c) void {
+    // Security check to avoid program crash
     if ((dst.*.data == null) or (dst.*.width == 0) or (dst.*.height == 0)) return;
 
     // Fill in first pixel based on image format
+    // NOTE: We could use ImageDrawPixel() but this is faster
     ImageDrawPixel(dst, 0, 0, color);
 
-    const pSrcPixel: [*]u8 = @ptrCast(dst.*.data);
-    const bytesPerPixel = GetPixelDataSize(1, 1, dst.*.format);
-    const totalPixels = dst.*.width * dst.*.height;
+    const pixelSize: usize = @intCast(GetPixelDataSize(1, 1, dst.*.format));
+    const totalPixels = pixelCount(dst.*);
+    const data = bytesAt(dst.*.data, @intCast(totalPixels * pixelSize));
 
-    var i: c_int = 1;
-    while (i < totalPixels) : (i *= 2) {
-        const pixelsToCopy = MINi(i, totalPixels - i);
-        _ = memcpy(pSrcPixel + @as(usize, @intCast(i * bytesPerPixel)), pSrcPixel, @intCast(pixelsToCopy * bytesPerPixel));
+    // Repeat the first pixel into the rest of the image, doubling the filled span each time
+    var filled: usize = 1;
+    while (filled < totalPixels) : (filled *= 2) {
+        const n = @min(filled, totalPixels - filled) * pixelSize;
+        @memcpy(data[filled * pixelSize ..][0..n], data[0..n]);
     }
 }
 
 // Draw pixel within an image
+// NOTE: Compressed image formats not supported
 export fn ImageDrawPixel(dst: [*c]Image, x: c_int, y: c_int, color: Color) callconv(.c) void {
+    // Security check to avoid program crash
     if ((dst.*.data == null) or (x < 0) or (x >= dst.*.width) or (y < 0) or (y >= dst.*.height)) return;
 
-    const idx: usize = @intCast(y * dst.*.width + x);
-
-    switch (dst.*.format) {
-        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const gray: u8 = tuc((coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114) * 255.0);
-            const d: [*]u8 = @ptrCast(dst.*.data);
-            d[idx] = gray;
-        },
-        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const gray: u8 = tuc((coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114) * 255.0);
-            const d: [*]u8 = @ptrCast(dst.*.data);
-            d[idx * 2] = gray;
-            d[idx * 2 + 1] = color.a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const r: u16 = tuc(round(@floatCast(coln.x * 31.0)));
-            const g: u16 = tuc(round(@floatCast(coln.y * 63.0)));
-            const b: u16 = tuc(round(@floatCast(coln.z * 31.0)));
-            const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx] = (r << 11) | (g << 5) | b;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-            const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
-            const r: u16 = tuc(round(@floatCast(coln.x * 31.0)));
-            const g: u16 = tuc(round(@floatCast(coln.y * 31.0)));
-            const b: u16 = tuc(round(@floatCast(coln.z * 31.0)));
-            const a: u16 = if (coln.w > (@as(f32, @floatFromInt(PIXELFORMAT_UNCOMPRESSED_R5G5B5A1_ALPHA_THRESHOLD)) / 255.0)) 1 else 0;
-            const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx] = (r << 11) | (g << 6) | (b << 1) | a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-            const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
-            const r: u16 = tuc(round(@floatCast(coln.x * 15.0)));
-            const g: u16 = tuc(round(@floatCast(coln.y * 15.0)));
-            const b: u16 = tuc(round(@floatCast(coln.z * 15.0)));
-            const a: u16 = tuc(round(@floatCast(coln.w * 15.0)));
-            const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx] = (r << 12) | (g << 8) | (b << 4) | a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-            const d: [*]u8 = @ptrCast(dst.*.data);
-            d[idx * 3] = color.r;
-            d[idx * 3 + 1] = color.g;
-            d[idx * 3 + 2] = color.b;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-            const d: [*]u8 = @ptrCast(dst.*.data);
-            d[idx * 4] = color.r;
-            d[idx * 4 + 1] = color.g;
-            d[idx * 4 + 2] = color.b;
-            d[idx * 4 + 3] = color.a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R32 => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const d: [*]f32 = @ptrCast(@alignCast(dst.*.data));
-            d[idx] = coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const d: [*]f32 = @ptrCast(@alignCast(dst.*.data));
-            d[idx * 3] = coln.x;
-            d[idx * 3 + 1] = coln.y;
-            d[idx * 3 + 2] = coln.z;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-            const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
-            const d: [*]f32 = @ptrCast(@alignCast(dst.*.data));
-            d[idx * 4] = coln.x;
-            d[idx * 4 + 1] = coln.y;
-            d[idx * 4 + 2] = coln.z;
-            d[idx * 4 + 3] = coln.w;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R16 => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx] = FloatToHalf(coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114);
-        },
-        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx * 3] = FloatToHalf(coln.x);
-            d[idx * 3 + 1] = FloatToHalf(coln.y);
-            d[idx * 3 + 2] = FloatToHalf(coln.z);
-        },
-        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-            const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
-            const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx * 4] = FloatToHalf(coln.x);
-            d[idx * 4 + 1] = FloatToHalf(coln.y);
-            d[idx * 4 + 2] = FloatToHalf(coln.z);
-            d[idx * 4 + 3] = FloatToHalf(coln.w);
-        },
-        else => {},
-    }
+    const data: [*]u8 = @ptrCast(dst.*.data);
+    const i: usize = @intCast(y * dst.*.width + x);
+    writeColor(data + i * bytesPerPixel(dst.*.format), color, dst.*.format);
 }
 
 // Draw pixel within an image (Vector version)
@@ -3228,7 +2488,7 @@ export fn ImageDrawLine(dst: [*c]Image, startPosX: c_int, startPosY: c_int, endP
     var longLen = endPosX - startPosX;
     var yLonger = false;
 
-    if (absi(shortLen) > absi(longLen)) {
+    if (@abs(shortLen) > @abs(longLen)) {
         const temp = shortLen;
         shortLen = longLen;
         longLen = temp;
@@ -3287,7 +2547,7 @@ export fn ImageDrawLineEx(dst: [*c]Image, start: Vector2, end: Vector2, thick: c
     const dx = x2 - x1;
     const dy = y2 - y1;
 
-    if ((dx != 0) and (absi(@divTrunc(dy, dx)) < 1)) {
+    if ((dx != 0) and (@abs(@divTrunc(dy, dx)) < 1)) {
         const wy = thick - 1;
 
         var i: c_int = 0;
@@ -3316,10 +2576,9 @@ export fn ImageDrawLineEx(dst: [*c]Image, start: Vector2, end: Vector2, thick: c
 
 // Draw a lines sequence within an image
 export fn ImageDrawLineStrip(dst: [*c]Image, points: [*c]const Vector2, pointCount: c_int, color: Color) callconv(.c) void {
-    var i: c_int = 0;
-    while (i < pointCount - 1) : (i += 1) {
-        ImageDrawLineV(dst, points[@intCast(i)], points[@intCast(i + 1)], color);
-    }
+    if (pointCount < 2) return;
+    const pts = points[0..@intCast(pointCount)];
+    for (pts[0 .. pts.len - 1], pts[1..]) |start, end| ImageDrawLineV(dst, start, end, color);
 }
 
 // Draw triangle within an image
@@ -3428,7 +2687,7 @@ export fn ImageDrawTriangleGradient(dst: [*c]Image, v1: Vector2, v2: Vector2, v3
                 const aW2: u8 = tuc(@as(f32, @floatFromInt(w2)) * wInvSum);
                 const aW3: u8 = tuc(@as(f32, @floatFromInt(w3)) * wInvSum);
 
-                var finalColor: Color = std.mem.zeroes(Color);
+                var finalColor: Color = BLANK;
                 finalColor.r = iuc(@divTrunc(@as(c_int, c1.r) * @as(c_int, aW1) + @as(c_int, c2.r) * @as(c_int, aW2) + @as(c_int, c3.r) * @as(c_int, aW3), 255));
                 finalColor.g = iuc(@divTrunc(@as(c_int, c1.g) * @as(c_int, aW1) + @as(c_int, c2.g) * @as(c_int, aW2) + @as(c_int, c3.g) * @as(c_int, aW3), 255));
                 finalColor.b = iuc(@divTrunc(@as(c_int, c1.b) * @as(c_int, aW1) + @as(c_int, c2.b) * @as(c_int, aW2) + @as(c_int, c3.b) * @as(c_int, aW3), 255));
@@ -3457,23 +2716,20 @@ export fn ImageDrawTriangleLines(dst: [*c]Image, v1: Vector2, v2: Vector2, v3: V
 
 // Draw a triangle fan defined by points within an image (first vertex is the center)
 export fn ImageDrawTriangleFan(dst: [*c]Image, points: [*c]const Vector2, pointCount: c_int, color: Color) callconv(.c) void {
-    if (pointCount >= 3) {
-        var i: c_int = 1;
-        while (i < pointCount - 1) : (i += 1) {
-            ImageDrawTriangle(dst, points[0], points[@intCast(i)], points[@intCast(i + 1)], color);
-        }
-    }
+    if (pointCount < 3) return;
+    const pts = points[0..@intCast(pointCount)];
+    for (pts[1 .. pts.len - 1], pts[2..]) |b, c| ImageDrawTriangle(dst, pts[0], b, c, color);
 }
 
 // Draw a triangle strip defined by points within an image
 export fn ImageDrawTriangleStrip(dst: [*c]Image, points: [*c]const Vector2, pointCount: c_int, color: Color) callconv(.c) void {
-    if (pointCount >= 3) {
-        var i: c_int = 2;
-        while (i < pointCount) : (i += 1) {
-            if (@rem(i, 2) == 0) {
-                ImageDrawTriangle(dst, points[@intCast(i)], points[@intCast(i - 2)], points[@intCast(i - 1)], color);
-            } else ImageDrawTriangle(dst, points[@intCast(i)], points[@intCast(i - 1)], points[@intCast(i - 2)], color);
-        }
+    if (pointCount < 3) return;
+    const pts = points[0..@intCast(pointCount)];
+    // Alternate the winding so every triangle faces the same way
+    for (2..pts.len) |i| {
+        if (i % 2 == 0) {
+            ImageDrawTriangle(dst, pts[i], pts[i - 2], pts[i - 1], color);
+        } else ImageDrawTriangle(dst, pts[i], pts[i - 1], pts[i - 2], color);
     }
 }
 
@@ -3512,25 +2768,27 @@ export fn ImageDrawRectangleRec(dst: [*c]Image, rec_in: Rectangle, color: Color)
     const sy = ti(rec.y);
     const sx = ti(rec.x);
 
-    const bytesPerPixel = GetPixelDataSize(1, 1, dst.*.format);
+    const pixelSize = GetPixelDataSize(1, 1, dst.*.format);
 
+    // Fill in the first pixel of the first row based on image format
     ImageDrawPixel(dst, sx, sy, color);
 
-    const bytesOffset = ((sy * dst.*.width) + sx) * bytesPerPixel;
-    const base8: [*]u8 = @ptrCast(dst.*.data);
-    const pSrcPixel = base8 + @as(usize, @intCast(bytesOffset));
+    const data: [*]u8 = @ptrCast(dst.*.data);
+    const first = data + @as(usize, @intCast(((sy * dst.*.width) + sx) * pixelSize));
+    const size: usize = @intCast(pixelSize);
+    const width = dim(ti(rec.width));
 
-    var x: c_int = 1;
-    while (x < ti(rec.width)) : (x *= 2) {
-        const pixelsToCopy = MINi(x, ti(rec.width) - x);
-        _ = memcpy(pSrcPixel + @as(usize, @intCast(x * bytesPerPixel)), pSrcPixel, @intCast(pixelsToCopy * bytesPerPixel));
+    // Repeat the first pixel through the first row, doubling the filled span each time
+    var filled: usize = 1;
+    while (filled < width) : (filled *= 2) {
+        const n = @min(filled, width - filled) * size;
+        @memcpy(first[filled * size ..][0..n], first[0..n]);
     }
 
-    const bytesPerRow = bytesPerPixel * ti(rec.width);
-    var yy: c_int = 1;
-    while (yy < ti(rec.height)) : (yy += 1) {
-        _ = memcpy(pSrcPixel + @as(usize, @intCast((yy * dst.*.width) * bytesPerPixel)), pSrcPixel, @intCast(bytesPerRow));
-    }
+    // Repeat the first row down the rectangle
+    const rowSize = size * width;
+    const stride = dim(dst.*.width) * size;
+    for (1..dim(ti(rec.height))) |y| @memcpy(first[y * stride ..][0..rowSize], first[0..rowSize]);
 }
 
 // Bounding box of a rectangle rotated around `pivot`; corners are given relative to the pivot.
@@ -3552,7 +2810,7 @@ fn rotatedBounds(cornersX: [4]f32, cornersY: [4]f32, cosA: f32, sinA: f32, pivot
         if (ry > maxY) maxY = ry;
     }
 
-    return clampBounds(ti(floorf(minX)), ti(floorf(minY)), ti(ceilf(maxX)), ti(ceilf(maxY)), width, height);
+    return clampBounds(ti(@floor(minX)), ti(@floor(minY)), ti(@ceil(maxX)), ti(@ceil(maxY)), width, height);
 }
 
 // Limit integer pixel bounds to the image; null when nothing remains to draw.
@@ -3623,10 +2881,10 @@ export fn ImageDrawRectangleGradientEx(dst: [*c]Image, rec: Rectangle, col1: Col
     if ((dst == null) or (dst.*.data == null) or (rec.width <= 0) or (rec.height <= 0)) return;
 
     const b = clampBounds(
-        ti(floorf(rec.x)),
-        ti(floorf(rec.y)),
-        ti(ceilf(rec.x + rec.width)),
-        ti(ceilf(rec.y + rec.height)),
+        ti(@floor(rec.x)),
+        ti(@floor(rec.y)),
+        ti(@ceil(rec.x + rec.width)),
+        ti(@ceil(rec.y + rec.height)),
         dst.*.width,
         dst.*.height,
     ) orelse return;
@@ -3713,10 +2971,10 @@ export fn ImageDrawCircleGradient(dst: [*c]Image, center: Vector2, radius: f32, 
     if ((dst == null) or (dst.*.data == null) or (radius <= 0.0)) return;
 
     const b = clampBounds(
-        ti(floorf(center.x - radius)),
-        ti(floorf(center.y - radius)),
-        ti(ceilf(center.x + radius)),
-        ti(ceilf(center.y + radius)),
+        ti(@floor(center.x - radius)),
+        ti(@floor(center.y - radius)),
+        ti(@ceil(center.x + radius)),
+        ti(@ceil(center.y + radius)),
         dst.*.width,
         dst.*.height,
     ) orelse return;
@@ -3737,7 +2995,7 @@ export fn ImageDrawCircleGradient(dst: [*c]Image, center: Vector2, radius: f32, 
             if (distSq > radiusSq) continue;
 
             // Linear interpolation from inner to outer color
-            const t = sqrtf(distSq) / radius;
+            const t = @sqrt(distSq) / radius;
 
             // NOTE: Pixel format conversion managed by function
             ImageDrawPixel(dst, x, y, .{
@@ -3824,7 +3082,7 @@ export fn ImageDrawImagePro(dst: [*c]Image, src: Image, srcRec_in: Rectangle, ds
     if (dst.*.format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "Image drawing not supported for compressed formats");
     } else {
-        var srcMod: Image = std.mem.zeroes(Image);
+        var srcMod: Image = .{};
         var srcPtr: *const Image = &src;
         var useSrcMod = false;
 
@@ -3863,7 +3121,6 @@ export fn ImageDrawImagePro(dst: [*c]Image, src: Image, srcRec_in: Rectangle, ds
         if (@as(f32, @floatFromInt(dst.*.width)) < srcRec.width) srcRec.width = @floatFromInt(dst.*.width);
         if (@as(f32, @floatFromInt(dst.*.height)) < srcRec.height) srcRec.height = @floatFromInt(dst.*.height);
 
-        var blend: Color = std.mem.zeroes(Color);
         var blendRequired = true;
 
         // Fast path: Avoid blend if source has no alpha to blend
@@ -3895,14 +3152,16 @@ export fn ImageDrawImagePro(dst: [*c]Image, src: Image, srcRec_in: Rectangle, ds
             var pDst = pDstBase;
 
             if (!blendRequired and (srcPtr.format == dst.*.format)) {
-                _ = memcpy(pDst, pSrc, @intCast(ti(srcRec.width) * bytesPerPixelSrc));
+                // NOTE: memmove, not memcpy: drawing an image onto itself overlaps
+                const n: usize = @intCast(ti(srcRec.width) * bytesPerPixelSrc);
+                @memmove(pDst[0..n], pSrc[0..n]);
             } else {
                 var x: c_int = 0;
                 while (x < ti(srcRec.width)) : (x += 1) {
                     const colSrc = GetPixelColor(pSrc, srcPtr.format);
                     const colDst = GetPixelColor(pDst, dst.*.format);
 
-                    if (blendRequired) blend = ColorAlphaBlend(colDst, colSrc, tint) else blend = colSrc;
+                    const blend = if (blendRequired) ColorAlphaBlend(colDst, colSrc, tint) else colSrc;
 
                     SetPixelColor(pDst, blend, dst.*.format);
 
@@ -3919,13 +3178,13 @@ export fn ImageDrawImagePro(dst: [*c]Image, src: Image, srcRec_in: Rectangle, ds
 
         if ((dst.*.mipmaps > 1) and (src.mipmaps > 1)) {
             var mipmapDst = dst.*;
-            mipmapDst.data = ptrAdd(@as([*]u8, @ptrCast(mipmapDst.data)), GetPixelDataSize(mipmapDst.width, mipmapDst.height, mipmapDst.format));
+            mipmapDst.data = @as([*]u8, @ptrCast(mipmapDst.data)) + @as(usize, @intCast(GetPixelDataSize(mipmapDst.width, mipmapDst.height, mipmapDst.format)));
             mipmapDst.width = @divTrunc(mipmapDst.width, 2);
             mipmapDst.height = @divTrunc(mipmapDst.height, 2);
             mipmapDst.mipmaps -= 1;
 
             var mipmapSrc = src;
-            mipmapSrc.data = ptrAdd(@as([*]u8, @ptrCast(mipmapSrc.data)), GetPixelDataSize(mipmapSrc.width, mipmapSrc.height, mipmapSrc.format));
+            mipmapSrc.data = @as([*]u8, @ptrCast(mipmapSrc.data)) + @as(usize, @intCast(GetPixelDataSize(mipmapSrc.width, mipmapSrc.height, mipmapSrc.format)));
             mipmapSrc.width = @divTrunc(mipmapSrc.width, 2);
             mipmapSrc.height = @divTrunc(mipmapSrc.height, 2);
             mipmapSrc.mipmaps -= 1;
@@ -3978,40 +3237,48 @@ export fn ImageDrawTextPro(dst: [*c]Image, font: Font, text: [*c]const u8, posit
 //------------------------------------------------------------------------------------
 // Load texture from file into GPU memory (VRAM)
 export fn LoadTexture(fileName: [*c]const u8) callconv(.c) Texture2D {
-    var texture: Texture2D = std.mem.zeroes(Texture2D);
-
     const image = LoadImage(fileName);
+    if (image.data == null) return .{};
+    defer UnloadImage(image);
 
-    if (image.data != null) {
-        texture = LoadTextureFromImage(image);
-        UnloadImage(image);
-    }
-
-    return texture;
+    return LoadTextureFromImage(image);
 }
 
 // Load a texture from image data
+// NOTE: image is not unloaded, it must be done manually
 export fn LoadTextureFromImage(image: Image) callconv(.c) Texture2D {
-    var texture: Texture2D = std.mem.zeroes(Texture2D);
+    var texture: Texture2D = .{
+        .width = image.width,
+        .height = image.height,
+        .mipmaps = image.mipmaps,
+        .format = image.format,
+    };
 
     if ((image.width != 0) and (image.height != 0)) {
         texture.id = rlLoadTexture(image.data, image.width, image.height, image.format, image.mipmaps);
     } else TraceLog(LOG_WARNING, "IMAGE: Data is not valid to load texture");
 
-    texture.width = image.width;
-    texture.height = image.height;
-    texture.mipmaps = image.mipmaps;
-    texture.format = image.format;
-
     return texture;
+}
+
+/// Where each cubemap face sits in an image laid out as `layout`, in units of
+/// the face size; null for a layout that is not a cross or a horizontal line.
+fn cubemapFaceCells(layout: c_int) ?[6][2]u8 {
+    return switch (layout) {
+        CUBEMAP_LAYOUT_LINE_HORIZONTAL => .{ .{ 0, 0 }, .{ 1, 0 }, .{ 2, 0 }, .{ 3, 0 }, .{ 4, 0 }, .{ 5, 0 } },
+        CUBEMAP_LAYOUT_CROSS_THREE_BY_FOUR => .{ .{ 1, 1 }, .{ 1, 3 }, .{ 1, 0 }, .{ 1, 2 }, .{ 0, 1 }, .{ 2, 1 } },
+        CUBEMAP_LAYOUT_CROSS_FOUR_BY_THREE => .{ .{ 2, 1 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 2 }, .{ 1, 1 }, .{ 3, 1 } },
+        else => null,
+    };
 }
 
 // Load cubemap from image, multiple image cubemap layouts supported
 export fn LoadTextureCubemap(image: Image, layout_in: c_int) callconv(.c) TextureCubemap {
-    var cubemap: TextureCubemap = std.mem.zeroes(TextureCubemap);
+    var cubemap: TextureCubemap = .{};
     var layout = layout_in;
 
-    if (layout == CUBEMAP_LAYOUT_AUTO_DETECT) {
+    if (layout == CUBEMAP_LAYOUT_AUTO_DETECT) { // Try to automatically guess layout type
+        // Check image width/height to determine the type of cubemap provided
         if (image.width > image.height) {
             if (@divTrunc(image.width, 6) == image.height) {
                 layout = CUBEMAP_LAYOUT_LINE_HORIZONTAL;
@@ -4038,77 +3305,50 @@ export fn LoadTextureCubemap(image: Image, layout_in: c_int) callconv(.c) Textur
 
     cubemap.height = cubemap.width;
 
-    if (layout != CUBEMAP_LAYOUT_AUTO_DETECT) {
-        const size = cubemap.width;
+    // Layout provided or already auto-detected
+    if (layout == CUBEMAP_LAYOUT_AUTO_DETECT) {
+        TraceLog(LOG_WARNING, "IMAGE: Failed to detect cubemap image layout");
+        return cubemap;
+    }
 
-        var faces: Image = std.mem.zeroes(Image);
-        var faceRecs: [6]Rectangle = std.mem.zeroes([6]Rectangle);
+    const size = cubemap.width;
 
-        {
-            var i: usize = 0;
-            while (i < 6) : (i += 1) faceRecs[i] = .{ .x = 0, .y = 0, .width = @floatFromInt(size), .height = @floatFromInt(size) };
+    // NOTE: Image formatting does not work with compressed textures
+    const faces = if (layout == CUBEMAP_LAYOUT_LINE_VERTICAL)
+        ImageCopy(image) // Image data already follows expected convention
+    else faces: {
+        // Convert image data to 6 faces in a vertical column, that's the optimum layout for loading
+        // NOTE: An unrecognized layout leaves every face at the image's top-left corner (raylib)
+        const cells = cubemapFaceCells(layout) orelse @as([6][2]u8, @splat(.{ 0, 0 }));
+
+        var faces = GenImageColor(size, size * 6, MAGENTA); // Image to store faces
+        ImageFormat(&faces, image.format);
+
+        var mipmapped = ImageCopy(image);
+        defer UnloadImage(mipmapped);
+        if (image.mipmaps > 1) {
+            ImageMipmaps(&mipmapped);
+            ImageMipmaps(&faces);
         }
 
-        if (layout == CUBEMAP_LAYOUT_LINE_VERTICAL) {
-            faces = ImageCopy(image);
-        } else {
-            if (layout == CUBEMAP_LAYOUT_LINE_HORIZONTAL) {
-                var i: c_int = 0;
-                while (i < 6) : (i += 1) faceRecs[@intCast(i)].x = @floatFromInt(size * i);
-            } else if (layout == CUBEMAP_LAYOUT_CROSS_THREE_BY_FOUR) {
-                faceRecs[0].x = @floatFromInt(size);
-                faceRecs[0].y = @floatFromInt(size);
-                faceRecs[1].x = @floatFromInt(size);
-                faceRecs[1].y = @floatFromInt(size * 3);
-                faceRecs[2].x = @floatFromInt(size);
-                faceRecs[2].y = 0;
-                faceRecs[3].x = @floatFromInt(size);
-                faceRecs[3].y = @floatFromInt(size * 2);
-                faceRecs[4].x = 0;
-                faceRecs[4].y = @floatFromInt(size);
-                faceRecs[5].x = @floatFromInt(size * 2);
-                faceRecs[5].y = @floatFromInt(size);
-            } else if (layout == CUBEMAP_LAYOUT_CROSS_FOUR_BY_THREE) {
-                faceRecs[0].x = @floatFromInt(size * 2);
-                faceRecs[0].y = @floatFromInt(size);
-                faceRecs[1].x = 0;
-                faceRecs[1].y = @floatFromInt(size);
-                faceRecs[2].x = @floatFromInt(size);
-                faceRecs[2].y = 0;
-                faceRecs[3].x = @floatFromInt(size);
-                faceRecs[3].y = @floatFromInt(size * 2);
-                faceRecs[4].x = @floatFromInt(size);
-                faceRecs[4].y = @floatFromInt(size);
-                faceRecs[5].x = @floatFromInt(size * 3);
-                faceRecs[5].y = @floatFromInt(size);
-            }
-
-            faces = GenImageColor(size, size * 6, MAGENTA);
-            ImageFormat(&faces, image.format);
-
-            var mipmapped = ImageCopy(image);
-            if (image.mipmaps > 1) {
-                ImageMipmaps(&mipmapped);
-                ImageMipmaps(&faces);
-            }
-
-            var i: c_int = 0;
-            while (i < 6) : (i += 1) {
-                ImageDrawImagePro(&faces, mipmapped, faceRecs[@intCast(i)], .{ .x = 0, .y = @floatFromInt(size * i), .width = @floatFromInt(size), .height = @floatFromInt(size) }, .{ .x = 0, .y = 0 }, 0.0, WHITE);
-            }
-
-            UnloadImage(mipmapped);
+        // NOTE: Image formatting does not work with compressed textures
+        for (cells, 0..) |cell, i| {
+            const face: Rectangle = .{ .x = f(size) * f(cell[0]), .y = f(size) * f(cell[1]), .width = f(size), .height = f(size) };
+            const dst: Rectangle = .{ .x = 0, .y = f(size) * f(i), .width = f(size), .height = f(size) };
+            ImageDrawImagePro(&faces, mipmapped, face, dst, .{ .x = 0, .y = 0 }, 0.0, WHITE);
         }
+        break :faces faces;
+    };
+    defer UnloadImage(faces);
 
-        cubemap.id = rlLoadTextureCubemap(faces.data, size, faces.format, faces.mipmaps);
+    // NOTE: Cubemap data is expected to be provided as 6 images in a single data array,
+    // one after the other (that's a vertical image), following convention: +X, -X, +Y, -Y, +Z, -Z
+    cubemap.id = rlLoadTextureCubemap(faces.data, size, faces.format, faces.mipmaps);
 
-        if (cubemap.id != 0) {
-            cubemap.format = faces.format;
-            cubemap.mipmaps = faces.mipmaps;
-        } else TraceLog(LOG_WARNING, "IMAGE: Failed to load cubemap image");
-
-        UnloadImage(faces);
-    } else TraceLog(LOG_WARNING, "IMAGE: Failed to detect cubemap image layout");
+    if (cubemap.id != 0) {
+        cubemap.format = faces.format;
+        cubemap.mipmaps = faces.mipmaps;
+    } else TraceLog(LOG_WARNING, "IMAGE: Failed to load cubemap image");
 
     return cubemap;
 }
@@ -4121,7 +3361,7 @@ export fn LoadRenderTexture(width: c_int, height: c_int) callconv(.c) RenderText
 // Load texture for rendering (framebuffer), with specific format
 // NOTE: Render texture is loaded by default with RGBA color attachment and depth RenderBuffer
 export fn LoadRenderTextureEx(width: c_int, height: c_int, format: c_int) callconv(.c) RenderTexture2D {
-    var target: RenderTexture2D = std.mem.zeroes(RenderTexture2D);
+    var target: RenderTexture2D = .{};
 
     if (format >= PIXELFORMAT_COMPRESSED_DXT1_RGB) {
         TraceLog(LOG_WARNING, "FBO: Render texture format not supported");
@@ -4161,15 +3401,11 @@ export fn LoadRenderTextureEx(width: c_int, height: c_int, format: c_int) callco
 
 // Check if texture is valid (loaded in GPU)
 export fn IsTextureValid(texture: Texture2D) callconv(.c) bool {
-    var result = false;
-
-    if ((texture.id > 0) and
-        (texture.width > 0) and
-        (texture.height > 0) and
-        (texture.format > 0) and
-        (texture.mipmaps > 0)) result = true;
-
-    return result;
+    return (texture.id > 0) and // Validate OpenGL id (texture uploaded to GPU)
+        (texture.width > 0) and // Validate texture width
+        (texture.height > 0) and // Validate texture height
+        (texture.format > 0) and // Validate texture pixel format
+        (texture.mipmaps > 0); // Validate texture mipmaps (at least 1 for basic mipmap level)
 }
 
 // Unload texture from GPU memory (VRAM)
@@ -4182,13 +3418,9 @@ export fn UnloadTexture(texture: Texture2D) callconv(.c) void {
 
 // Check if render texture is valid (loaded in GPU)
 export fn IsRenderTextureValid(target: RenderTexture2D) callconv(.c) bool {
-    var result = false;
-
-    if ((target.id > 0) and
-        IsTextureValid(target.depth) and
-        IsTextureValid(target.texture)) result = true;
-
-    return result;
+    return (target.id > 0) and // Validate OpenGL id (loaded on GPU)
+        IsTextureValid(target.depth) and // Validate FBO depth texture/renderbuffer attachment
+        IsTextureValid(target.texture); // Validate FBO texture attachment
 }
 
 // Unload render texture from GPU memory (VRAM)
@@ -4304,7 +3536,7 @@ export fn DrawTextureEx(texture: Texture2D, position: Vector2, rotation: f32, sc
 
 // Draw a part of a texture (defined by a rectangle)
 export fn DrawTextureRec(texture: Texture2D, rec: Rectangle, position: Vector2, tint: Color) callconv(.c) void {
-    const dstrec = Rectangle{ .x = position.x, .y = position.y, .width = fabsf(rec.width), .height = fabsf(rec.height) };
+    const dstrec = Rectangle{ .x = position.x, .y = position.y, .width = @abs(rec.width), .height = @abs(rec.height) };
     const origin = Vector2{ .x = 0.0, .y = 0.0 };
 
     DrawTexturePro(texture, rec, dstrec, origin, 0.0, tint);
@@ -4330,10 +3562,10 @@ export fn DrawTexturePro(texture: Texture2D, srcrec_in: Rectangle, dstrec_in: Re
         if (dstrec.width < 0) dstrec.width *= -1;
         if (dstrec.height < 0) dstrec.height *= -1;
 
-        var topLeft: Vector2 = std.mem.zeroes(Vector2);
-        var topRight: Vector2 = std.mem.zeroes(Vector2);
-        var bottomLeft: Vector2 = std.mem.zeroes(Vector2);
-        var bottomRight: Vector2 = std.mem.zeroes(Vector2);
+        var topLeft: Vector2 = .{ .x = 0, .y = 0 };
+        var topRight: Vector2 = .{ .x = 0, .y = 0 };
+        var bottomLeft: Vector2 = .{ .x = 0, .y = 0 };
+        var bottomRight: Vector2 = .{ .x = 0, .y = 0 };
 
         if (rotation == 0.0) {
             const x = dstrec.x - origin.x;
@@ -4424,31 +3656,16 @@ export fn DrawTextureNPatch(texture: Texture2D, nPatchInfo_in: NPatchInfo, dstre
             bottomBorder = patchHeight - topBorder;
         }
 
-        var vertA: Vector2 = std.mem.zeroes(Vector2);
-        var vertB: Vector2 = std.mem.zeroes(Vector2);
-        var vertC: Vector2 = std.mem.zeroes(Vector2);
-        var vertD: Vector2 = std.mem.zeroes(Vector2);
-        vertA.x = 0.0; // Outer left
-        vertA.y = 0.0; // Outer top
-        vertB.x = leftBorder; // Inner left
-        vertB.y = topBorder; // Inner top
-        vertC.x = patchWidth - rightBorder; // Inner right
-        vertC.y = patchHeight - bottomBorder; // Inner bottom
-        vertD.x = patchWidth; // Outer right
-        vertD.y = patchHeight; // Outer bottom
+        const vertA: Vector2 = .{ .x = 0.0, .y = 0.0 }; // Outer left, outer top
+        const vertB: Vector2 = .{ .x = leftBorder, .y = topBorder }; // Inner left, inner top
+        const vertC: Vector2 = .{ .x = patchWidth - rightBorder, .y = patchHeight - bottomBorder }; // Inner right, inner bottom
+        const vertD: Vector2 = .{ .x = patchWidth, .y = patchHeight }; // Outer right, outer bottom
 
-        var coordA: Vector2 = std.mem.zeroes(Vector2);
-        var coordB: Vector2 = std.mem.zeroes(Vector2);
-        var coordC: Vector2 = std.mem.zeroes(Vector2);
-        var coordD: Vector2 = std.mem.zeroes(Vector2);
-        coordA.x = nPatchInfo.source.x / width;
-        coordA.y = nPatchInfo.source.y / height;
-        coordB.x = (nPatchInfo.source.x + leftBorder) / width;
-        coordB.y = (nPatchInfo.source.y + topBorder) / height;
-        coordC.x = (nPatchInfo.source.x + nPatchInfo.source.width - rightBorder) / width;
-        coordC.y = (nPatchInfo.source.y + nPatchInfo.source.height - bottomBorder) / height;
-        coordD.x = (nPatchInfo.source.x + nPatchInfo.source.width) / width;
-        coordD.y = (nPatchInfo.source.y + nPatchInfo.source.height) / height;
+        const source = nPatchInfo.source;
+        const coordA: Vector2 = .{ .x = source.x / width, .y = source.y / height };
+        const coordB: Vector2 = .{ .x = (source.x + leftBorder) / width, .y = (source.y + topBorder) / height };
+        const coordC: Vector2 = .{ .x = (source.x + source.width - rightBorder) / width, .y = (source.y + source.height - bottomBorder) / height };
+        const coordD: Vector2 = .{ .x = (source.x + source.width) / width, .y = (source.y + source.height) / height };
 
         rlSetTexture(texture.id);
 
@@ -4627,9 +3844,7 @@ export fn DrawTextureNPatch(texture: Texture2D, nPatchInfo_in: NPatchInfo, dstre
 //------------------------------------------------------------------------------------
 // Check if two colors are equal
 export fn ColorIsEqual(col1: Color, col2: Color) callconv(.c) bool {
-    var result = false;
-    if ((col1.r == col2.r) and (col1.g == col2.g) and (col1.b == col2.b) and (col1.a == col2.a)) result = true;
-    return result;
+    return (col1.r == col2.r) and (col1.g == col2.g) and (col1.b == col2.b) and (col1.a == col2.a);
 }
 
 // Get color with alpha applied, alpha goes from 0.0f to 1.0f
@@ -4675,7 +3890,7 @@ export fn ColorFromNormalized(normalized: Vector4) callconv(.c) Color {
 
 // Get HSV values for a Color, Hue [0..360], Saturation/Value [0..1]
 export fn ColorToHSV(color: Color) callconv(.c) Vector3 {
-    var hsv: Vector3 = std.mem.zeroes(Vector3);
+    var hsv: Vector3 = .{ .x = 0, .y = 0, .z = 0 };
     const rgb = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
     var min: f32 = 0.0;
     var max: f32 = 0.0;
@@ -4752,19 +3967,12 @@ export fn ColorFromHSV(hue: f32, saturation: f32, value: f32) callconv(.c) Color
 
 // Get color multiplied with another color
 export fn ColorTint(color: Color, tint: Color) callconv(.c) Color {
-    var result = color;
-
-    const r: u8 = iuc(@divTrunc(@as(c_int, color.r) * @as(c_int, tint.r), 255));
-    const g: u8 = iuc(@divTrunc(@as(c_int, color.g) * @as(c_int, tint.g), 255));
-    const b: u8 = iuc(@divTrunc(@as(c_int, color.b) * @as(c_int, tint.b), 255));
-    const a: u8 = iuc(@divTrunc(@as(c_int, color.a) * @as(c_int, tint.a), 255));
-
-    result.r = r;
-    result.g = g;
-    result.b = b;
-    result.a = a;
-
-    return result;
+    return .{
+        .r = iuc(@divTrunc(@as(c_int, color.r) * @as(c_int, tint.r), 255)),
+        .g = iuc(@divTrunc(@as(c_int, color.g) * @as(c_int, tint.g), 255)),
+        .b = iuc(@divTrunc(@as(c_int, color.b) * @as(c_int, tint.b), 255)),
+        .a = iuc(@divTrunc(@as(c_int, color.a) * @as(c_int, tint.a), 255)),
+    };
 }
 
 // Get color with brightness correction, brightness factor goes from -1.0f to 1.0f
@@ -4877,7 +4085,7 @@ export fn ColorAlphaBlend(dst: Color, src_in: Color, tint: Color) callconv(.c) C
 
 // Get color lerp interpolation between two colors, factor [0.0f..1.0f]
 export fn ColorLerp(color1: Color, color2: Color, factor_in: f32) callconv(.c) Color {
-    var color: Color = std.mem.zeroes(Color);
+    var color: Color = BLANK;
     var factor = factor_in;
 
     if (factor < 0.0) factor = 0.0 else if (factor > 1.0) factor = 1.0;
@@ -4903,145 +4111,84 @@ export fn GetColor(hexValue: c_uint) callconv(.c) Color {
 }
 
 // Get color from a pixel from certain format
+// NOTE: Unlike LoadImageColors, 16-bit formats are scaled with integer math
 export fn GetPixelColor(srcPtr: ?*const anyopaque, format: c_int) callconv(.c) Color {
-    var color: Color = std.mem.zeroes(Color);
+    const src: [*]const u8 = @ptrCast(srcPtr);
 
-    // The wider views are computed lazily inside the arms that use them: for
-    // 1-byte formats srcPtr is often odd-aligned (a byte offset into the image),
-    // and an eager @alignCast would trap. C casts per-case for the same reason.
-    const s8: [*]const u8 = @ptrCast(srcPtr);
-    const S = struct {
-        inline fn u16s(p: ?*const anyopaque) [*]const u16 {
-            return @ptrCast(@alignCast(p));
-        }
-        inline fn f32s(p: ?*const anyopaque) [*]const f32 {
-            return @ptrCast(@alignCast(p));
-        }
+    return switch (format) {
+        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => .{ .r = src[0], .g = src[0], .b = src[0], .a = 255 },
+        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => .{ .r = src[0], .g = src[0], .b = src[0], .a = src[1] },
+        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => blk: {
+            const pixel: c_int = u16s(src)[0];
+            break :blk .{
+                .r = iuc(@divTrunc((pixel >> 11) * 255, 31)),
+                .g = iuc(@divTrunc(((pixel >> 5) & 0b0000000000111111) * 255, 63)),
+                .b = iuc(@divTrunc((pixel & 0b0000000000011111) * 255, 31)),
+                .a = 255,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => blk: {
+            const pixel: c_int = u16s(src)[0];
+            break :blk .{
+                .r = iuc(@divTrunc((pixel >> 11) * 255, 31)),
+                .g = iuc(@divTrunc(((pixel >> 6) & 0b0000000000011111) * 255, 31)),
+                .b = iuc(@divTrunc(((pixel >> 1) & 0b0000000000011111) * 255, 31)),
+                .a = if ((pixel & 0b0000000000000001) != 0) 255 else 0,
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => blk: {
+            const pixel: c_int = u16s(src)[0];
+            break :blk .{
+                .r = iuc(@divTrunc((pixel >> 12) * 255, 15)),
+                .g = iuc(@divTrunc(((pixel >> 8) & 0b0000000000001111) * 255, 15)),
+                .b = iuc(@divTrunc(((pixel >> 4) & 0b0000000000001111) * 255, 15)),
+                .a = iuc(@divTrunc((pixel & 0b0000000000001111) * 255, 15)),
+            };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => .{ .r = src[0], .g = src[1], .b = src[2], .a = src[3] },
+        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => .{ .r = src[0], .g = src[1], .b = src[2], .a = 255 },
+        // NOTE: Single-channel float formats read as gray here (LoadImageColors reads red)
+        PIXELFORMAT_UNCOMPRESSED_R32 => blk: {
+            const value = tuc(f32s(src)[0] * 255.0);
+            break :blk .{ .r = value, .g = value, .b = value, .a = 255 };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => .{
+            .r = tuc(f32s(src)[0] * 255.0),
+            .g = tuc(f32s(src)[1] * 255.0),
+            .b = tuc(f32s(src)[2] * 255.0),
+            .a = 255,
+        },
+        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => .{
+            .r = tuc(f32s(src)[0] * 255.0),
+            .g = tuc(f32s(src)[1] * 255.0),
+            .b = tuc(f32s(src)[2] * 255.0),
+            .a = tuc(f32s(src)[3] * 255.0),
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16 => blk: {
+            const value = tuc(encode.halfToFloat(u16s(src)[0]) * 255.0);
+            break :blk .{ .r = value, .g = value, .b = value, .a = 255 };
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => .{
+            .r = tuc(encode.halfToFloat(u16s(src)[0]) * 255.0),
+            .g = tuc(encode.halfToFloat(u16s(src)[1]) * 255.0),
+            .b = tuc(encode.halfToFloat(u16s(src)[2]) * 255.0),
+            .a = 255,
+        },
+        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => .{
+            .r = tuc(encode.halfToFloat(u16s(src)[0]) * 255.0),
+            .g = tuc(encode.halfToFloat(u16s(src)[1]) * 255.0),
+            .b = tuc(encode.halfToFloat(u16s(src)[2]) * 255.0),
+            .a = tuc(encode.halfToFloat(u16s(src)[3]) * 255.0),
+        },
+        else => BLANK,
     };
-    const s16 = S.u16s;
-    const s32 = S.f32s;
-
-    switch (format) {
-        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => color = .{ .r = s8[0], .g = s8[0], .b = s8[0], .a = 255 },
-        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => color = .{ .r = s8[0], .g = s8[0], .b = s8[0], .a = s8[1] },
-        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-            color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 11)) * 255, 31));
-            color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 5) & 0b0000000000111111)) * 255, 63));
-            color.b = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] & 0b0000000000011111)) * 255, 31));
-            color.a = 255;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-            color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 11)) * 255, 31));
-            color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 6) & 0b0000000000011111)) * 255, 31));
-            color.b = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 1) & 0b0000000000011111)) * 255, 31));
-            color.a = if ((s16(srcPtr)[0] & 0b0000000000000001) != 0) 255 else 0;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-            color.r = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] >> 12)) * 255, 15));
-            color.g = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 8) & 0b0000000000001111)) * 255, 15));
-            color.b = iuc(@divTrunc(@as(c_int, ((s16(srcPtr)[0] >> 4) & 0b0000000000001111)) * 255, 15));
-            color.a = iuc(@divTrunc(@as(c_int, (s16(srcPtr)[0] & 0b0000000000001111)) * 255, 15));
-        },
-        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => color = .{ .r = s8[0], .g = s8[1], .b = s8[2], .a = s8[3] },
-        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => color = .{ .r = s8[0], .g = s8[1], .b = s8[2], .a = 255 },
-        PIXELFORMAT_UNCOMPRESSED_R32 => {
-            color.r = tuc(s32(srcPtr)[0] * 255.0);
-            color.g = tuc(s32(srcPtr)[0] * 255.0);
-            color.b = tuc(s32(srcPtr)[0] * 255.0);
-            color.a = 255;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-            color.r = tuc(s32(srcPtr)[0] * 255.0);
-            color.g = tuc(s32(srcPtr)[1] * 255.0);
-            color.b = tuc(s32(srcPtr)[2] * 255.0);
-            color.a = 255;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-            color.r = tuc(s32(srcPtr)[0] * 255.0);
-            color.g = tuc(s32(srcPtr)[1] * 255.0);
-            color.b = tuc(s32(srcPtr)[2] * 255.0);
-            color.a = tuc(s32(srcPtr)[3] * 255.0);
-        },
-        PIXELFORMAT_UNCOMPRESSED_R16 => {
-            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.b = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.a = 255;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16(srcPtr)[1]) * 255.0);
-            color.b = tuc(HalfToFloat(s16(srcPtr)[2]) * 255.0);
-            color.a = 255;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16(srcPtr)[1]) * 255.0);
-            color.b = tuc(HalfToFloat(s16(srcPtr)[2]) * 255.0);
-            color.a = tuc(HalfToFloat(s16(srcPtr)[3]) * 255.0);
-        },
-        else => {},
-    }
-
-    return color;
 }
 
 // Set pixel color formatted into destination pointer
+// NOTE: Only formats up to 8 bits per channel are written; others are ignored
 export fn SetPixelColor(dstPtr: ?*anyopaque, color: Color, format: c_int) callconv(.c) void {
-    switch (format) {
-        PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const gray: u8 = tuc((coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114) * 255.0);
-            const d: [*]u8 = @ptrCast(dstPtr);
-            d[0] = gray;
-        },
-        PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const gray: u8 = tuc((coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114) * 255.0);
-            const d: [*]u8 = @ptrCast(dstPtr);
-            d[0] = gray;
-            d[1] = color.a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-            const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
-            const r: u16 = tuc(round(@floatCast(coln.x * 31.0)));
-            const g: u16 = tuc(round(@floatCast(coln.y * 63.0)));
-            const b: u16 = tuc(round(@floatCast(coln.z * 31.0)));
-            const d: [*]u16 = @ptrCast(@alignCast(dstPtr));
-            d[0] = (r << 11) | (g << 5) | b;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-            const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
-            const r: u16 = tuc(round(@floatCast(coln.x * 31.0)));
-            const g: u16 = tuc(round(@floatCast(coln.y * 31.0)));
-            const b: u16 = tuc(round(@floatCast(coln.z * 31.0)));
-            const a: u16 = if (coln.w > (@as(f32, @floatFromInt(PIXELFORMAT_UNCOMPRESSED_R5G5B5A1_ALPHA_THRESHOLD)) / 255.0)) 1 else 0;
-            const d: [*]u16 = @ptrCast(@alignCast(dstPtr));
-            d[0] = (r << 11) | (g << 6) | (b << 1) | a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-            const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
-            const r: u16 = tuc(round(@floatCast(coln.x * 15.0)));
-            const g: u16 = tuc(round(@floatCast(coln.y * 15.0)));
-            const b: u16 = tuc(round(@floatCast(coln.z * 15.0)));
-            const a: u16 = tuc(round(@floatCast(coln.w * 15.0)));
-            const d: [*]u16 = @ptrCast(@alignCast(dstPtr));
-            d[0] = (r << 12) | (g << 8) | (b << 4) | a;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-            const d: [*]u8 = @ptrCast(dstPtr);
-            d[0] = color.r;
-            d[1] = color.g;
-            d[2] = color.b;
-        },
-        PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-            const d: [*]u8 = @ptrCast(dstPtr);
-            d[0] = color.r;
-            d[1] = color.g;
-            d[2] = color.b;
-            d[3] = color.a;
-        },
-        else => {},
+    if ((format >= PIXELFORMAT_UNCOMPRESSED_GRAYSCALE) and (format <= PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)) {
+        writeColor(@ptrCast(dstPtr), color, format);
     }
 }
 
