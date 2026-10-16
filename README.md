@@ -40,6 +40,15 @@ for the headless self-test mode.
   pure-C raylib 6.2 (7 excluded with reasons — all 227 accounted for)
 - **License:** zlib/libpng (same as upstream raylib)
 
+## Compatibility
+
+For raylib 6.2 on Linux / GLFW / OpenGL 3.3 with the default `config.h`, the
+Zig library is a drop-in replacement: all 619 `raylib.h` functions are
+exported from Zig, and every deterministic upstream example (217/217) renders
+byte-identical to C raylib — in Debug and ReleaseFast, on llvmpipe and on a
+real GPU. Evidence, limits and known gaps (non-default `SUPPORT_*` formats,
+other platforms): [docs/compatibility.md](docs/compatibility.md).
+
 ## Using raylib from Zig
 
 Besides the unchanged C ABI (`raylib.h` programs link as-is), the build
