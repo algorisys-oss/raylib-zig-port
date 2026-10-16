@@ -71,6 +71,7 @@ const c_defines = [_][]const u8{
 /// Upstream examples translated to the idiomatic Zig API (examples/zig/),
 /// gated by `zig build apiexamples` against the original C example.
 const api_examples = [_][]const u8{
+    "core/core_2d_camera_mouse_zoom",
     "core/core_basic_window",
     "audio/audio_mixed_processor",
     "audio/audio_music_stream",
@@ -78,6 +79,7 @@ const api_examples = [_][]const u8{
     "audio/audio_sound_multi",
     "audio/audio_sound_positioning",
     "audio/audio_stream_effects",
+    "text/text_3d_drawing",
     "text/text_codepoints_loading",
     "text/text_font_filters",
     "text/text_font_loading",
@@ -93,6 +95,27 @@ const api_examples = [_][]const u8{
     "text/text_unicode_ranges",
     "text/text_words_alignment",
     "text/text_writing_anim",
+    "others/gl_scissor_shapes",
+    "shapes/shapes_rectangle_advanced",
+    "shapes/shapes_rlgl_triangle",
+    "shapes/shapes_top_down_lights",
+    "models/models_animation_blend_custom",
+    "models/models_point_rendering",
+    "models/models_rlgl_solar_system",
+    "models/models_skybox_rendering",
+    "models/models_textured_cube",
+    "shaders/shaders_depth_rendering",
+    "shaders/shaders_depth_writing",
+    "shaders/shaders_hot_reloading",
+    "shaders/shaders_hybrid_rendering",
+    "shaders/shaders_lightmap_rendering",
+    "shaders/shaders_lights_bloom",
+    "shaders/shaders_rlgl_compute",
+    "shaders/shaders_shadowmap_rendering",
+    "textures/textures_magnifying_glass",
+    "textures/textures_polygon_drawing",
+    "textures/textures_portal_window",
+    "textures/textures_textured_curve",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };

@@ -16,6 +16,13 @@ const std = @import("std");
 pub const c = @import("raylib_c");
 
 // --------------------------------------------------------------------------
+// Constants
+// --------------------------------------------------------------------------
+pub const pi: f32 = 3.14159265358979323846;
+pub const deg2rad: f32 = pi / 180.0;
+pub const rad2deg: f32 = 180.0 / pi;
+
+// --------------------------------------------------------------------------
 // Structures
 // --------------------------------------------------------------------------
 pub const Vector2 = extern struct {
@@ -181,6 +188,11 @@ pub const Mesh = extern struct {
 pub const Shader = extern struct {
     id: c_uint,
     locs: ?[*]c_int,
+
+    /// `shader.locs[index]`: the location bound to a standard shader slot.
+    pub fn loc(shader: Shader, index: ShaderLocationIndex) *c_int {
+        return &shader.locs.?[@intCast(@backingInt(index))];
+    }
 };
 
 pub const MaterialMap = extern struct {
@@ -193,6 +205,11 @@ pub const Material = extern struct {
     shader: Shader,
     maps: ?[*]MaterialMap,
     params: [4]f32,
+
+    /// `material.maps[index]`: one of the material's standard maps.
+    pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+        return &material.maps.?[@intCast(@backingInt(index))];
+    }
 };
 
 pub const Transform = extern struct {

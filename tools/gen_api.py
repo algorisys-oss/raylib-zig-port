@@ -151,6 +151,25 @@ VALIDATED_LOADERS = {
     "LoadAudioStream": "IsAudioStreamValid",
 }
 
+# Typed accessors for raylib's enum-indexed arrays: C indexes `shader.locs[]`
+# and `material.maps[]` with int constants (SHADER_LOC_*, MATERIAL_MAP_*); the
+# API indexes them with the enum. They return pointers, so they read and write
+# like the C lvalue: `shader.loc(.vector_view).* = loc`.
+STRUCT_METHODS = {
+    "Shader": '''
+/// `shader.locs[index]`: the location bound to a standard shader slot.
+pub fn loc(shader: Shader, index: ShaderLocationIndex) *c_int {
+    return &shader.locs.?[@intCast(@backingInt(index))];
+}
+''',
+    "Material": '''
+/// `material.maps[index]`: one of the material's standard maps.
+pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+    return &material.maps.?[@intCast(@backingInt(index))];
+}
+''',
+}
+
 COLOR_NAMES = {
     "LIGHTGRAY": "light_gray", "DARKGRAY": "dark_gray", "SKYBLUE": "sky_blue",
     "DARKBLUE": "dark_blue", "DARKGREEN": "dark_green", "DARKPURPLE": "dark_purple",
@@ -1035,6 +1054,12 @@ class Gen:
 
     def emit_api(self):
         out = [HEADER_API]
+        # Math constants (raylib.h #defines). Typed f32, as the C macros are
+        # float literals: `angle*DEG2RAD` stays single-precision math.
+        out.append("// " + "-" * 74 + "\n// Constants\n// " + "-" * 74)
+        out.append("pub const pi: f32 = 3.14159265358979323846;")
+        out.append("pub const deg2rad: f32 = pi / 180.0;")
+        out.append("pub const rad2deg: f32 = 180.0 / pi;\n")
         # Types
         out.append("// " + "-" * 74 + "\n// Structures\n// " + "-" * 74)
         for sname, fields in self.structs:
@@ -1046,6 +1071,8 @@ class Gen:
                 for cname, r, g, b, a, comment in parse_colors(self.src):
                     zname = COLOR_NAMES.get(cname, cname.lower())
                     out.append(f"    pub const {zname}: Color = .{{ .r = {r}, .g = {g}, .b = {b}, .a = {a} }}; // {comment.strip()}")
+            if sname in STRUCT_METHODS:
+                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].splitlines())
             out.append("};\n")
         for target, alias in self.aliases:
             out.append(f"pub const {alias} = {target};")
