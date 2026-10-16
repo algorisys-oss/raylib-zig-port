@@ -3243,8 +3243,12 @@ export fn GetMeshBoundingBox(mesh: Mesh) callconv(.c) BoundingBox {
         var i: c_int = 1;
         while (i < mesh.vertexCount) : (i += 1) {
             const u: usize = @intCast(i);
-            minVertex = Vector3Min(minVertex, .{ .x = mesh.vertices[u * 3], .y = mesh.vertices[u * 3 + 1], .z = mesh.vertices[u * 3 + 2] });
-            maxVertex = Vector3Max(maxVertex, .{ .x = mesh.vertices[u * 3], .y = mesh.vertices[u * 3 + 1], .z = mesh.vertices[u * 3 + 2] });
+            const v: Vector3 = .{ .x = mesh.vertices[u * 3], .y = mesh.vertices[u * 3 + 1], .z = mesh.vertices[u * 3 + 2] };
+            // C inlines raymath's fminf/fmaxf as LLVM minnum/maxnum, which is what
+            // @min/@max lower to; the exported Vector3Min calls libm instead, and
+            // the two disagree on the sign of a zero result
+            minVertex = .{ .x = @min(minVertex.x, v.x), .y = @min(minVertex.y, v.y), .z = @min(minVertex.z, v.z) };
+            maxVertex = .{ .x = @max(maxVertex.x, v.x), .y = @max(maxVertex.y, v.y), .z = @max(maxVertex.z, v.z) };
         }
     }
 
@@ -4516,6 +4520,14 @@ export fn GetRayCollisionSphere(ray: Ray, center: Vector3, radius: f32) callconv
     return collision;
 }
 
+/// C's `(int)` cast as x86-64 performs it: NaN and out-of-range values give
+/// INT_MIN where Zig's @intFromFloat would trap (an axis-aligned ray makes
+/// GetRayCollisionBox divide by zero, and its normal goes infinite)
+fn cInt(v: f32) c_int {
+    if (!(v >= -2147483648.0 and v < 2147483648.0)) return std.math.minInt(c_int);
+    return @intFromFloat(v);
+}
+
 // Get collision info between ray and box
 export fn GetRayCollisionBox(ray_in: Ray, box: BoundingBox) callconv(.c) RayCollision {
     var ray = ray_in;
@@ -4550,9 +4562,9 @@ export fn GetRayCollisionBox(ray_in: Ray, box: BoundingBox) callconv(.c) RayColl
     collision.normal = Vector3Subtract(collision.point, collision.normal);
     collision.normal = Vector3Scale(collision.normal, 2.01);
     collision.normal = Vector3Divide(collision.normal, Vector3Subtract(box.max, box.min));
-    collision.normal.x = @floatFromInt(@as(c_int, @intFromFloat(collision.normal.x)));
-    collision.normal.y = @floatFromInt(@as(c_int, @intFromFloat(collision.normal.y)));
-    collision.normal.z = @floatFromInt(@as(c_int, @intFromFloat(collision.normal.z)));
+    collision.normal.x = @floatFromInt(cInt(collision.normal.x));
+    collision.normal.y = @floatFromInt(cInt(collision.normal.y));
+    collision.normal.z = @floatFromInt(cInt(collision.normal.z));
 
     collision.normal = Vector3Normalize(collision.normal);
 
@@ -5029,6 +5041,8 @@ fn LoadIQM(fileName: [*c]const u8) Model {
 
             model.meshMaterial[ui] = i;
 
+            TraceLog(LOG_DEBUG, "MODEL: [%s] mesh name (%s), material (%s)", fileName, &name, &material);
+
             model.meshes[ui].vertexCount = @intCast(imesh[ui].num_vertexes);
 
             model.meshes[ui].vertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[ui].vertexCount * 3), @sizeOf(f32))));
@@ -5259,6 +5273,8 @@ fn LoadModelAnimationsIQM(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mode
         animations[a].keyframeCount = @intCast(anim[a].num_frames);
         animations[a].keyframePoses = @ptrCast(@alignCast(RL_CALLOC(anim[a].num_frames, @sizeOf(ModelAnimPose))));
         _ = memcpy(&animations[a].name, fileDataPtr + iqmHeader.ofs_text + anim[a].name, 32);
+
+        TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Framerate: %f", fileName, &animations[a].name, animations[a].keyframeCount, @as(f64, anim[a].framerate));
 
         var j: c_uint = 0;
         while (j < iqmHeader.num_poses) : (j += 1) {
@@ -5555,6 +5571,12 @@ fn LoadGLTF(fileName: [*c]const u8) Model {
             TraceLog(LOG_INFO, "MODEL: [%s] Model basic data (glTF) loaded successfully", fileName);
         } else TraceLog(LOG_WARNING, "MODEL: [%s] Model format not recognized", fileName);
 
+        TraceLog(LOG_INFO, "    > Meshes count: %i", @as(c_int, @intCast(data.*.meshes_count)));
+        TraceLog(LOG_INFO, "    > Materials count: %i (+1 default)", @as(c_int, @intCast(data.*.materials_count)));
+        TraceLog(LOG_DEBUG, "    > Buffers count: %i", @as(c_int, @intCast(data.*.buffers_count)));
+        TraceLog(LOG_DEBUG, "    > Images count: %i", @as(c_int, @intCast(data.*.images_count)));
+        TraceLog(LOG_DEBUG, "    > Textures count: %i", @as(c_int, @intCast(data.*.textures_count)));
+
         result = cgltf_load_buffers(&options, data, fileName);
         if (result != cgltf_result_success) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load mesh/material buffers", fileName);
 
@@ -5583,6 +5605,8 @@ fn LoadGLTF(fileName: [*c]const u8) Model {
             UnloadFileData(fileData);
             return model;
         }
+
+        TraceLog(LOG_DEBUG, "    > Primitives (triangles only) count based on hierarchy : %i", primitivesCount);
 
         model.meshCount = primitivesCount;
         model.meshes = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
