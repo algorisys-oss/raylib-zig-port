@@ -29,6 +29,11 @@
     "calls": 3,
     "cptrs": 0
   },
+  "src/cscan.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
   "src/fs.zig": {
     "externs": 0,
     "calls": 0,
@@ -55,9 +60,14 @@
     "cptrs": 30
   },
   "src/raudio.zig": {
-    "externs": 9,
-    "calls": 99,
-    "cptrs": 100
+    "externs": 1,
+    "calls": 1,
+    "cptrs": 12
+  },
+  "src/raudio_wave.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
   },
   "src/raygui/c.zig": {
     "externs": 0,
@@ -90,9 +100,14 @@
     "cptrs": 0
   },
   "src/rlgl.zig": {
-    "externs": 7,
-    "calls": 24,
-    "cptrs": 36
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 25
+  },
+  "src/rlgl_buffers.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
   },
   "src/rmodels.zig": {
     "externs": 13,
@@ -105,13 +120,28 @@
     "cptrs": 10
   },
   "src/rtext.zig": {
-    "externs": 12,
-    "calls": 160,
-    "cptrs": 203
+    "externs": 2,
+    "calls": 2,
+    "cptrs": 167
+  },
+  "src/rtext_bmfont.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
+  "src/rtext_strings.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
   },
   "src/rtextures.zig": {
-    "externs": 10,
-    "calls": 132,
-    "cptrs": 170
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 100
+  },
+  "src/rtextures_encode.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
   }
 }
