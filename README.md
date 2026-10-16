@@ -40,6 +40,37 @@ for the headless self-test mode.
   pure-C raylib 6.2 (7 excluded with reasons — all 227 accounted for)
 - **License:** zlib/libpng (same as upstream raylib)
 
+## Using raylib from Zig
+
+Besides the unchanged C ABI (`raylib.h` programs link as-is), the build
+exports an idiomatic Zig API as the `raylib` module — raylib's functions and
+names, first letter lower-cased, with Zig types where C is weak
+([docs/zig-api.md](docs/zig-api.md)):
+
+```zig
+const rl = @import("raylib");
+
+pub fn main() !void {
+    rl.initWindow(800, 450, "raylib [core] example - basic window");
+    defer rl.closeWindow();
+    rl.setTargetFPS(60);
+
+    const logo = try rl.loadTexture("resources/raylib_logo.png");
+    defer rl.unloadTexture(logo);
+
+    while (!rl.windowShouldClose()) {
+        rl.beginDrawing();
+        defer rl.endDrawing();
+        rl.clearBackground(.ray_white);
+        rl.drawTexture(logo, 10, 10, .white);
+    }
+}
+```
+
+raymath is `rl.math`, rlgl is `rl.gl`. 155+ upstream examples are translated
+in [examples/zig/](examples/zig/), each gated to render byte-identical to the
+original C example (`zig build apiexamples`).
+
 ## Goal
 
 **100% port** of all raylib-authored C to Zig — all 6 `.c` modules, all 4

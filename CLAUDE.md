@@ -247,6 +247,18 @@ before claiming a module done.
   `-DPLATFORM_DESKTOP`, so shader examples loaded their GLSL 100 (ES) shaders —
   passing, but on a configuration desktop raylib never runs. Upstream passes
   `-DPLATFORM_DESKTOP -I src/external`; so does tools/exdiff.sh now.
+- **`std.testing.refAllDecls` never analyzes generic (`anytype`/`comptime`)
+  functions.** The Zig API's `textFormat`/`traceLog` didn't compile on 0.18
+  (`std.fmt.bufPrintZ` removed) while apitest stayed green. Instantiate every
+  generic wrapper explicitly in a test.
+- **`std.fmt` is not printf.** `{d:0>2}` on a *signed* int prints `+6` (printf
+  `%02i` → `06`); float ties round differently (`{d:.2}` of 0.125 → `0.13`,
+  printf → `0.12`). Zig-API example translations format unsigned/abs values or
+  avoid exact ties when output must match C byte-for-byte.
+- **Generator edits merged from parallel branches can duplicate silently.** Two
+  branches adding the same Python table/constant merge "cleanly" into two
+  definitions (the later wins) or two emitted decls. After every merge of
+  tools/gen_api.py: grep for duplicate top-level names and regenerate.
 - **Audio-driven examples are timing-sensitive under load.** Before calling an
   audio example a port failure, run it C-vs-C (`exdiff.sh <oracle> <oracle>`)
   several times; exclude it only if C disagrees with itself.

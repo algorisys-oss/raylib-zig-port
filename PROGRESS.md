@@ -4,6 +4,31 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
+## Phase 6 — idiomatic Zig API — ✅ (2026-10-16; approved "as per the raylib guidelines")
+
+`const rl = @import("raylib");` — raylib's functions, names and types
+(first letter lower-cased) with Zig idiom where C is weak: `[:0]const u8`
+strings, slices for ptr+count, real enums, packed `ConfigFlags`, error unions
+on loaders, `Color` decl literals (`.ray_white`), std.fmt `textFormat`.
+Rules: [docs/zig-api.md](docs/zig-api.md).
+
+- **Generated** by `tools/gen_api.py` from raylib.h + raymath.h + rlgl.h →
+  `src/api/raylib.zig` (619 functions + `rl.math` 146 + `rl.gl` 163),
+  `src/api/c.zig` (exact-C boundary), `src/api/c_exdiff.zig` (gate variant).
+  Anything the rules can't map fails generation by name (~60 overrides).
+- **Gates:** `zig build apitest` — every API struct layout-identical to
+  translate-c'd raylib.h/rlgl.h (by reflection), all wrappers compile,
+  generic wrappers instantiated, enum/flag/color values;
+  `zig build apiexamples` — Zig-API translations of upstream examples render
+  the final frame byte-identical to the original C example (C example + C
+  oracle vs Zig example + Zig lib). **155/155** (+ shapes batch pending). Main C-vs-port gate re-verified after the harness flag change: **219/219**.
+- **API bugs the translations found and fixed:** updateSound/updateAudioStream
+  frame-count misread as bytes; loadFontEx empty codepoints → NULL handling;
+  memRealloc/imageBlurGaussian mis-sliced; textFormat/traceLog didn't compile
+  on 0.18 (generic fns escape refAllDecls — now instantiated in apitest).
+- **Harness:** C examples now compiled `-ffp-contract=off` (clang fused a*b+c
+  in example code; no Zig translation can match FMA).
+
 ## raylib 6.2 parity — ✅ DONE 2026-10-16 (tag `raylib-6.2-parity`)
 
 raylib 6.2 was tagged upstream 2026-10-15 (352 commits past our 6.1-dev pin,
