@@ -19,3 +19,5 @@ src/c_layout.zig
 *.actual.png
 *.diff.png
 /zig-out/frames/
+__pycache__/
+*.pyc
