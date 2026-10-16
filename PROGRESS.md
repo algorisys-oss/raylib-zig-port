@@ -21,7 +21,7 @@ Rules: [docs/zig-api.md](docs/zig-api.md).
   generic wrappers instantiated, enum/flag/color values;
   `zig build apiexamples` — Zig-API translations of upstream examples render
   the final frame byte-identical to the original C example (C example + C
-  oracle vs Zig example + Zig lib). **181/181**. Main C-vs-port gate re-verified after the harness flag change: **219/219**.
+  oracle vs Zig example + Zig lib). **192/192**. Main C-vs-port gate re-verified after the harness flag change: **219/219**.
 - **API bugs the translations found and fixed:** updateSound/updateAudioStream
   frame-count misread as bytes; loadFontEx empty codepoints → NULL handling;
   memRealloc/imageBlurGaussian mis-sliced; textFormat/traceLog didn't compile
