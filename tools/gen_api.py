@@ -161,15 +161,22 @@ COLOR_NAMES = {
     "DARKBROWN": "dark_brown", "RAYWHITE": "ray_white",
 }
 
-# Methods appended to generated structs: accessors where a C idiom (an array
-# indexed by an enum) has no direct Zig spelling. ABI unaffected (decls only).
+# Typed accessors for raylib's enum-indexed arrays: C indexes `shader.locs[]`
+# and `material.maps[]` with int constants (SHADER_LOC_*, MATERIAL_MAP_*); the
+# API indexes them with the enum. They return pointers, so they read and write
+# like the C lvalue: `shader.loc(.vector_view).* = loc`.
 STRUCT_METHODS = {
+    "Shader": '''
+/// `shader.locs[index]`: the location bound to a standard shader slot.
+pub fn loc(shader: Shader, index: ShaderLocationIndex) *c_int {
+    return &shader.locs.?[@intCast(@backingInt(index))];
+}
+''',
     "Material": '''
-    /// Material map by index: `model.materials.?[0].map(.diffuse).texture = texture`
-    /// (C: `model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture`).
-    pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
-        return &material.maps.?[@intCast(@intFromEnum(index))];
-    }
+/// `material.maps[index]`: one of the material's standard maps.
+pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+    return &material.maps.?[@intCast(@backingInt(index))];
+}
 ''',
 }
 
@@ -1063,13 +1070,13 @@ class Gen:
             out.append(f"pub const {sname} = extern struct {{")
             for base, stars, fname, array in fields:
                 out.append(f"    {zig_ident(fname)}: {self.field_type(sname, base, stars, fname, array)},")
-            if sname in STRUCT_METHODS:
-                out.append(STRUCT_METHODS[sname].rstrip("\n"))
             if sname == "Color":
                 out.append("")
                 for cname, r, g, b, a, comment in parse_colors(self.src):
                     zname = COLOR_NAMES.get(cname, cname.lower())
                     out.append(f"    pub const {zname}: Color = .{{ .r = {r}, .g = {g}, .b = {b}, .a = {a} }}; // {comment.strip()}")
+            if sname in STRUCT_METHODS:
+                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].splitlines())
             out.append("};\n")
         for target, alias in self.aliases:
             out.append(f"pub const {alias} = {target};")

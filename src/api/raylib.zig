@@ -215,6 +215,11 @@ pub const Mesh = extern struct {
 pub const Shader = extern struct {
     id: c_uint,
     locs: ?[*]c_int,
+
+    /// `shader.locs[index]`: the location bound to a standard shader slot.
+    pub fn loc(shader: Shader, index: ShaderLocationIndex) *c_int {
+        return &shader.locs.?[@intCast(@backingInt(index))];
+    }
 };
 
 pub const MaterialMap = extern struct {
@@ -228,8 +233,7 @@ pub const Material = extern struct {
     maps: ?[*]MaterialMap,
     params: [4]f32,
 
-    /// Material map by index: `model.materials.?[0].map(.diffuse).texture = texture`
-    /// (C: `model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture`).
+    /// `material.maps[index]`: one of the material's standard maps.
     pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
         return &material.maps.?[@intCast(@backingInt(index))];
     }
