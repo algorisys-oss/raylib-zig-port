@@ -11,7 +11,7 @@
   gates plus cdiff text_strings re-ran green after it.)
 - **Phase W (web target) started** — see PROGRESS.md "Phase W" and docs/web.md.
   `zig build webexamples -Demsdk=$HOME/emsdk`: browser gate **46/46**
-  (core_basic_window), Debug and ReleaseFast. `zig build webdemos` feeds the
+  (core_basic_window + all 45 shapes), Debug and ReleaseFast. `zig build webdemos` feeds the
   site (raylib-zig-web, `npm run sync`).
 - Committed at the end of this run (see git log); not pushed (pushing needs the
   owner's go-ahead).
