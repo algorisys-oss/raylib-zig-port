@@ -20,6 +20,7 @@ import sys
 HEADER = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "vendor/raylib/src/raylib.h")
 RAYMATH = HEADER.with_name("raymath.h")
 RLGL = HEADER.with_name("rlgl.h")
+RCAMERA = HEADER.with_name("rcamera.h")
 OUT_DIR = pathlib.Path("src/api")
 
 ZIG_KEYWORDS = {
@@ -894,6 +895,12 @@ class Gen:
         self.enums = parse_enums(src)
         self.enum_names = {n for n, _ in self.enums}
         self.funcs = parse_functions(src)
+        # rcamera.h's RLAPI functions are raylib proper (exported by the port)
+        # but declared outside raylib.h: same rules, top-level in `rl`.
+        cam_src = RCAMERA.read_text()
+        cam_src = cam_src[: cam_src.index("#if defined(RCAMERA_IMPLEMENTATION)")]
+        known = {f[0] for f in self.funcs}
+        self.funcs += [f for f in parse_functions(cam_src) if f[0] not in known]
         self.math_src = RAYMATH.read_text()
         self.math_funcs = parse_functions(self.math_src, "RMAPI ")
         self.struct_names |= {"float3", "float16"}

@@ -83,6 +83,10 @@ round-trips.
 `Vector2Add(a, b)` → `rl.math.vector2Add(a, b)`, `MatrixRotateY(angle)` →
 `rl.math.matrixRotateY(angle)`.
 
+`rcamera.h` functions (raylib proper, declared outside raylib.h) are
+top-level in `rl` with the same rules: `rl.cameraYaw(&camera, angle, false)`,
+`rl.getCameraForward(&camera)`.
+
 ## rlgl
 
 `rlgl.h` (raylib's OpenGL abstraction) is the `gl` namespace:

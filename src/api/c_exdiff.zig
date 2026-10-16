@@ -689,6 +689,18 @@ pub extern fn AttachAudioStreamProcessor(stream: AudioStream, processor: AudioCa
 pub extern fn DetachAudioStreamProcessor(stream: AudioStream, processor: AudioCallback) void;
 pub extern fn AttachAudioMixedProcessor(processor: AudioCallback) void;
 pub extern fn DetachAudioMixedProcessor(processor: AudioCallback) void;
+pub extern fn GetCameraForward(camera: [*c]Camera) Vector3;
+pub extern fn GetCameraUp(camera: [*c]Camera) Vector3;
+pub extern fn GetCameraRight(camera: [*c]Camera) Vector3;
+pub extern fn CameraMoveForward(camera: [*c]Camera, distance: f32, moveInWorldPlane: bool) void;
+pub extern fn CameraMoveUp(camera: [*c]Camera, distance: f32) void;
+pub extern fn CameraMoveRight(camera: [*c]Camera, distance: f32, moveInWorldPlane: bool) void;
+pub extern fn CameraMoveToTarget(camera: [*c]Camera, delta: f32) void;
+pub extern fn CameraYaw(camera: [*c]Camera, angle: f32, rotateAroundTarget: bool) void;
+pub extern fn CameraPitch(camera: [*c]Camera, angle: f32, lockView: bool, rotateAroundTarget: bool, rotateUp: bool) void;
+pub extern fn CameraRoll(camera: [*c]Camera, angle: f32) void;
+pub extern fn GetCameraViewMatrix(camera: [*c]Camera) Matrix;
+pub extern fn GetCameraProjectionMatrix(camera: [*c]Camera, aspect: f32) Matrix;
 pub extern fn Clamp(value: f32, min: f32, max: f32) f32;
 pub extern fn Lerp(start: f32, end: f32, amount: f32) f32;
 pub extern fn Normalize(value: f32, start: f32, end: f32) f32;

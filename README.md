@@ -67,7 +67,7 @@ pub fn main() !void {
 }
 ```
 
-raymath is `rl.math`, rlgl is `rl.gl`, raygui is `@import("raygui")`. 192 upstream examples are translated
+raymath is `rl.math`, rlgl is `rl.gl`, raygui is `@import("raygui")`. 214 upstream examples are translated
 in [examples/zig/](examples/zig/), each gated to render byte-identical to the
 original C example (`zig build apiexamples`).
 

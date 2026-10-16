@@ -228,11 +228,11 @@ pub fn main() !void {
 
         if (gui.dropdownBox(.{ .x = screen_w - 170.0, .y = 10, .width = 160, .height = 24 }, rl.textJoin(anim_names, ";"), &anim_index1, dropdown_edit_mode1) != 0) dropdown_edit_mode1 = !dropdown_edit_mode1;
 
-        gui.setStyle(.label, gui.ControlProperty.text_alignment, @backingInt(gui.TextAlignment.center));
+        gui.setStyle(.label, gui.ControlProperty.text_alignment, gui.TextAlignment.center);
         gui.setStyle(.default, gui.DefaultProperty.text_size, gui.getFont().baseSize * 2);
         _ = gui.label(.{ .x = 0, .y = screen_h - 100.0, .width = screen_w, .height = 40 }, "PRESS SPACE to START BLENDING");
         gui.setStyle(.default, gui.DefaultProperty.text_size, gui.getFont().baseSize);
-        gui.setStyle(.label, gui.ControlProperty.text_alignment, @backingInt(gui.TextAlignment.left));
+        gui.setStyle(.label, gui.ControlProperty.text_alignment, gui.TextAlignment.left);
 
         if (anims.len > 0) {
             // Draw playing timeline with keyframes for anim0[]

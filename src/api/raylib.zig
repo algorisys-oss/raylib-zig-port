@@ -4035,6 +4035,56 @@ pub fn detachAudioMixedProcessor(processor: AudioCallback) void {
     c.DetachAudioMixedProcessor(processor);
 }
 
+pub fn getCameraForward(camera: *Camera) Vector3 {
+    return c.GetCameraForward(camera);
+}
+
+pub fn getCameraUp(camera: *Camera) Vector3 {
+    return c.GetCameraUp(camera);
+}
+
+pub fn getCameraRight(camera: *Camera) Vector3 {
+    return c.GetCameraRight(camera);
+}
+
+/// Camera movement
+pub fn cameraMoveForward(camera: *Camera, distance: f32, moveInWorldPlane: bool) void {
+    c.CameraMoveForward(camera, distance, moveInWorldPlane);
+}
+
+pub fn cameraMoveUp(camera: *Camera, distance: f32) void {
+    c.CameraMoveUp(camera, distance);
+}
+
+pub fn cameraMoveRight(camera: *Camera, distance: f32, moveInWorldPlane: bool) void {
+    c.CameraMoveRight(camera, distance, moveInWorldPlane);
+}
+
+pub fn cameraMoveToTarget(camera: *Camera, delta: f32) void {
+    c.CameraMoveToTarget(camera, delta);
+}
+
+/// Camera rotation
+pub fn cameraYaw(camera: *Camera, angle: f32, rotateAroundTarget: bool) void {
+    c.CameraYaw(camera, angle, rotateAroundTarget);
+}
+
+pub fn cameraPitch(camera: *Camera, angle: f32, lockView: bool, rotateAroundTarget: bool, rotateUp: bool) void {
+    c.CameraPitch(camera, angle, lockView, rotateAroundTarget, rotateUp);
+}
+
+pub fn cameraRoll(camera: *Camera, angle: f32) void {
+    c.CameraRoll(camera, angle);
+}
+
+pub fn getCameraViewMatrix(camera: *Camera) Matrix {
+    return c.GetCameraViewMatrix(camera);
+}
+
+pub fn getCameraProjectionMatrix(camera: *Camera, aspect: f32) Matrix {
+    return c.GetCameraProjectionMatrix(camera, aspect);
+}
+
 // --------------------------------------------------------------------------
 // raymath — vector, matrix and quaternion math (raymath.h)
 // --------------------------------------------------------------------------
