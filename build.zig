@@ -134,6 +134,7 @@ const api_examples = [_][]const u8{
     "models/models_loading_gltf",
     "models/models_loading_iqm",
     "models/models_loading_m3d",
+    "models/models_loading_vox",
     "models/models_mesh_generation",
     "models/models_mesh_picking",
     "models/models_orthographic_projection",
@@ -148,17 +149,22 @@ const api_examples = [_][]const u8{
     "others/embedded_files_loading",
     "others/gl_scissor_shapes",
     "shaders/shaders_ascii_rendering",
+    "shaders/shaders_basic_lighting",
     "shaders/shaders_basic_pbr",
+    "shaders/shaders_cel_shading",
     "shaders/shaders_custom_uniform",
+    "shaders/shaders_deferred_rendering",
     "shaders/shaders_depth_rendering",
     "shaders/shaders_depth_writing",
     "shaders/shaders_eratosthenes_sieve",
+    "shaders/shaders_fog_rendering",
     "shaders/shaders_hot_reloading",
     "shaders/shaders_hybrid_rendering",
     "shaders/shaders_julia_set",
     "shaders/shaders_lightmap_rendering",
     "shaders/shaders_lights_bloom",
     "shaders/shaders_mandelbrot_set",
+    "shaders/shaders_mesh_instancing",
     "shaders/shaders_model_shader",
     "shaders/shaders_multi_sample2d",
     "shaders/shaders_normalmap_rendering",
@@ -175,6 +181,7 @@ const api_examples = [_][]const u8{
     "shaders/shaders_texture_rendering",
     "shaders/shaders_texture_tiling",
     "shaders/shaders_texture_waves",
+    "shaders/shaders_vertex_displacement",
     "shapes/shapes_ball_physics",
     "shapes/shapes_basic_shapes",
     "shapes/shapes_bouncing_ball",
@@ -186,6 +193,10 @@ const api_examples = [_][]const u8{
     "shapes/shapes_digital_clock",
     "shapes/shapes_double_pendulum",
     "shapes/shapes_drag_puzzle",
+    "shapes/shapes_easings_ball",
+    "shapes/shapes_easings_box",
+    "shapes/shapes_easings_rectangles",
+    "shapes/shapes_easings_testbed",
     "shapes/shapes_ellipse_collision",
     "shapes/shapes_following_eyes",
     "shapes/shapes_lines_bezier",
@@ -204,6 +215,7 @@ const api_examples = [_][]const u8{
     "shapes/shapes_top_down_lights",
     "shapes/shapes_vector_angle",
     "text/text_3d_drawing",
+    "text/text_animations",
     "text/text_codepoints_loading",
     "text/text_font_filters",
     "text/text_font_loading",
@@ -492,6 +504,15 @@ pub fn build(b: *std.Build) void {
         gate_c.addImport("raylib", gate_api);
         gate_api.addImport("raylib_c", gate_c);
 
+        // Shared helper modules ported from the raylib-authored headers that
+        // sit next to the upstream examples (rlights.h, reasings.h).
+        var helpers: [2]std.Build.Module.Import = undefined;
+        for (&helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
+            const helper_mod = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/zig/common/{s}.zig", .{helper_name})) });
+            helper_mod.addImport("raylib", gate_api);
+            helper.* = .{ .name = helper_name, .module = helper_mod };
+        }
+
         const step = b.step("apiexamples", "Zig-API example translations vs upstream C examples (pixel diff)");
         const list = b.addWriteFiles();
         var list_text: std.ArrayList(u8) = .empty;
@@ -508,6 +529,7 @@ pub fn build(b: *std.Build) void {
                 .link_libc = true,
             });
             mod.addImport("raylib", gate_api);
+            for (helpers) |helper| mod.addImport(helper.name, helper.module);
             mod.addIncludePath(b.path("vendor/raylib/src"));
             mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &.{"-std=c99"} });
             mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
