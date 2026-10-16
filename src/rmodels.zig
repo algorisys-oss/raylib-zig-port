@@ -2,15 +2,21 @@
 //!
 //! Zig port of raylib's `rmodels.c`. Every public raylib model/mesh/material function
 //! is exported with its exact C name, byte-compatible signature, and C calling
-//! convention, so the rest of raylib (still C) links against it unchanged.
-//! Floating-point operation order matches the C source exactly to keep pixel output
-//! bit-identical, and libc/libm functions are called via extern declarations.
+//! convention, so the rest of raylib links against it unchanged. C types (`[*c]`,
+//! `extern struct`, `callconv(.c)`) stay at that export edge; behind it are
+//! slices, error unions and `defer`.
+//!
+//! Memory a C caller or a raylib Unload* function releases (mesh arrays, model,
+//! material and animation arrays) lives on the C heap through `cmem`; scratch
+//! memory comes from `std.heap.c_allocator`. Floating-point operation order
+//! matches the C source exactly to keep pixel output bit-identical.
 //!
 //! This build mirrors raylib's default `config.h`: OBJ/MTL/IQM/GLTF/VOX/M3D loaders
 //! and procedural mesh generation are all enabled. The third-party single-file
 //! libraries (tinyobj_loader_c, cgltf, vox_loader, m3d, par_shapes) are instantiated
 //! in the C shim `src/c/rmodels_impl.c` and only `extern`-declared and called here.
-//! rlgl, raymath, rtextures and rcore are reached through extern declarations too.
+//! The IQM file layout is read by `rmodels_iqm.zig`. rlgl, raymath, rtextures and
+//! rcore are reached through extern declarations.
 
 const std = @import("std");
 const Io = std.Io;
@@ -750,10 +756,8 @@ export fn DrawSphereEx(centerPos: Vector3, radius: f32, rings: c_int, slices: c_
         .{ .x = sinring, .y = cosring, .z = 0 },
     };
 
-    var i: c_int = 0;
-    while (i < rings) : (i += 1) {
-        var j: c_int = 0;
-        while (j < slices) : (j += 1) {
+    for (0..count(rings)) |_| {
+        for (0..count(slices)) |_| {
             vertices[0] = vertices[2]; // Rotate around y axis to set up vertices for next face
             vertices[1] = vertices[3];
             vertices[2] = rotateSlice(vertices[2], cosslice, sinslice);
@@ -805,10 +809,8 @@ export fn DrawSphereWires(centerPos: Vector3, radius: f32, rings: c_int, slices:
         .{ .x = sinring, .y = cosring, .z = 0 },
     };
 
-    var i: c_int = 0;
-    while (i < rings) : (i += 1) {
-        var j: c_int = 0;
-        while (j < slices) : (j += 1) {
+    for (0..count(rings)) |_| {
+        for (0..count(slices)) |_| {
             vertices[0] = vertices[2]; // Rotate around y axis to set up vertices for next face
             vertices[1] = vertices[3];
             vertices[2] = rotateSlice(vertices[2], cosslice, sinslice);
@@ -837,8 +839,7 @@ export fn DrawSphereWires(centerPos: Vector3, radius: f32, rings: c_int, slices:
 // Draw a cylinder
 // NOTE: It could be also used for pyramid and cone
 export fn DrawCylinder(position: Vector3, radiusTop: f32, radiusBottom: f32, height: f32, sides_in: c_int, color: Color) callconv(.c) void {
-    var sides = sides_in;
-    if (sides < 3) sides = 3;
+    const sides = @max(sides_in, 3);
 
     const angleStep: f32 = 360.0 / @as(f32, @floatFromInt(sides));
 
@@ -850,8 +851,7 @@ export fn DrawCylinder(position: Vector3, radiusTop: f32, radiusBottom: f32, hei
 
     if (radiusTop > 0) {
         // Draw Body
-        var i: c_int = 0;
-        while (i < sides) : (i += 1) {
+        for (0..count(sides)) |i| {
             const fi = @as(f32, @floatFromInt(i));
             const fi1 = @as(f32, @floatFromInt(i + 1));
             rlVertex3f(sinf(DEG2RAD * fi * angleStep) * radiusBottom, 0, cosf(DEG2RAD * fi * angleStep) * radiusBottom); // Bottom Left
@@ -864,8 +864,7 @@ export fn DrawCylinder(position: Vector3, radiusTop: f32, radiusBottom: f32, hei
         }
 
         // Draw Cap
-        i = 0;
-        while (i < sides) : (i += 1) {
+        for (0..count(sides)) |i| {
             const fi = @as(f32, @floatFromInt(i));
             const fi1 = @as(f32, @floatFromInt(i + 1));
             rlVertex3f(0, height, 0);
@@ -874,8 +873,7 @@ export fn DrawCylinder(position: Vector3, radiusTop: f32, radiusBottom: f32, hei
         }
     } else {
         // Draw Cone
-        var i: c_int = 0;
-        while (i < sides) : (i += 1) {
+        for (0..count(sides)) |i| {
             const fi = @as(f32, @floatFromInt(i));
             const fi1 = @as(f32, @floatFromInt(i + 1));
             rlVertex3f(0, height, 0);
@@ -885,8 +883,7 @@ export fn DrawCylinder(position: Vector3, radiusTop: f32, radiusBottom: f32, hei
     }
 
     // Draw Base
-    var i: c_int = 0;
-    while (i < sides) : (i += 1) {
+    for (0..count(sides)) |i| {
         const fi = @as(f32, @floatFromInt(i));
         const fi1 = @as(f32, @floatFromInt(i + 1));
         rlVertex3f(0, 0, 0);
@@ -899,8 +896,7 @@ export fn DrawCylinder(position: Vector3, radiusTop: f32, radiusBottom: f32, hei
 
 // Draw a cylinder with base at startPos and top at endPos
 export fn DrawCylinderEx(startPos: Vector3, endPos: Vector3, startRadius: f32, endRadius: f32, sides_in: c_int, color: Color) callconv(.c) void {
-    var sides = sides_in;
-    if (sides < 3) sides = 3;
+    const sides = @max(sides_in, 3);
 
     const direction = Vector3{ .x = endPos.x - startPos.x, .y = endPos.y - startPos.y, .z = endPos.z - startPos.z };
     if ((direction.x == 0) and (direction.y == 0) and (direction.z == 0)) return; // Security check
@@ -913,8 +909,7 @@ export fn DrawCylinderEx(startPos: Vector3, endPos: Vector3, startRadius: f32, e
     rlBegin(RL_TRIANGLES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    var i: c_int = 0;
-    while (i < sides) : (i += 1) {
+    for (0..count(sides)) |i| {
         const fi = @as(f32, @floatFromInt(i));
         const fi1 = @as(f32, @floatFromInt(i + 1));
         const s1 = sinf(baseAngle * fi) * startRadius;
@@ -955,8 +950,7 @@ export fn DrawCylinderEx(startPos: Vector3, endPos: Vector3, startRadius: f32, e
 
 // Draw a wired cylinder
 export fn DrawCylinderWires(position: Vector3, radiusTop: f32, radiusBottom: f32, height: f32, sides_in: c_int, color: Color) callconv(.c) void {
-    var sides = sides_in;
-    if (sides < 3) sides = 3;
+    const sides = @max(sides_in, 3);
 
     const angleStep: f32 = 360.0 / @as(f32, @floatFromInt(sides));
 
@@ -966,8 +960,7 @@ export fn DrawCylinderWires(position: Vector3, radiusTop: f32, radiusBottom: f32
     rlBegin(RL_LINES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    var i: c_int = 0;
-    while (i < sides) : (i += 1) {
+    for (0..count(sides)) |i| {
         const fi = @as(f32, @floatFromInt(i));
         const fi1 = @as(f32, @floatFromInt(i + 1));
         rlVertex3f(sinf(DEG2RAD * fi * angleStep) * radiusBottom, 0, cosf(DEG2RAD * fi * angleStep) * radiusBottom);
@@ -988,8 +981,7 @@ export fn DrawCylinderWires(position: Vector3, radiusTop: f32, radiusBottom: f32
 
 // Draw a wired cylinder with base at startPos and top at endPos
 export fn DrawCylinderWiresEx(startPos: Vector3, endPos: Vector3, startRadius: f32, endRadius: f32, slices_in: c_int, color: Color) callconv(.c) void {
-    var slices = slices_in;
-    if (slices < 3) slices = 3;
+    const slices = @max(slices_in, 3);
 
     const direction = Vector3{ .x = endPos.x - startPos.x, .y = endPos.y - startPos.y, .z = endPos.z - startPos.z };
     if ((direction.x == 0) and (direction.y == 0) and (direction.z == 0)) return; // Security check
@@ -1002,8 +994,7 @@ export fn DrawCylinderWiresEx(startPos: Vector3, endPos: Vector3, startRadius: f
     rlBegin(RL_LINES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    var i: c_int = 0;
-    while (i < slices) : (i += 1) {
+    for (0..count(slices)) |i| {
         const fi = @as(f32, @floatFromInt(i));
         const fi1 = @as(f32, @floatFromInt(i + 1));
         const s1 = sinf(baseAngle * fi) * startRadius;
@@ -1033,10 +1024,8 @@ export fn DrawCylinderWiresEx(startPos: Vector3, endPos: Vector3, startRadius: f
 
 // Draw a capsule with the center of its sphere caps at startPos and endPos
 export fn DrawCapsule(startPos: Vector3, endPos: Vector3, radius: f32, rings_in: c_int, slices_in: c_int, color: Color) callconv(.c) void {
-    var slices = slices_in;
-    var rings = rings_in;
-    if (slices < 3) slices = 3;
-    if (rings < 1) rings = 1;
+    const slices = @max(slices_in, 3);
+    const rings = @max(rings_in, 1);
     var direction = Vector3{ .x = endPos.x - startPos.x, .y = endPos.y - startPos.y, .z = endPos.z - startPos.z };
 
     const sphereCase = (direction.x == 0) and (direction.y == 0) and (direction.z == 0);
@@ -1054,12 +1043,9 @@ export fn DrawCapsule(startPos: Vector3, endPos: Vector3, radius: f32, rings_in:
     rlColor4ub(color.r, color.g, color.b, color.a);
 
     // render both caps
-    var c: c_int = 0;
-    while (c < 2) : (c += 1) {
-        var i: c_int = 0;
-        while (i < rings) : (i += 1) {
-            var j: c_int = 0;
-            while (j < slices) : (j += 1) {
+    for (0..2) |c| {
+        for (0..count(rings)) |i| {
+            for (0..count(slices)) |j| {
                 const fj0 = @as(f32, @floatFromInt(j + 0));
                 const fj1 = @as(f32, @floatFromInt(j + 1));
                 const fi0 = @as(f32, @floatFromInt(i + 0));
@@ -1119,8 +1105,7 @@ export fn DrawCapsule(startPos: Vector3, endPos: Vector3, radius: f32, rings_in:
     }
     // render middle
     if (!sphereCase) {
-        var j: c_int = 0;
-        while (j < slices) : (j += 1) {
+        for (0..count(slices)) |j| {
             const fj0 = @as(f32, @floatFromInt(j + 0));
             const fj1 = @as(f32, @floatFromInt(j + 1));
             const ringSin1 = sinf(baseSliceAngle * fj0) * radius;
@@ -1167,10 +1152,8 @@ export fn DrawCapsule(startPos: Vector3, endPos: Vector3, radius: f32, rings_in:
 
 // Draw capsule wires with the center of its sphere caps at startPos and endPos
 export fn DrawCapsuleWires(startPos: Vector3, endPos: Vector3, radius: f32, rings_in: c_int, slices_in: c_int, color: Color) callconv(.c) void {
-    var slices = slices_in;
-    var rings = rings_in;
-    if (slices < 3) slices = 3;
-    if (rings < 1) rings = 1;
+    const slices = @max(slices_in, 3);
+    const rings = @max(rings_in, 1);
     var direction = Vector3{ .x = endPos.x - startPos.x, .y = endPos.y - startPos.y, .z = endPos.z - startPos.z };
 
     const sphereCase = (direction.x == 0) and (direction.y == 0) and (direction.z == 0);
@@ -1187,12 +1170,9 @@ export fn DrawCapsuleWires(startPos: Vector3, endPos: Vector3, radius: f32, ring
     rlBegin(RL_LINES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    var c: c_int = 0;
-    while (c < 2) : (c += 1) {
-        var i: c_int = 0;
-        while (i < rings) : (i += 1) {
-            var j: c_int = 0;
-            while (j < slices) : (j += 1) {
+    for (0..2) |_| {
+        for (0..count(rings)) |i| {
+            for (0..count(slices)) |j| {
                 const fj0 = @as(f32, @floatFromInt(j + 0));
                 const fj1 = @as(f32, @floatFromInt(j + 1));
                 const fi0 = @as(f32, @floatFromInt(i + 0));
@@ -1249,8 +1229,7 @@ export fn DrawCapsuleWires(startPos: Vector3, endPos: Vector3, radius: f32, ring
     }
     // render middle
     if (!sphereCase) {
-        var j: c_int = 0;
-        while (j < slices) : (j += 1) {
+        for (0..count(slices)) |j| {
             const fj0 = @as(f32, @floatFromInt(j + 0));
             const fj1 = @as(f32, @floatFromInt(j + 1));
             const ringSin1 = sinf(baseSliceAngle * fj0) * radius;
@@ -3878,37 +3857,39 @@ export fn DrawModel(model: Model, position: Vector3, scale: f32, tint: Color) ca
 }
 
 // Draw a model with custom transform
-export fn DrawModelEx(model_in: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: f32, scale: Vector3, tint: Color) callconv(.c) void {
-    var model = model_in;
+export fn DrawModelEx(model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: f32, scale: Vector3, tint: Color) callconv(.c) void {
+    // Transform matrix from the parameters: rotation, then scale, then translation
     const matScale = MatrixScale(scale.x, scale.y, scale.z);
     const matRotation = MatrixRotate(rotationAxis, rotationAngle * DEG2RAD);
     const matTranslation = MatrixTranslate(position.x, position.y, position.z);
 
     const matTransform = MatrixMultiply(MatrixMultiply(matScale, matRotation), matTranslation);
 
-    model.transform = MatrixMultiply(model.transform, matTransform);
+    // Combined with the model's own transform
+    const transform = MatrixMultiply(model.transform, matTransform);
 
-    var i: c_int = 0;
-    while (i < model.meshCount) : (i += 1) {
-        var mat = model.materials[@intCast(model.meshMaterial[@intCast(i)])];
-        const colDiffuse = mat.maps[MATERIAL_MAP_DIFFUSE].color;
+    for (modelMeshes(model), model.meshMaterial[0..modelMeshes(model).len]) |mesh, materialIndex| {
+        const material = model.materials[@intCast(materialIndex)];
+        const diffuse = &material.maps[MATERIAL_MAP_DIFFUSE];
 
-        var colTinted = std.mem.zeroes(Color);
-        colTinted.r = @intCast(@divTrunc(@as(c_int, colDiffuse.r) * @as(c_int, tint.r), 255));
-        colTinted.g = @intCast(@divTrunc(@as(c_int, colDiffuse.g) * @as(c_int, tint.g), 255));
-        colTinted.b = @intCast(@divTrunc(@as(c_int, colDiffuse.b) * @as(c_int, tint.b), 255));
-        colTinted.a = @intCast(@divTrunc(@as(c_int, colDiffuse.a) * @as(c_int, tint.a), 255));
+        // The tint goes into the material's diffuse color for this draw (the
+        // material is shared, so it is restored after)
+        const colDiffuse = diffuse.color;
+        diffuse.color = .{
+            .r = @intCast(@as(c_uint, colDiffuse.r) * tint.r / 255),
+            .g = @intCast(@as(c_uint, colDiffuse.g) * tint.g / 255),
+            .b = @intCast(@as(c_uint, colDiffuse.b) * tint.b / 255),
+            .a = @intCast(@as(c_uint, colDiffuse.a) * tint.a / 255),
+        };
+        defer diffuse.color = colDiffuse;
 
-        mat.maps[MATERIAL_MAP_DIFFUSE].color = colTinted;
-
-        if ((mat.shader.locs != null) and (mat.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS] != -1) and (model.boneMatrices != null)) {
-            rlEnableShader(mat.shader.id);
-            rlSetUniformMatrices(mat.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS], model.boneMatrices, @bitCast(model.skeleton.boneCount));
+        // GPU skinning: upload the bone matrices
+        if ((material.shader.locs != null) and (material.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS] != -1) and (model.boneMatrices != null)) {
+            rlEnableShader(material.shader.id);
+            rlSetUniformMatrices(material.shader.locs[SHADER_LOC_MATRIX_BONETRANSFORMS], model.boneMatrices, @bitCast(model.skeleton.boneCount));
         }
 
-        DrawMesh(model.meshes[@intCast(i)], mat, model.transform);
-
-        mat.maps[MATERIAL_MAP_DIFFUSE].color = colDiffuse;
+        DrawMesh(mesh, material, transform);
     }
 }
 
@@ -3969,35 +3950,29 @@ export fn DrawBillboardPro(camera: Camera, texture: Texture2D, rec_in: Rectangle
 
     const origin3D = Vector3Add(Vector3Scale(Vector3Normalize(right), origin.x), Vector3Scale(Vector3Normalize(up), origin.y));
 
-    var points: [4]Vector3 = undefined;
-    points[0] = Vector3Zero();
-    points[1] = right;
-    points[2] = Vector3Add(up, right);
-    points[3] = up;
-
-    var i: usize = 0;
-    while (i < 4) : (i += 1) {
-        points[i] = Vector3Subtract(points[i], origin3D);
-        if (rotation != 0.0) points[i] = Vector3RotateByAxisAngle(points[i], forward, rotation * DEG2RAD);
-        points[i] = Vector3Add(points[i], position);
+    var points = [4]Vector3{ Vector3Zero(), right, Vector3Add(up, right), up };
+    for (&points) |*point| {
+        point.* = Vector3Subtract(point.*, origin3D);
+        if (rotation != 0.0) point.* = Vector3RotateByAxisAngle(point.*, forward, rotation * DEG2RAD);
+        point.* = Vector3Add(point.*, position);
     }
 
-    var texcoords: [4]Vector2 = undefined;
-    const tw = @as(f32, @floatFromInt(texture.width));
-    const th = @as(f32, @floatFromInt(texture.height));
-    texcoords[0] = .{ .x = rec.x / tw, .y = (rec.y + rec.height) / th };
-    texcoords[1] = .{ .x = (rec.x + rec.width) / tw, .y = (rec.y + rec.height) / th };
-    texcoords[2] = .{ .x = (rec.x + rec.width) / tw, .y = rec.y / th };
-    texcoords[3] = .{ .x = rec.x / tw, .y = rec.y / th };
+    const tw: f32 = @floatFromInt(texture.width);
+    const th: f32 = @floatFromInt(texture.height);
+    const texcoords = [4]Vector2{
+        .{ .x = rec.x / tw, .y = (rec.y + rec.height) / th },
+        .{ .x = (rec.x + rec.width) / tw, .y = (rec.y + rec.height) / th },
+        .{ .x = (rec.x + rec.width) / tw, .y = rec.y / th },
+        .{ .x = rec.x / tw, .y = rec.y / th },
+    };
 
     rlSetTexture(texture.id);
     rlBegin(RL_QUADS);
 
     rlColor4ub(tint.r, tint.g, tint.b, tint.a);
-    i = 0;
-    while (i < 4) : (i += 1) {
-        rlTexCoord2f(texcoords[i].x, texcoords[i].y);
-        rlVertex(points[i]);
+    for (texcoords, points) |texcoord, point| {
+        rlTexCoord2f(texcoord.x, texcoord.y);
+        rlVertex(point);
     }
 
     rlEnd();
