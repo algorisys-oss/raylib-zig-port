@@ -100,8 +100,8 @@ of raylib: it is vendored in `vendor/raygui/` and **linked as C**, like
 `external/`. `tools/gen_raygui.py` generates the `raygui` module:
 `GuiButton(bounds, "OK")` → `gui.button(bounds, "OK")` (prefix dropped, as in
 `rl.gl`). Text params are `?[:0]const u8` (raygui accepts NULL); value
-out-params are `*i32`/`*f32`/`*bool`; `char *text, int textSize` is a `[]u8`
-edit buffer; `state`/`control`/`iconId` are enums; style `property` takes any
+out-params are `*i32`/`*f32`/`*bool`; `char *text, int textSize` is a `?[]u8`
+edit buffer (null shows nothing); `state`/`control`/`iconId` are enums; style `property` takes any
 per-control property enum (`gui.setStyle(.default, gui.DefaultProperty.text_size, 20)`).
 Control results stay `i32` as in raygui (a message box returns the pressed
 button index), so `if (gui.button(r, "OK") != 0)`.

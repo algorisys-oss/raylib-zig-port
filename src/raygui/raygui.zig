@@ -667,8 +667,8 @@ pub fn valueBoxFloat(bounds: Rectangle, text: ?[:0]const u8, textValue: [*]u8, v
 }
 
 /// Text Box control, updates input text
-pub fn textBox(bounds: Rectangle, text: []u8, editMode: bool) i32 {
-    return c.GuiTextBox(bounds, text.ptr, @intCast(text.len), editMode);
+pub fn textBox(bounds: Rectangle, text: ?[]u8, editMode: bool) i32 {
+    return c.GuiTextBox(bounds, if (text) |s| s.ptr else null, if (text) |s| @intCast(s.len) else 0, editMode);
 }
 
 /// Slider control
@@ -727,8 +727,8 @@ pub fn messageBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u
 }
 
 /// Text Input Box control, ask for text, supports secret
-pub fn textInputBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u8, text: []u8, btnText: ?[:0]const u8, btnActive: *i32, secretViewActive: *bool) i32 {
-    return c.GuiTextInputBox(bounds, if (title) |s| s.ptr else null, if (message) |s| s.ptr else null, text.ptr, @intCast(text.len), if (btnText) |s| s.ptr else null, @ptrCast(btnActive), @ptrCast(secretViewActive));
+pub fn textInputBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u8, text: ?[]u8, btnText: ?[:0]const u8, btnActive: *i32, secretViewActive: *bool) i32 {
+    return c.GuiTextInputBox(bounds, if (title) |s| s.ptr else null, if (message) |s| s.ptr else null, if (text) |s| s.ptr else null, if (text) |s| @intCast(s.len) else 0, if (btnText) |s| s.ptr else null, @ptrCast(btnActive), @ptrCast(secretViewActive));
 }
 
 /// Color Picker control, includes Color bar controls
