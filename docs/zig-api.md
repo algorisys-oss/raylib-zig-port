@@ -14,7 +14,8 @@ it mechanically to `vendor/raylib/src/raylib.h`.
    pairs are slices; int "enums" are real `enum`s; bit flags are packed
    structs; loaders report failure as an error union; out-parameter counts
    become returned slices. Nothing else changes.
-3. **One implementation.** Every function is a thin `inline` wrapper over the
+3. **One implementation.** Every function is a thin wrapper (plain `pub fn`;
+   the optimizer inlines it) over the
    C-ABI export the port already gates (pixel/numeric/PCM diffs). The API
    adds no behavior of its own, so it cannot drift from upstream raylib.
 4. **Regenerable.** A new raylib release is absorbed by re-running the
@@ -63,6 +64,14 @@ pub fn main() !void {
 | color `#define` (`RAYWHITE`) | `Color` decl (`.ray_white`) | `clearBackground(.ray_white)` |
 | enum constant (`KEY_LEFT_SHIFT`) | enum tag without prefix | `.left_shift` |
 | printf-style varargs (`TextFormat`, `TraceLog`) | `std.fmt` comptime format | `rl.textFormat("{d} pts", .{score})` |
+| `PI` / `DEG2RAD` / `RAD2DEG` | `f32` constants | `rl.deg2rad * angle` |
+| `char *` struct field | `[*:0]u8` (NUL-terminated) | `std.mem.span(files.paths.?[0])` |
+| `material.maps[MATERIAL_MAP_X]` | `material.map(.x)` → `*MaterialMap` | `model.materials.?[0].map(.diffuse).texture = tex` |
+
+`textFormat` follows `std.fmt`, not printf: the format syntax differs
+(`%02i` → `{d:0>2}`, `%.2f` → `{d:.2}`), and so does float rounding on exact
+ties (`{d:.2}` of 0.125 is `0.13`; printf gives `0.12`). Output that must
+match a C program byte-for-byte should avoid formatting exact binary ties.
 
 Enums that represent open sets (key codes, gamepad buttons, gestures,
 shader locations) are non-exhaustive (`_`), so any value raylib can return
@@ -89,7 +98,10 @@ translate-c by `zig build apitest`.
 raylib allocates with its own `MemAlloc`/`MemFree` (libc malloc); the API
 does not take a `std.mem.Allocator`, because the memory is owned by raylib and
 must be returned to raylib (`unloadFileData`, `unloadImageColors`, …) exactly
-as in C. Slices returned by the API point at raylib-owned memory; the matching
+as in C. The reverse direction — buffers you build and hand to raylib, which
+frees them itself (e.g. `Mesh.vertices` passed to `uploadMesh`, released by
+`unloadModel`) — goes through `rl.mem_allocator`, a `std.mem.Allocator` over
+`MemAlloc`/`MemRealloc`/`MemFree`. Slices returned by the API point at raylib-owned memory; the matching
 `unload*` takes the slice back. Functions documented upstream as returning a
 "static string" (e.g. `textFormat`, `getFileName`) return slices into raylib's
 internal buffers — valid until the next call, as in C.

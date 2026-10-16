@@ -113,7 +113,11 @@ RESERVED_PARAMS = {"c", "std", "math"}  # module-level names in raylib.zig
 # A `void *` buffer becomes a byte slice only when its length param is in bytes.
 BYTE_SIZE_NAMES = re.compile(r"[sS]ize$")
 # Pointer params whose following "size" is NOT the buffer length.
-NO_SLICE = {("rlLoadTextureCubemap", "data")}
+NO_SLICE = {
+    ("rlLoadTextureCubemap", "data"),  # `size` is the face size in pixels
+    ("ImageBlurGaussian", "image"),  # `blurSize` is a radius
+    ("MemRealloc", "ptr"),  # `size` is the new allocation size
+}
 
 # `const char *` params that raylib documents as accepting NULL.
 NULLABLE_STRINGS = {
@@ -155,6 +159,18 @@ COLOR_NAMES = {
     "LIGHTGRAY": "light_gray", "DARKGRAY": "dark_gray", "SKYBLUE": "sky_blue",
     "DARKBLUE": "dark_blue", "DARKGREEN": "dark_green", "DARKPURPLE": "dark_purple",
     "DARKBROWN": "dark_brown", "RAYWHITE": "ray_white",
+}
+
+# Methods appended to generated structs: accessors where a C idiom (an array
+# indexed by an enum) has no direct Zig spelling. ABI unaffected (decls only).
+STRUCT_METHODS = {
+    "Material": '''
+    /// Material map by index: `model.materials.?[0].map(.diffuse).texture = texture`
+    /// (C: `model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture`).
+    pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+        return &material.maps.?[@intCast(@intFromEnum(index))];
+    }
+''',
 }
 
 # Hand-written wrappers: name -> Zig source (uses `c.` for the boundary).
@@ -1017,6 +1033,12 @@ class Gen:
             for _ in range(stars - 1):
                 t = f"?[*]{t}"
             return t
+        if base == "char" and stars:
+            # `char *` fields are NUL-terminated strings (FilePathList.paths).
+            t = "[*:0]u8"
+            for _ in range(stars - 1):
+                t = f"[*]{t}"
+            return f"?{t}"
         z = self.api_scalar(base) if base in C_SCALARS else base
         if base in C_SCALARS:
             z = {"int": "c_int", "unsigned int": "c_uint"}.get(base, z)
@@ -1041,6 +1063,8 @@ class Gen:
             out.append(f"pub const {sname} = extern struct {{")
             for base, stars, fname, array in fields:
                 out.append(f"    {zig_ident(fname)}: {self.field_type(sname, base, stars, fname, array)},")
+            if sname in STRUCT_METHODS:
+                out.append(STRUCT_METHODS[sname].rstrip("\n"))
             if sname == "Color":
                 out.append("")
                 for cname, r, g, b, a, comment in parse_colors(self.src):
@@ -1258,6 +1282,40 @@ const std = @import("std");
 /// A named module: build.zig wires it to src/api/c.zig (the examples gate
 /// substitutes the generated c_exdiff.zig determinism variant).
 pub const c = @import("raylib_c");
+
+// raylib.h math defines, typed f32 like the C macros (DEG2RAD is PI/180.0f).
+pub const pi: f32 = 3.14159265358979323846;
+pub const deg2rad: f32 = pi / 180.0;
+pub const rad2deg: f32 = 180.0 / pi;
+
+/// `std.mem.Allocator` over raylib's MemAlloc/MemRealloc/MemFree: use it for
+/// buffers raylib takes ownership of and frees itself (e.g. `Mesh.vertices`
+/// handed to `uploadMesh`, released by `unloadMesh`/`unloadModel`).
+pub const mem_allocator: std.mem.Allocator = .{ .ptr = undefined, .vtable = &mem_vtable };
+
+const mem_vtable: std.mem.Allocator.VTable = .{
+    .alloc = memAllocFn,
+    .resize = std.mem.Allocator.noResize,
+    .remap = memRemapFn,
+    .free = memFreeFn,
+};
+
+// MemAlloc is malloc-backed: aligned for any fundamental type, no more.
+const mem_max_align = @alignOf(std.c.max_align_t);
+
+fn memAllocFn(_: *anyopaque, len: usize, alignment: std.mem.Alignment, _: usize) ?[*]u8 {
+    if (alignment.toByteUnits() > mem_max_align) return null;
+    return @ptrCast(c.MemAlloc(std.math.cast(c_uint, len) orelse return null));
+}
+
+fn memRemapFn(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+    if (alignment.toByteUnits() > mem_max_align) return null;
+    return @ptrCast(c.MemRealloc(memory.ptr, std.math.cast(c_uint, new_len) orelse return null));
+}
+
+fn memFreeFn(_: *anyopaque, memory: []u8, _: std.mem.Alignment, _: usize) void {
+    c.MemFree(memory.ptr);
+}
 '''
 
 
