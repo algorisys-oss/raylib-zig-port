@@ -15,6 +15,9 @@
   ReleaseFast · pixel 12/12 · audio 43/43 · math 93,000 / cam / gest
   bit-exact · apitest · datacheck · constaudit 0 · idiomaudit OK · browser
   46/46 · raylib-zig-web site e2e 46/46 (public/examples rebuilt locally).
+- Later (5cd8ae2, from the raylib-zig-web session): browser gate **78/78**
+  Debug and ReleaseFast (+32 textures; textures_to_image excluded, docs/web.md);
+  rmodels par_shapes extern fixed to f32; web links use -Wl,--fatal-warnings.
 
 ## 2. What this run did
 
@@ -35,7 +38,7 @@
 
 1. Owner: send the reviewer reply (docs/migration-status.md, appendix) and
    decide whether to report the BMFont use-after-free upstream.
-2. Phase W (web) resume list: textures, then text in `web_examples`; GLSL
+2. Phase W (web) resume list: text in `web_examples` (textures done); GLSL
    version constant then shaders; per-example .data; example manifest;
    Asyncify vs frame callback.
 3. Optional: idiomaudit `[*c]` count is dominated by export signatures and
