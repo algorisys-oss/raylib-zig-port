@@ -673,6 +673,12 @@ export fn InitWindow(width: c_int, height: c_int, title: [*c]const u8) callconv(
     TraceLog(LOG_INFO, "Supported raylib modules:");
     TraceLog(LOG_INFO, "    > rcore:..... loaded (mandatory)");
     TraceLog(LOG_INFO, "    > rlgl:...... loaded (mandatory)");
+    // The port implements raylib's default config.h, where every optional module is on
+    TraceLog(LOG_INFO, "    > rshapes:... loaded (optional)");
+    TraceLog(LOG_INFO, "    > rtextures:. loaded (optional)");
+    TraceLog(LOG_INFO, "    > rtext:..... loaded (optional)");
+    TraceLog(LOG_INFO, "    > rmodels:... loaded (optional)");
+    TraceLog(LOG_INFO, "    > raudio:.... loaded (optional)");
 
     // Initialize window data
     CORE.Window.screen.width = @intCast(width);

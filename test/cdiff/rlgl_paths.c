@@ -21,9 +21,6 @@
 
 static void logCallback(int level, const char *text, va_list args)
 {
-    // InitWindow's "> rshapes:... loaded (optional)" module list is rcore's,
-    // and rcore.zig does not print it: not an rlgl matter, skipped here
-    if (strstr(text, "(optional)") != NULL) return;
     printf("  log %d: ", level);
     vprintf(text, args);
     printf("\n");
