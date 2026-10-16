@@ -67,6 +67,7 @@ FIELD_ENUMS = {
     ("Image", "format"): "PixelFormat",
     ("Texture", "format"): "PixelFormat",
     ("Camera3D", "projection"): "CameraProjection",
+    ("NPatchInfo", "layout"): "NPatchLayout",
 }
 
 # (function-name regex, param name) -> enum/flags type. First match wins.
@@ -99,6 +100,7 @@ RETURN_ENUMS = {
 
 # Pointer param followed by an int param with one of these names -> one slice.
 COUNT_NAMES = re.compile(r"(?:[cC]ount|[sS]ize|[lL]ength|^instances)$")
+
 
 # Params whose C name would shadow a declaration in Zig (Zig forbids shadowing).
 PARAM_RENAMES = {
@@ -1064,6 +1066,12 @@ class Gen:
 
     def emit_api(self):
         out = [HEADER_API]
+        # Math constants (raylib.h PI / DEG2RAD / RAD2DEG; f32, as the C macros)
+        pi = re.search(r"#define PI ([0-9.]+)f", self.src).group(1)
+        out.append("// " + "-" * 74 + "\n// Defines\n// " + "-" * 74)
+        out.append(f"pub const pi: f32 = {pi};")
+        out.append("pub const deg2rad: f32 = pi / 180.0;")
+        out.append("pub const rad2deg: f32 = 180.0 / pi;\n")
         # Types
         out.append("// " + "-" * 74 + "\n// Structures\n// " + "-" * 74)
         for sname, fields in self.structs:
@@ -1289,11 +1297,6 @@ const std = @import("std");
 /// A named module: build.zig wires it to src/api/c.zig (the examples gate
 /// substitutes the generated c_exdiff.zig determinism variant).
 pub const c = @import("raylib_c");
-
-// raylib.h math defines, typed f32 like the C macros (DEG2RAD is PI/180.0f).
-pub const pi: f32 = 3.14159265358979323846;
-pub const deg2rad: f32 = pi / 180.0;
-pub const rad2deg: f32 = 180.0 / pi;
 
 /// `std.mem.Allocator` over raylib's MemAlloc/MemRealloc/MemFree: use it for
 /// buffers raylib takes ownership of and frees itself (e.g. `Mesh.vertices`

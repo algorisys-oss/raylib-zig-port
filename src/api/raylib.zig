@@ -15,11 +15,6 @@ const std = @import("std");
 /// substitutes the generated c_exdiff.zig determinism variant).
 pub const c = @import("raylib_c");
 
-// raylib.h math defines, typed f32 like the C macros (DEG2RAD is PI/180.0f).
-pub const pi: f32 = 3.14159265358979323846;
-pub const deg2rad: f32 = pi / 180.0;
-pub const rad2deg: f32 = 180.0 / pi;
-
 /// `std.mem.Allocator` over raylib's MemAlloc/MemRealloc/MemFree: use it for
 /// buffers raylib takes ownership of and frees itself (e.g. `Mesh.vertices`
 /// handed to `uploadMesh`, released by `unloadMesh`/`unloadModel`).
@@ -48,6 +43,13 @@ fn memRemapFn(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len
 fn memFreeFn(_: *anyopaque, memory: []u8, _: std.mem.Alignment, _: usize) void {
     c.MemFree(memory.ptr);
 }
+
+// --------------------------------------------------------------------------
+// Defines
+// --------------------------------------------------------------------------
+pub const pi: f32 = 3.14159265358979323846;
+pub const deg2rad: f32 = pi / 180.0;
+pub const rad2deg: f32 = 180.0 / pi;
 
 // --------------------------------------------------------------------------
 // Structures
@@ -158,7 +160,7 @@ pub const NPatchInfo = extern struct {
     top: c_int,
     right: c_int,
     bottom: c_int,
-    layout: c_int,
+    layout: NPatchLayout,
 };
 
 pub const GlyphInfo = extern struct {
