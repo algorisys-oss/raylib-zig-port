@@ -54,7 +54,8 @@ C_SCALARS = {
 # Enums whose values form an open set (raylib can return values outside the
 # declared members, or users pass raw codes) are non-exhaustive.
 OPEN_ENUMS = {"KeyboardKey", "GamepadButton", "GamepadAxis", "MouseButton",
-              "MouseCursor", "Gesture", "ShaderLocationIndex", "MaterialMapIndex"}
+              "MouseCursor", "Gesture", "ShaderLocationIndex", "MaterialMapIndex",
+              "PixelFormat"}  # PixelFormat: depth textures use unlisted formats (e.g. 19)
 
 # Enums raylib passes as `unsigned int` (default backing is c_int).
 ENUM_BACKING = {"Gesture": "c_uint"}

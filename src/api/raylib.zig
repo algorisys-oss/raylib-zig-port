@@ -715,6 +715,7 @@ pub const PixelFormat = enum(c_int) {
     compressed_pvrt_rgba = 22, // 4 bpp
     compressed_astc_4x4_rgba = 23, // 8 bpp
     compressed_astc_8x8_rgba = 24, // 2 bpp
+    _,
 };
 
 pub const TextureFilter = enum(c_int) {
