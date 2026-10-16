@@ -138,6 +138,25 @@ int main(void)
     frameCrc("user batch");
     rlUnloadRenderBatch(batch);
 
+    // rlColor4f/rlColor3f with components outside 0..1 and NaN: C's
+    // (unsigned char)(x*255) on x86-64 truncates through int
+    rlRenderBatch colors = rlLoadRenderBatch(1, 16);
+    rlSetRenderBatchActive(&colors);
+    const float odd[] = { 0.0f, 1.0f, 0.5f, 1.5f, -0.5f, 2.0f, -2.0f, 300.0f, -1e9f, 1e9f, 0.0f/0.0f, 1.0f/0.0f };
+    rlBegin(RL_QUADS);
+    for (int i = 0; i < 12; i += 4) {
+        rlColor4f(odd[i], odd[i + 1], odd[i + 2], odd[i + 3]); rlVertex2f(0, 0);
+        rlColor3f(odd[i + 1], odd[i + 2], odd[i + 3]); rlVertex2f(1, 0);
+        rlColor4f(odd[i + 3], odd[i], odd[i + 1], odd[i + 2]); rlVertex2f(1, 1);
+        rlColor3f(odd[i + 2], odd[i + 3], odd[i]); rlVertex2f(0, 1);
+    }
+    rlEnd();
+    printf("odd colors:");
+    for (int i = 0; i < 48; i++) printf(" %u", colors.vertexBuffer[0].colors[i]);
+    printf("\n");
+    rlSetRenderBatchActive(NULL);
+    rlUnloadRenderBatch(colors);
+
     // Indexed draws with an offset into the bound element buffer, and sampler slots
     Mesh cube = GenMeshCube(1.0f, 1.0f, 1.0f);
     Texture2D tex = LoadTextureFromImage(GenImageChecked(8, 8, 2, 2, RED, BLUE));

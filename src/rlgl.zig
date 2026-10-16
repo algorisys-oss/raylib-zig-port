@@ -713,12 +713,21 @@ export fn rlColor4ub(x: u8, y: u8, z: u8, w: u8) callconv(.c) void {
 
 // Define one vertex (color) - 4 float
 export fn rlColor4f(r: f32, g: f32, b: f32, a: f32) callconv(.c) void {
-    rlColor4ub(@intFromFloat(r * 255), @intFromFloat(g * 255), @intFromFloat(b * 255), @intFromFloat(a * 255));
+    rlColor4ub(colorByte(r), colorByte(g), colorByte(b), colorByte(a));
 }
 
 // Define one vertex (color) - 3 float
 export fn rlColor3f(x: f32, y: f32, z: f32) callconv(.c) void {
-    rlColor4ub(@intFromFloat(x * 255), @intFromFloat(y * 255), @intFromFloat(z * 255), 255);
+    rlColor4ub(colorByte(x), colorByte(y), colorByte(z), 255);
+}
+
+/// C's `(unsigned char)(x*255)` as clang compiles it on x86-64: through a
+/// 32-bit int (INT_MIN for NaN or out of range), keeping the low byte.
+/// `@intFromFloat` would panic for any component outside 0..1.
+fn colorByte(x: f32) u8 {
+    const scaled = x * 255;
+    const int: i32 = if (scaled >= -2147483648.0 and scaled < 2147483648.0) @intFromFloat(scaled) else std.math.minInt(i32);
+    return @truncate(@as(u32, @bitCast(int)));
 }
 
 //--------------------------------------------------------------------------------------
