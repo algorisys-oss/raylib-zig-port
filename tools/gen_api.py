@@ -78,6 +78,7 @@ PARAM_ENUMS = [
     (r"IsGestureDetected", "gesture", "Gesture"),
     (r"TraceLog|SetTraceLogLevel", "logLevel", "TraceLogLevel"),
     (r"ConfigFlags|WindowState", "flags", "ConfigFlags"),
+    (r"IsWindowState", "flag", "ConfigFlags"),
     (r".", "format", "PixelFormat"),
     (r".", "newFormat", "PixelFormat"),
     (r"SetTextureFilter", "filter", "TextureFilter"),
@@ -113,6 +114,7 @@ RESERVED_PARAMS = {"c", "std", "math"}  # module-level names in raylib.zig
 NULLABLE_STRINGS = {
     ("LoadShader", "vsFileName"), ("LoadShader", "fsFileName"),
     ("LoadShaderFromMemory", "vsCode"), ("LoadShaderFromMemory", "fsCode"),
+    ("LoadAutomationEventList", "fileName"),  # NULL: new empty list to record into
 }
 
 # `const char *` returns that can be NULL.
@@ -144,6 +146,26 @@ COLOR_NAMES = {
     "DARKBROWN": "dark_brown", "RAYWHITE": "ray_white",
 }
 
+# Methods appended inside a generated struct: struct name -> Zig source.
+# Only for raylib's C-shaped "pointer + count" list structs, so their contents
+# can be iterated as a slice instead of indexing a raw many-pointer.
+STRUCT_METHODS = {
+    "FilePathList": '''
+/// The paths as a slice of strings (valid until the list is unloaded).
+pub fn slice(list: FilePathList) []const [*:0]const u8 {
+    const paths = list.paths orelse return &.{};
+    return @ptrCast(paths[0..list.count]);
+}
+''',
+    "AutomationEventList": '''
+/// The recorded events as a slice (valid until the list is unloaded).
+pub fn slice(list: AutomationEventList) []AutomationEvent {
+    const events = list.events orelse return &.{};
+    return events[0..list.count];
+}
+''',
+}
+
 # Hand-written wrappers: name -> Zig source (uses `c.` for the boundary).
 # Each exists because its C signature carries something the mechanical rules
 # deliberately don't guess at: out-params, owned buffers, varargs, callbacks.
@@ -154,7 +176,7 @@ OVERRIDES = {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -172,17 +194,31 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
 }
 ''',
     # ---- callbacks: raw C function pointers --------------------------------
+    # The C callback receives printf-style `text` + a va_list, which Zig code
+    # cannot format portably; a comptime trampoline formats it (vsnprintf) and
+    # hands the callback the finished message. Raw: c.SetTraceLogCallback.
     "SetTraceLogCallback": '''
-/// Set custom trace log callback (raw C callback; `args` is a C va_list).
-pub fn setTraceLogCallback(callback: TraceLogCallback) void {
-    c.SetTraceLogCallback(callback);
+/// Set custom trace log callback. The callback receives each message already
+/// formatted (truncated at 1023 bytes); `null` restores raylib's default logger.
+pub fn setTraceLogCallback(comptime callback: ?fn (logLevel: TraceLogLevel, text: [:0]const u8) void) void {
+    const callback_fn = callback orelse return c.SetTraceLogCallback(null);
+    const Trampoline = struct {
+        extern "c" fn vsnprintf(buffer: [*]u8, size: usize, format: [*:0]const u8, args: ?*anyopaque) c_int;
+
+        fn log(logLevel: c_int, format: [*c]const u8, args: ?*anyopaque) callconv(.c) void {
+            var buffer: [1024]u8 = undefined;
+            _ = vsnprintf(&buffer, buffer.len, format, args); // always NUL-terminates
+            callback_fn(@enumFromInt(logLevel), std.mem.span(@as([*:0]const u8, @ptrCast(&buffer))));
+        }
+    };
+    c.SetTraceLogCallback(Trampoline.log);
 }
 ''',
     "SetLoadFileDataCallback": '''
@@ -237,6 +273,13 @@ pub fn attachAudioMixedProcessor(processor: AudioCallback) void {
 /// Detach audio stream processor from the entire audio pipeline.
 pub fn detachAudioMixedProcessor(processor: AudioCallback) void {
     c.DetachAudioMixedProcessor(processor);
+}
+''',
+    # ---- memory: `size` is the new size, not the length of `ptr` ------------
+    "MemRealloc": '''
+/// Internal memory reallocator (`ptr` may be null; `size` is the new size in bytes).
+pub fn memRealloc(ptr: ?*anyopaque, size: u32) ?*anyopaque {
+    return c.MemRealloc(ptr, size);
 }
 ''',
     # ---- file data: owned buffers as slices --------------------------------
@@ -912,6 +955,9 @@ class Gen:
                 for cname, r, g, b, a, comment in parse_colors(self.src):
                     zname = COLOR_NAMES.get(cname, cname.lower())
                     out.append(f"    pub const {zname}: Color = .{{ .r = {r}, .g = {g}, .b = {b}, .a = {a} }}; // {comment.strip()}")
+            if sname in STRUCT_METHODS:
+                out.append("")
+                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].strip("\n").splitlines())
             out.append("};\n")
         for target, alias in self.aliases:
             out.append(f"pub const {alias} = {target};")
