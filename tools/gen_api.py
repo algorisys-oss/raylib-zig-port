@@ -66,6 +66,7 @@ FIELD_ENUMS = {
     ("Image", "format"): "PixelFormat",
     ("Texture", "format"): "PixelFormat",
     ("Camera3D", "projection"): "CameraProjection",
+    ("NPatchInfo", "layout"): "NPatchLayout",
 }
 
 # (function-name regex, param name) -> enum/flags type. First match wins.
@@ -98,6 +99,9 @@ RETURN_ENUMS = {
 
 # Pointer param followed by an int param with one of these names -> one slice.
 COUNT_NAMES = re.compile(r"(?:[cC]ount|[sS]ize|[lL]ength|^instances)$")
+
+# Int params that match COUNT_NAMES but are not the preceding pointer's length.
+NOT_COUNTS = {("ImageBlurGaussian", "blurSize")}
 
 # Params whose C name would shadow a declaration in Zig (Zig forbids shadowing).
 PARAM_RENAMES = {
@@ -154,7 +158,7 @@ OVERRIDES = {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -172,7 +176,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -787,7 +791,8 @@ class Gen:
                     sig.append(f"{pn}: [:0]const u8")
                     call.append(f"{pn}.ptr")
             elif (p.stars == 1 and nxt is not None and nxt.stars == 0 and nxt.base in ("int", "unsigned int")
-                  and COUNT_NAMES.search(nxt.name) and p.base != "char"):
+                  and COUNT_NAMES.search(nxt.name) and (fname, nxt.name) not in NOT_COUNTS
+                  and p.base != "char"):
                 elem = "u8" if p.base == "void" else self.api_scalar(p.base)
                 if p.base == "char":
                     raise ValueError("char slice")
@@ -901,6 +906,12 @@ class Gen:
 
     def emit_api(self):
         out = [HEADER_API]
+        # Math constants (raylib.h PI / DEG2RAD / RAD2DEG; f32, as the C macros)
+        pi = re.search(r"#define PI ([0-9.]+)f", self.src).group(1)
+        out.append("// " + "-" * 74 + "\n// Defines\n// " + "-" * 74)
+        out.append(f"pub const pi: f32 = {pi};")
+        out.append("pub const deg2rad: f32 = pi / 180.0;")
+        out.append("pub const rad2deg: f32 = 180.0 / pi;\n")
         # Types
         out.append("// " + "-" * 74 + "\n// Structures\n// " + "-" * 74)
         for sname, fields in self.structs:
