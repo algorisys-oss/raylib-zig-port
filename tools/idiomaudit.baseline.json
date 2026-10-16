@@ -110,9 +110,14 @@
     "cptrs": 0
   },
   "src/rmodels.zig": {
-    "externs": 13,
-    "calls": 362,
-    "cptrs": 393
+    "externs": 1,
+    "calls": 1,
+    "cptrs": 45
+  },
+  "src/rmodels_iqm.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
   },
   "src/rshapes.zig": {
     "externs": 0,
