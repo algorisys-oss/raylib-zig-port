@@ -11,10 +11,16 @@
 //! OpenGL is reached through `glad_gl*` function pointers. On the desktop they are
 //! GLAD's, declared in src/gl33.zig and loaded by src/c/glad_impl.c; on the web,
 //! src/gles3.zig declares the same names bound directly to Emscripten's WebGL 2
-//! functions. raymath helpers and TraceLog are still C and are `extern`-declared here.
+//! functions. TraceLog is raylib's C-variadic logger and is `extern`-declared here.
+//!
+//! Memory rlgl hands to C callers (render batch arrays, default shader locations,
+//! pixels read back) lives on the C heap through cmem; scratch memory uses
+//! std.heap.c_allocator.
 
 const std = @import("std");
 const builtin = @import("builtin");
+const cmem = @import("cmem.zig");
+const buffers = @import("rlgl_buffers.zig");
 
 /// rlgl.h's GRAPHICS_API_OPENGL_* switch. Emscripten means a browser, and a browser
 /// means WebGL 2, which is OpenGL ES 3.0. Note that rlgl.h defines
@@ -29,24 +35,12 @@ const gl = switch (graphics_api) {
 };
 
 //----------------------------------------------------------------------------------
-// libc functions (RL_MALLOC/RL_CALLOC/RL_REALLOC/RL_FREE map to these).
+// libm: called, not reimplemented, so results stay bit-identical to C rlgl.
 //----------------------------------------------------------------------------------
-extern fn malloc(usize) ?*anyopaque;
-extern fn calloc(usize, usize) ?*anyopaque;
-extern fn realloc(?*anyopaque, usize) ?*anyopaque;
-extern fn free(?*anyopaque) void;
-extern fn memcpy(noalias ?*anyopaque, noalias ?*const anyopaque, usize) ?*anyopaque;
-extern fn strcmp([*c]const u8, [*c]const u8) c_int;
-extern fn strlen([*c]const u8) usize;
-extern fn floor(f64) f64;
 extern fn log(f64) f64;
 extern fn sqrtf(f32) f32;
 extern fn sinf(f32) f32;
 extern fn cosf(f32) f32;
-
-inline fn RL_FREE(p: anytype) void {
-    free(@ptrCast(@constCast(p)));
-}
 
 //----------------------------------------------------------------------------------
 // Cross-module raylib C symbols.
@@ -302,9 +296,11 @@ const State = struct {
     defaultVShaderId: c_uint = 0,
     defaultFShaderId: c_uint = 0,
     defaultShaderId: c_uint = 0,
-    defaultShaderLocs: [*c]c_int = null,
+    /// RL_MAX_SHADER_LOCATIONS entries on the C heap (rlGetShaderLocsDefault hands them out)
+    defaultShaderLocs: ?[]c_int = null,
     currentShaderId: c_uint = 0,
-    currentShaderLocs: [*c]c_int = null,
+    /// The active shader's locations: a C caller's array of unknown length
+    currentShaderLocs: ?[*]c_int = null,
 
     stereoRender: bool = false,
     projectionStereo: [2]Matrix = undefined,
@@ -579,30 +575,50 @@ export fn rlGetCullDistanceFar() callconv(.c) f64 {
 // Module Functions Definition - Vertex level operations
 //----------------------------------------------------------------------------------
 
+/// The batch's current (last opened) draw call. Look it up again after anything
+/// that can flush the batch or open a new draw call.
+fn lastDraw(batch: *const rlRenderBatch) *rlDrawCall {
+    return &drawCalls(batch)[@intCast(batch.drawCounter - 1)];
+}
+
+/// The batch's draw call table (always RL_DEFAULT_BATCH_DRAWCALLS long)
+fn drawCalls(batch: *const rlRenderBatch) []rlDrawCall {
+    return batch.draws[0..RL_DEFAULT_BATCH_DRAWCALLS];
+}
+
+/// The vertex buffer the batch is currently filling
+fn currentVertexBuffer(batch: *const rlRenderBatch) *rlVertexBuffer {
+    return &batch.vertexBuffer[0..@intCast(batch.bufferCount)][@intCast(batch.currentBuffer)];
+}
+
+/// Pads the current draw call to a multiple of 4 vertices and opens a new one,
+/// unless that padding overflows the batch (which then flushes instead).
+/// Returns whether a new draw call was opened. The padding vertices are never
+/// drawn: they keep later QUADS aligned with the index buffer.
+fn closeDrawCall(batch: *rlRenderBatch) bool {
+    const draw = lastDraw(batch);
+    draw.vertexAlignment = switch (draw.mode) {
+        RL_LINES => if (draw.vertexCount < 4) draw.vertexCount else @rem(draw.vertexCount, 4),
+        RL_TRIANGLES => if (draw.vertexCount < 4) 1 else 4 - @rem(draw.vertexCount, 4),
+        else => 0,
+    };
+
+    if (rlCheckRenderBatchLimit(draw.vertexAlignment)) return false;
+    RLGL.State.vertexCounter += draw.vertexAlignment;
+    batch.drawCounter += 1;
+    return true;
+}
+
 // Initialize drawing mode (how to organize vertex)
 export fn rlBegin(mode: c_int) callconv(.c) void {
     const batch = RLGL.currentBatch;
-    if (batch.draws[@intCast(batch.drawCounter - 1)].mode != mode) {
-        if (batch.draws[@intCast(batch.drawCounter - 1)].vertexCount > 0) {
-            const dc = &batch.draws[@intCast(batch.drawCounter - 1)];
-            if (dc.mode == RL_LINES) {
-                dc.vertexAlignment = if (dc.vertexCount < 4) dc.vertexCount else @rem(dc.vertexCount, 4);
-            } else if (dc.mode == RL_TRIANGLES) {
-                dc.vertexAlignment = if (dc.vertexCount < 4) 1 else (4 - @rem(dc.vertexCount, 4));
-            } else {
-                dc.vertexAlignment = 0;
-            }
-
-            if (!rlCheckRenderBatchLimit(dc.vertexAlignment)) {
-                RLGL.State.vertexCounter += dc.vertexAlignment;
-                batch.drawCounter += 1;
-            }
-        }
+    if (lastDraw(batch).mode != mode) {
+        if (lastDraw(batch).vertexCount > 0) _ = closeDrawCall(batch);
 
         if (batch.drawCounter >= RL_DEFAULT_BATCH_DRAWCALLS) rlDrawRenderBatch(batch);
 
-        batch.draws[@intCast(batch.drawCounter - 1)].mode = mode;
-        batch.draws[@intCast(batch.drawCounter - 1)].textureId = RLGL.State.currentTextureId;
+        lastDraw(batch).mode = mode;
+        lastDraw(batch).textureId = RLGL.State.currentTextureId;
         RLGL.State.currentTextureId = RLGL.State.defaultTextureId;
     }
 }
@@ -627,43 +643,32 @@ export fn rlVertex3f(x: f32, y: f32, z: f32) callconv(.c) void {
 
     const batch = RLGL.currentBatch;
 
-    if (RLGL.State.vertexCounter > (batch.vertexBuffer[@intCast(batch.currentBuffer)].elementCount * 4 - 4)) {
-        const dc = batch.draws[@intCast(batch.drawCounter - 1)];
-        if ((dc.mode == RL_LINES) and (@rem(dc.vertexCount, 2) == 0)) {
-            _ = rlCheckRenderBatchLimit(2 + 1);
-        } else if ((dc.mode == RL_TRIANGLES) and (@rem(dc.vertexCount, 3) == 0)) {
-            _ = rlCheckRenderBatchLimit(3 + 1);
-        } else if ((dc.mode == RL_QUADS) and (@rem(dc.vertexCount, 4) == 0)) {
-            _ = rlCheckRenderBatchLimit(4 + 1);
+    // Near the end of the buffer, flush only between whole primitives: lines come
+    // in pairs, triangles in threes and quads in fours (+1 vertex for safety)
+    if (RLGL.State.vertexCounter > (currentVertexBuffer(batch).elementCount * 4 - 4)) {
+        const draw = lastDraw(batch).*;
+        const primitiveSize: c_int = switch (draw.mode) {
+            RL_LINES => 2,
+            RL_TRIANGLES => 3,
+            RL_QUADS => 4,
+            else => 0,
+        };
+        if (primitiveSize > 0 and @rem(draw.vertexCount, primitiveSize) == 0) {
+            _ = rlCheckRenderBatchLimit(primitiveSize + 1);
         }
     }
 
     // The check above may have flushed the batch and moved to its next buffer
-    const vbuf = &batch.vertexBuffer[@intCast(batch.currentBuffer)];
+    const vbuf = currentVertexBuffer(batch);
     const vc: usize = @intCast(RLGL.State.vertexCounter);
 
-    // Add vertices
-    vbuf.vertices[3 * vc] = tx;
-    vbuf.vertices[3 * vc + 1] = ty;
-    vbuf.vertices[3 * vc + 2] = tz;
-
-    // Add current texcoord
-    vbuf.texcoords[2 * vc] = RLGL.State.texcoordx;
-    vbuf.texcoords[2 * vc + 1] = RLGL.State.texcoordy;
-
-    // Add current normal
-    vbuf.normals[3 * vc] = RLGL.State.normalx;
-    vbuf.normals[3 * vc + 1] = RLGL.State.normaly;
-    vbuf.normals[3 * vc + 2] = RLGL.State.normalz;
-
-    // Add current color
-    vbuf.colors[4 * vc] = RLGL.State.colorr;
-    vbuf.colors[4 * vc + 1] = RLGL.State.colorg;
-    vbuf.colors[4 * vc + 2] = RLGL.State.colorb;
-    vbuf.colors[4 * vc + 3] = RLGL.State.colora;
+    vbuf.vertices[3 * vc ..][0..3].* = .{ tx, ty, tz };
+    vbuf.texcoords[2 * vc ..][0..2].* = .{ RLGL.State.texcoordx, RLGL.State.texcoordy };
+    vbuf.normals[3 * vc ..][0..3].* = .{ RLGL.State.normalx, RLGL.State.normaly, RLGL.State.normalz };
+    vbuf.colors[4 * vc ..][0..4].* = .{ RLGL.State.colorr, RLGL.State.colorg, RLGL.State.colorb, RLGL.State.colora };
 
     RLGL.State.vertexCounter += 1;
-    batch.draws[@intCast(batch.drawCounter - 1)].vertexCount += 1;
+    lastDraw(batch).vertexCount += 1;
 }
 
 // Define one vertex (position) - 2 float
@@ -725,34 +730,22 @@ export fn rlSetTexture(id: c_uint) callconv(.c) void {
     const batch = RLGL.currentBatch;
     if (id == 0) {
         // NOTE: If quads batch limit is reached, force a draw call and next batch starts
-        if (RLGL.State.vertexCounter >= batch.vertexBuffer[@intCast(batch.currentBuffer)].elementCount * 4) {
+        if (RLGL.State.vertexCounter >= currentVertexBuffer(batch).elementCount * 4) {
             rlDrawRenderBatch(batch);
         }
         RLGL.State.currentTextureId = RLGL.State.defaultTextureId;
     } else {
         RLGL.State.currentTextureId = id;
-        if (batch.draws[@intCast(batch.drawCounter - 1)].textureId != id) {
-            if (batch.draws[@intCast(batch.drawCounter - 1)].vertexCount > 0) {
-                const dc = &batch.draws[@intCast(batch.drawCounter - 1)];
-                if (dc.mode == RL_LINES) {
-                    dc.vertexAlignment = if (dc.vertexCount < 4) dc.vertexCount else @rem(dc.vertexCount, 4);
-                } else if (dc.mode == RL_TRIANGLES) {
-                    dc.vertexAlignment = if (dc.vertexCount < 4) 1 else (4 - @rem(dc.vertexCount, 4));
-                } else {
-                    dc.vertexAlignment = 0;
-                }
-
-                if (!rlCheckRenderBatchLimit(dc.vertexAlignment)) {
-                    RLGL.State.vertexCounter += dc.vertexAlignment;
-                    batch.drawCounter += 1;
-                    batch.draws[@intCast(batch.drawCounter - 1)].mode = batch.draws[@intCast(batch.drawCounter - 2)].mode;
-                }
+        if (lastDraw(batch).textureId != id) {
+            if (lastDraw(batch).vertexCount > 0 and closeDrawCall(batch)) {
+                // The new draw call continues the previous one's mode
+                lastDraw(batch).mode = drawCalls(batch)[@intCast(batch.drawCounter - 2)].mode;
             }
 
             if (batch.drawCounter >= RL_DEFAULT_BATCH_DRAWCALLS) rlDrawRenderBatch(batch);
 
-            batch.draws[@intCast(batch.drawCounter - 1)].textureId = id;
-            batch.draws[@intCast(batch.drawCounter - 1)].vertexCount = 0;
+            lastDraw(batch).textureId = id;
+            lastDraw(batch).vertexCount = 0;
         }
     }
 }
@@ -885,7 +878,7 @@ export fn rlActiveDrawBuffers(count: c_int) callconv(.c) void {
         if (count > 8) {
             TraceLog(RL_LOG_WARNING, "GL: Max color buffers limited to 8");
         } else {
-            var buffers = [8]c_uint{
+            const attachments = [8]c_uint{
                 gl.GL_COLOR_ATTACHMENT0,
                 gl.GL_COLOR_ATTACHMENT0 + 1,
                 gl.GL_COLOR_ATTACHMENT0 + 2,
@@ -895,7 +888,7 @@ export fn rlActiveDrawBuffers(count: c_int) callconv(.c) void {
                 gl.GL_COLOR_ATTACHMENT0 + 6,
                 gl.GL_COLOR_ATTACHMENT0 + 7,
             };
-            gl.glad_glDrawBuffers.?(count, &buffers);
+            gl.glad_glDrawBuffers.?(count, &attachments);
         }
     } else TraceLog(RL_LOG_WARNING, "GL: One color buffer active by default");
 }
@@ -1045,11 +1038,10 @@ export fn rlClearScreenBuffers() callconv(.c) void {
 
 // Check and log OpenGL error codes
 export fn rlCheckErrors() callconv(.c) void {
-    var check: c_int = 1;
-    while (check != 0) {
+    while (true) {
         const err = gl.glad_glGetError.?();
         switch (err) {
-            gl.GL_NO_ERROR => check = 0,
+            gl.GL_NO_ERROR => return,
             0x0500 => TraceLog(RL_LOG_WARNING, "GL: Error detected: GL_INVALID_ENUM"),
             0x0501 => TraceLog(RL_LOG_WARNING, "GL: Error detected: GL_INVALID_VALUE"),
             0x0502 => TraceLog(RL_LOG_WARNING, "GL: Error detected: GL_INVALID_OPERATION"),
@@ -1160,17 +1152,19 @@ export fn rlglInit(width: c_int, height: c_int) callconv(.c) void {
     // Init default Shader
     rlLoadShaderDefault();
     RLGL.State.currentShaderId = RLGL.State.defaultShaderId;
-    RLGL.State.currentShaderLocs = RLGL.State.defaultShaderLocs;
+    RLGL.State.currentShaderLocs = RLGL.State.defaultShaderLocs.?.ptr;
 
     // Init default vertex arrays buffers
-    RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL] = @intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL);
+    // The default shader has no normal attribute: the batch binds the normal
+    // buffer to its fixed location while loading, then the loc goes back to -1
+    const locs = RLGL.State.currentShaderLocs.?;
+    locs[RL_SHADER_LOC_VERTEX_NORMAL] = @intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL);
     RLGL.defaultBatch = rlLoadRenderBatch(RL_DEFAULT_BATCH_BUFFERS, RL_DEFAULT_BATCH_BUFFER_ELEMENTS);
-    RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL] = -1;
+    locs[RL_SHADER_LOC_VERTEX_NORMAL] = -1;
     RLGL.currentBatch = &RLGL.defaultBatch;
 
     // Init stack matrices (emulating OpenGL 1.1)
-    var i: usize = 0;
-    while (i < @as(usize, @intCast(RL_MAX_MATRIX_STACK_SIZE))) : (i += 1) RLGL.State.stack[i] = rlMatrixIdentity();
+    RLGL.State.stack = @splat(rlMatrixIdentity());
 
     // Init internal matrices
     RLGL.State.transform = rlMatrixIdentity();
@@ -1322,7 +1316,8 @@ export fn rlGetShaderIdDefault() callconv(.c) c_uint {
 }
 // Get default shader locs
 export fn rlGetShaderLocsDefault() callconv(.c) [*c]c_int {
-    return RLGL.State.defaultShaderLocs;
+    const locs = RLGL.State.defaultShaderLocs orelse return null;
+    return locs.ptr;
 }
 
 // Render batch management
@@ -1330,119 +1325,128 @@ export fn rlGetShaderLocsDefault() callconv(.c) [*c]c_int {
 
 // Load render batch
 export fn rlLoadRenderBatch(numBuffers: c_int, bufferElements: c_int) callconv(.c) rlRenderBatch {
-    var batch = std.mem.zeroes(rlRenderBatch);
     if (!isGpuReady) {
         TraceLog(RL_LOG_WARNING, "GL: GPU is not ready to load data, trying to load before InitWindow()?");
-        return batch;
+        return std.mem.zeroes(rlRenderBatch);
     }
 
-    const nb: usize = @intCast(numBuffers);
-    const be: usize = @intCast(bufferElements);
-
-    // Initialize CPU (RAM) vertex buffers
-    batch.vertexBuffer = @ptrCast(@alignCast(calloc(nb, @sizeOf(rlVertexBuffer))));
-
-    var i: usize = 0;
-    while (i < nb) : (i += 1) {
-        const vb = &batch.vertexBuffer[i];
-        vb.elementCount = bufferElements;
-
-        vb.vertices = @ptrCast(@alignCast(calloc(be * 3 * 4, @sizeOf(f32))));
-        vb.texcoords = @ptrCast(@alignCast(calloc(be * 2 * 4, @sizeOf(f32))));
-        vb.normals = @ptrCast(@alignCast(calloc(be * 3 * 4, @sizeOf(f32))));
-        vb.colors = @ptrCast(@alignCast(calloc(be * 4 * 4, @sizeOf(u8))));
-        vb.indices = @ptrCast(@alignCast(calloc(be * 6, @sizeOf(BatchIndex))));
-
-        var j: usize = 0;
-        while (j < 3 * 4 * be) : (j += 1) vb.vertices[j] = 0.0;
-        j = 0;
-        while (j < 2 * 4 * be) : (j += 1) vb.texcoords[j] = 0.0;
-        j = 0;
-        while (j < 3 * 4 * be) : (j += 1) vb.normals[j] = 0.0;
-        j = 0;
-        while (j < 4 * 4 * be) : (j += 1) vb.colors[j] = 0;
-
-        var k: BatchIndex = 0;
-        // Indices can be initialized right now
-        j = 0;
-        while (j < 6 * be) : (j += 6) {
-            vb.indices[j] = 4 * k;
-            vb.indices[j + 1] = 4 * k + 1;
-            vb.indices[j + 2] = 4 * k + 2;
-            vb.indices[j + 3] = 4 * k;
-            vb.indices[j + 4] = 4 * k + 2;
-            vb.indices[j + 5] = 4 * k + 3;
-            k += 1;
-        }
-
-        RLGL.State.vertexCounter = 0;
-    }
+    // Initialize CPU (RAM) vertex buffers. rlgl.h does not check its
+    // allocations; here running out of memory gives the empty batch.
+    var batch = allocRenderBatch(@intCast(numBuffers), bufferElements) catch return std.mem.zeroes(rlRenderBatch);
+    const vertexBuffers = batch.vertexBuffer[0..@intCast(batch.bufferCount)];
+    if (vertexBuffers.len > 0) RLGL.State.vertexCounter = 0;
 
     TraceLog(RL_LOG_INFO, "RLGL: Render batch vertex buffers loaded successfully in RAM (CPU)");
 
     // Upload to GPU (VRAM) vertex data and initialize VAOs/VBOs
-    i = 0;
-    while (i < nb) : (i += 1) {
-        const vb = &batch.vertexBuffer[i];
-        if (RLGL.ExtSupported.vao) {
-            gl.glad_glGenVertexArrays.?(1, &vb.vaoId);
-            gl.glad_glBindVertexArray.?(vb.vaoId);
-        }
-
-        // Vertex position buffer (shader-location = 0)
-        gl.glad_glGenBuffers.?(1, &vb.vboId[0]);
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[0]);
-        gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 3 * 4 * @sizeOf(f32)), vb.vertices, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]));
-        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
-
-        // Vertex texcoord buffer (shader-location = 1)
-        gl.glad_glGenBuffers.?(1, &vb.vboId[1]);
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[1]);
-        gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 2 * 4 * @sizeOf(f32)), vb.texcoords, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
-        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
-
-        // Vertex normal buffer (shader-location = 2)
-        gl.glad_glGenBuffers.?(1, &vb.vboId[2]);
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[2]);
-        gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 3 * 4 * @sizeOf(f32)), vb.normals, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]));
-        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
-
-        // Vertex color buffer (shader-location = 3)
-        gl.glad_glGenBuffers.?(1, &vb.vboId[3]);
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[3]);
-        gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 4 * 4 * @sizeOf(u8)), vb.colors, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]));
-        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
-
-        // Fill index buffer
-        gl.glad_glGenBuffers.?(1, &vb.vboId[4]);
-        gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, vb.vboId[4]);
-        gl.glad_glBufferData.?(gl.GL_ELEMENT_ARRAY_BUFFER, @intCast(be * 6 * @sizeOf(BatchIndex)), vb.indices, gl.GL_STATIC_DRAW);
-    }
+    const locs = RLGL.State.currentShaderLocs.?;
+    for (vertexBuffers) |*vb| uploadVertexBuffer(vb, locs);
 
     TraceLog(RL_LOG_INFO, "RLGL: Render batch vertex buffers loaded successfully in VRAM (GPU)");
 
     if (RLGL.ExtSupported.vao) gl.glad_glBindVertexArray.?(0);
 
-    // Init draw calls tracking system
-    batch.draws = @ptrCast(@alignCast(calloc(@intCast(RL_DEFAULT_BATCH_DRAWCALLS), @sizeOf(rlDrawCall))));
+    return batch;
+}
 
-    i = 0;
-    while (i < @as(usize, @intCast(RL_DEFAULT_BATCH_DRAWCALLS))) : (i += 1) {
-        batch.draws[i].mode = RL_QUADS;
-        batch.draws[i].vertexCount = 0;
-        batch.draws[i].vertexAlignment = 0;
-        batch.draws[i].textureId = RLGL.State.defaultTextureId;
+/// The CPU side of a render batch: `count` vertex buffers of `elements` quads
+/// each and the draw call table, on the C heap (the batch is a C value;
+/// rlUnloadRenderBatch frees it).
+fn allocRenderBatch(count: usize, elements: c_int) error{OutOfMemory}!rlRenderBatch {
+    const vertexBuffers = try cmem.alloc(rlVertexBuffer, count);
+    errdefer {
+        for (vertexBuffers) |vb| freeVertexBuffer(vb);
+        cmem.free(vertexBuffers.ptr);
+    }
+    for (vertexBuffers) |*vb| vb.* = try allocVertexBuffer(elements);
+
+    const draws = try cmem.alloc(rlDrawCall, RL_DEFAULT_BATCH_DRAWCALLS);
+    @memset(draws, .{ .mode = RL_QUADS, .vertexCount = 0, .vertexAlignment = 0, .textureId = RLGL.State.defaultTextureId });
+
+    return .{
+        .bufferCount = @intCast(count),
+        .currentBuffer = 0,
+        .vertexBuffer = vertexBuffers.ptr,
+        .draws = draws.ptr,
+        .drawCounter = 1,
+        .currentDepth = -1.0,
+    };
+}
+
+/// Zeroed CPU arrays for `elements` quads (4 vertices each) and their indices.
+fn allocVertexBuffer(elements: c_int) error{OutOfMemory}!rlVertexBuffer {
+    const quads: usize = @intCast(elements);
+    var vb = std.mem.zeroes(rlVertexBuffer);
+    errdefer freeVertexBuffer(vb);
+
+    vb.elementCount = elements;
+    vb.vertices = (try cmem.alloc(f32, quads * 4 * 3)).ptr;
+    vb.texcoords = (try cmem.alloc(f32, quads * 4 * 2)).ptr;
+    vb.normals = (try cmem.alloc(f32, quads * 4 * 3)).ptr;
+    vb.colors = (try cmem.alloc(u8, quads * 4 * 4)).ptr;
+    const indices = try cmem.alloc(BatchIndex, quads * 6);
+    vb.indices = indices.ptr;
+
+    // Indices can be initialized right now
+    buffers.fillQuadIndices(BatchIndex, indices);
+    return vb;
+}
+
+fn freeVertexBuffer(vb: rlVertexBuffer) void {
+    cmem.free(vb.vertices);
+    cmem.free(vb.texcoords);
+    cmem.free(vb.normals);
+    cmem.free(vb.colors);
+    cmem.free(vb.indices);
+}
+
+/// Creates the GPU buffers (and VAO) for one batch vertex buffer, bound to the
+/// current shader's attribute locations.
+fn uploadVertexBuffer(vb: *rlVertexBuffer, locs: [*]const c_int) void {
+    const quads: usize = @intCast(vb.elementCount);
+    if (RLGL.ExtSupported.vao) {
+        gl.glad_glGenVertexArrays.?(1, &vb.vaoId);
+        gl.glad_glBindVertexArray.?(vb.vaoId);
     }
 
-    batch.bufferCount = numBuffers;
-    batch.drawCounter = 1;
-    batch.currentDepth = -1.0;
+    // Vertex position buffer (shader-location = 0)
+    gl.glad_glGenBuffers.?(1, &vb.vboId[0]);
+    gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[0]);
+    gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(quads * 3 * 4 * @sizeOf(f32)), vb.vertices, gl.GL_DYNAMIC_DRAW);
+    gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_POSITION]));
+    gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
 
-    return batch;
+    // Vertex texcoord buffer (shader-location = 1)
+    gl.glad_glGenBuffers.?(1, &vb.vboId[1]);
+    gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[1]);
+    gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(quads * 2 * 4 * @sizeOf(f32)), vb.texcoords, gl.GL_DYNAMIC_DRAW);
+    gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
+    gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
+
+    // Vertex normal buffer (shader-location = 2)
+    gl.glad_glGenBuffers.?(1, &vb.vboId[2]);
+    gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[2]);
+    gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(quads * 3 * 4 * @sizeOf(f32)), vb.normals, gl.GL_DYNAMIC_DRAW);
+    gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_NORMAL]));
+    gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
+
+    // Vertex color buffer (shader-location = 3)
+    gl.glad_glGenBuffers.?(1, &vb.vboId[3]);
+    gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[3]);
+    gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(quads * 4 * 4 * @sizeOf(u8)), vb.colors, gl.GL_DYNAMIC_DRAW);
+    gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_COLOR]));
+    gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
+
+    // Fill index buffer
+    gl.glad_glGenBuffers.?(1, &vb.vboId[4]);
+    gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, vb.vboId[4]);
+    gl.glad_glBufferData.?(gl.GL_ELEMENT_ARRAY_BUFFER, @intCast(quads * 6 * @sizeOf(BatchIndex)), vb.indices, gl.GL_STATIC_DRAW);
+}
+
+/// A shader location as a vertex attribute index. C converts a -1 (unused)
+/// location to GLuint implicitly and GL rejects it with GL_INVALID_VALUE.
+fn attribIndex(loc: c_int) c_uint {
+    return @bitCast(loc);
 }
 
 // Unload default internal buffers vertex data from CPU and GPU
@@ -1450,9 +1454,7 @@ export fn rlUnloadRenderBatch(batch: rlRenderBatch) callconv(.c) void {
     gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, 0);
     gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, 0);
 
-    var i: usize = 0;
-    while (i < @as(usize, @intCast(batch.bufferCount))) : (i += 1) {
-        const vb = &batch.vertexBuffer[i];
+    for (batch.vertexBuffer[0..@intCast(batch.bufferCount)]) |*vb| {
         if (RLGL.ExtSupported.vao) {
             gl.glad_glBindVertexArray.?(vb.vaoId);
             gl.glad_glDisableVertexAttribArray.?(RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION);
@@ -1462,51 +1464,43 @@ export fn rlUnloadRenderBatch(batch: rlRenderBatch) callconv(.c) void {
             gl.glad_glBindVertexArray.?(0);
         }
 
-        gl.glad_glDeleteBuffers.?(1, &vb.vboId[0]);
-        gl.glad_glDeleteBuffers.?(1, &vb.vboId[1]);
-        gl.glad_glDeleteBuffers.?(1, &vb.vboId[2]);
-        gl.glad_glDeleteBuffers.?(1, &vb.vboId[3]);
-        gl.glad_glDeleteBuffers.?(1, &vb.vboId[4]);
+        for (&vb.vboId) |*vbo| gl.glad_glDeleteBuffers.?(1, vbo);
 
         if (RLGL.ExtSupported.vao) gl.glad_glDeleteVertexArrays.?(1, &vb.vaoId);
 
-        RL_FREE(vb.vertices);
-        RL_FREE(vb.texcoords);
-        RL_FREE(vb.normals);
-        RL_FREE(vb.colors);
-        RL_FREE(vb.indices);
+        freeVertexBuffer(vb.*);
     }
 
-    RL_FREE(batch.vertexBuffer);
-    RL_FREE(batch.draws);
+    cmem.free(batch.vertexBuffer);
+    cmem.free(batch.draws);
 }
 
 // Draw render batch
 // NOTE: Batch is reseted and current buffer is updated (for multi-buffer config)
 export fn rlDrawRenderBatch(batch: *rlRenderBatch) callconv(.c) void {
-    const cb: usize = @intCast(batch.currentBuffer);
+    const vb = currentVertexBuffer(batch);
 
     // Update batch vertex buffers
     if (RLGL.State.vertexCounter > 0) {
-        if (RLGL.ExtSupported.vao) gl.glad_glBindVertexArray.?(batch.vertexBuffer[cb].vaoId);
+        if (RLGL.ExtSupported.vao) gl.glad_glBindVertexArray.?(vb.vaoId);
 
         const vc: isize = @intCast(RLGL.State.vertexCounter);
 
         // Vertex positions buffer
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[0]);
-        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 3 * @sizeOf(f32), batch.vertexBuffer[cb].vertices);
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[0]);
+        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 3 * @sizeOf(f32), vb.vertices);
 
         // Texture coordinates buffer
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[1]);
-        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 2 * @sizeOf(f32), batch.vertexBuffer[cb].texcoords);
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[1]);
+        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 2 * @sizeOf(f32), vb.texcoords);
 
         // Normals buffer
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[2]);
-        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 3 * @sizeOf(f32), batch.vertexBuffer[cb].normals);
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[2]);
+        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 3 * @sizeOf(f32), vb.normals);
 
         // Colors buffer
-        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[3]);
-        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 4 * @sizeOf(u8), batch.vertexBuffer[cb].colors);
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[3]);
+        gl.glad_glBufferSubData.?(gl.GL_ARRAY_BUFFER, 0, vc * 4 * @sizeOf(u8), vb.colors);
 
         if (RLGL.ExtSupported.vao) gl.glad_glBindVertexArray.?(0);
     }
@@ -1515,110 +1509,19 @@ export fn rlDrawRenderBatch(batch: *rlRenderBatch) callconv(.c) void {
     const matProjection = RLGL.State.projection;
     const matModelView = RLGL.State.modelview;
 
-    var eyeCount: c_int = 1;
-    if (RLGL.State.stereoRender) eyeCount = 2;
+    const eyeCount: c_int = if (RLGL.State.stereoRender) 2 else 1;
 
-    var eye: c_int = 0;
-    while (eye < eyeCount) : (eye += 1) {
+    for (0..@intCast(eyeCount)) |eye| {
         if (eyeCount == 2) {
             // Setup current eye viewport (half screen width)
-            rlViewport(@divTrunc(eye * RLGL.State.framebufferWidth, 2), 0, @divTrunc(RLGL.State.framebufferWidth, 2), RLGL.State.framebufferHeight);
+            rlViewport(@divTrunc(@as(c_int, @intCast(eye)) * RLGL.State.framebufferWidth, 2), 0, @divTrunc(RLGL.State.framebufferWidth, 2), RLGL.State.framebufferHeight);
 
-            rlSetMatrixModelview(rlMatrixMultiply(matModelView, RLGL.State.viewOffsetStereo[@intCast(eye)]));
-            rlSetMatrixProjection(RLGL.State.projectionStereo[@intCast(eye)]);
+            rlSetMatrixModelview(rlMatrixMultiply(matModelView, RLGL.State.viewOffsetStereo[eye]));
+            rlSetMatrixProjection(RLGL.State.projectionStereo[eye]);
         }
 
         // Draw buffers
-        if (RLGL.State.vertexCounter > 0) {
-            gl.glad_glUseProgram.?(RLGL.State.currentShaderId);
-
-            // Create modelview-projection matrix and upload to shader
-            const matMVP = rlMatrixMultiply(RLGL.State.modelview, RLGL.State.projection);
-            var fMVP = rlMatrixToFloatV(matMVP);
-            gl.glad_glUniformMatrix4fv.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_MVP], 1, @intCast(gl.GL_FALSE), &fMVP.v);
-
-            if (RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_PROJECTION] != -1) {
-                var fProj = rlMatrixToFloatV(RLGL.State.projection);
-                gl.glad_glUniformMatrix4fv.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_PROJECTION], 1, @intCast(gl.GL_FALSE), &fProj.v);
-            }
-
-            if (RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_VIEW] != -1) {
-                var fView = rlMatrixToFloatV(RLGL.State.modelview);
-                gl.glad_glUniformMatrix4fv.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_VIEW], 1, @intCast(gl.GL_FALSE), &fView.v);
-            }
-
-            if (RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_MODEL] != -1) {
-                var fModel = rlMatrixToFloatV(RLGL.State.transform);
-                gl.glad_glUniformMatrix4fv.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_MODEL], 1, @intCast(gl.GL_FALSE), &fModel.v);
-            }
-
-            if (RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_NORMAL] != -1) {
-                var fNormal = rlMatrixToFloatV(rlMatrixTranspose(rlMatrixInvert(RLGL.State.transform)));
-                gl.glad_glUniformMatrix4fv.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_MATRIX_NORMAL], 1, @intCast(gl.GL_FALSE), &fNormal.v);
-            }
-
-            if (RLGL.ExtSupported.vao) {
-                gl.glad_glBindVertexArray.?(batch.vertexBuffer[cb].vaoId);
-            } else {
-                gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[0]);
-                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]));
-
-                gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[1]);
-                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
-
-                gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[2]);
-                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]));
-
-                gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[3]);
-                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]));
-
-                gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[4]);
-            }
-
-            // Setup some default shader values
-            gl.glad_glUniform4f.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_COLOR_DIFFUSE], 1.0, 1.0, 1.0, 1.0);
-            gl.glad_glUniform1i.?(RLGL.State.currentShaderLocs[RL_SHADER_LOC_MAP_DIFFUSE], 0);
-
-            // Activate additional sampler textures
-            var t: usize = 0;
-            while (t < @as(usize, @intCast(RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS))) : (t += 1) {
-                if (RLGL.State.activeTextureId[t] > 0) {
-                    gl.glad_glActiveTexture.?(gl.GL_TEXTURE0 + 1 + @as(c_uint, @intCast(t)));
-                    gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, RLGL.State.activeTextureId[t]);
-                }
-            }
-
-            // Activate default sampler2D texture0
-            gl.glad_glActiveTexture.?(gl.GL_TEXTURE0);
-
-            var vertexOffset: c_int = 0;
-            var di: usize = 0;
-            while (di < @as(usize, @intCast(batch.drawCounter))) : (di += 1) {
-                const draw = batch.draws[di];
-                gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, draw.textureId);
-
-                if ((draw.mode == RL_LINES) or (draw.mode == RL_TRIANGLES)) {
-                    gl.glad_glDrawArrays.?(@intCast(draw.mode), vertexOffset, draw.vertexCount);
-                } else {
-                    const indexOffset: usize = @as(usize, @intCast(@divTrunc(vertexOffset, 4))) * 6 * @sizeOf(BatchIndex);
-                    const indexType = if (es2) gl.GL_UNSIGNED_SHORT else gl.GL_UNSIGNED_INT;
-                    gl.glad_glDrawElements.?(gl.GL_TRIANGLES, @divTrunc(draw.vertexCount, 4) * 6, indexType, @ptrFromInt(indexOffset));
-                }
-
-                vertexOffset += (draw.vertexCount + draw.vertexAlignment);
-            }
-
-            if (!RLGL.ExtSupported.vao) {
-                gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, 0);
-                gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, 0);
-            }
-
-            gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, 0);
-        }
+        if (RLGL.State.vertexCounter > 0) drawVertexBuffer(batch, vb);
 
         if (RLGL.ExtSupported.vao) gl.glad_glBindVertexArray.?(0);
 
@@ -1635,22 +1538,96 @@ export fn rlDrawRenderBatch(batch: *rlRenderBatch) callconv(.c) void {
     RLGL.State.projection = matProjection;
     RLGL.State.modelview = matModelView;
 
-    // Reset draws array
-    var i: usize = 0;
-    while (i < @as(usize, @intCast(RL_DEFAULT_BATCH_DRAWCALLS))) : (i += 1) {
-        batch.draws[i].mode = RL_QUADS;
-        batch.draws[i].vertexCount = 0;
-        batch.draws[i].textureId = RLGL.State.defaultTextureId;
+    // Reset draws array (vertexAlignment is left as it was, as in rlgl.h)
+    for (drawCalls(batch)) |*draw| {
+        draw.mode = RL_QUADS;
+        draw.vertexCount = 0;
+        draw.textureId = RLGL.State.defaultTextureId;
     }
 
     // Reset active texture units for next batch
-    i = 0;
-    while (i < @as(usize, @intCast(RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS))) : (i += 1) RLGL.State.activeTextureId[i] = 0;
+    @memset(&RLGL.State.activeTextureId, 0);
 
     batch.drawCounter = 1;
 
     batch.currentBuffer += 1;
     if (batch.currentBuffer >= batch.bufferCount) batch.currentBuffer = 0;
+}
+
+/// Issues the batch's draw calls from vertex buffer `vb` with the current
+/// shader, matrices and texture units.
+fn drawVertexBuffer(batch: *const rlRenderBatch, vb: *const rlVertexBuffer) void {
+    const locs = RLGL.State.currentShaderLocs.?;
+    gl.glad_glUseProgram.?(RLGL.State.currentShaderId);
+
+    // Create modelview-projection matrix and upload to shader
+    const matMVP = rlMatrixMultiply(RLGL.State.modelview, RLGL.State.projection);
+    setUniformMatrix(locs[RL_SHADER_LOC_MATRIX_MVP], matMVP);
+
+    if (locs[RL_SHADER_LOC_MATRIX_PROJECTION] != -1) setUniformMatrix(locs[RL_SHADER_LOC_MATRIX_PROJECTION], RLGL.State.projection);
+    if (locs[RL_SHADER_LOC_MATRIX_VIEW] != -1) setUniformMatrix(locs[RL_SHADER_LOC_MATRIX_VIEW], RLGL.State.modelview);
+    if (locs[RL_SHADER_LOC_MATRIX_MODEL] != -1) setUniformMatrix(locs[RL_SHADER_LOC_MATRIX_MODEL], RLGL.State.transform);
+    if (locs[RL_SHADER_LOC_MATRIX_NORMAL] != -1) setUniformMatrix(locs[RL_SHADER_LOC_MATRIX_NORMAL], rlMatrixTranspose(rlMatrixInvert(RLGL.State.transform)));
+
+    if (RLGL.ExtSupported.vao) {
+        gl.glad_glBindVertexArray.?(vb.vaoId);
+    } else {
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[0]);
+        gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
+        gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_POSITION]));
+
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[1]);
+        gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
+        gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
+
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[2]);
+        gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
+        gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_NORMAL]));
+
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[3]);
+        gl.glad_glVertexAttribPointer.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
+        gl.glad_glEnableVertexAttribArray.?(attribIndex(locs[RL_SHADER_LOC_VERTEX_COLOR]));
+
+        gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, vb.vboId[4]);
+    }
+
+    // Setup some default shader values
+    gl.glad_glUniform4f.?(locs[RL_SHADER_LOC_COLOR_DIFFUSE], 1.0, 1.0, 1.0, 1.0);
+    gl.glad_glUniform1i.?(locs[RL_SHADER_LOC_MAP_DIFFUSE], 0);
+
+    // Activate additional sampler textures
+    for (RLGL.State.activeTextureId, 0..) |textureId, unit| {
+        if (textureId > 0) {
+            gl.glad_glActiveTexture.?(gl.GL_TEXTURE0 + 1 + @as(c_uint, @intCast(unit)));
+            gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, textureId);
+        }
+    }
+
+    // Activate default sampler2D texture0
+    gl.glad_glActiveTexture.?(gl.GL_TEXTURE0);
+
+    var vertexOffset: c_int = 0;
+    for (drawCalls(batch)[0..@intCast(batch.drawCounter)]) |draw| {
+        gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, draw.textureId);
+
+        if ((draw.mode == RL_LINES) or (draw.mode == RL_TRIANGLES)) {
+            gl.glad_glDrawArrays.?(@intCast(draw.mode), vertexOffset, draw.vertexCount);
+        } else {
+            // Quads are drawn as indexed triangles: 6 indices per 4 vertices
+            const indexOffset: usize = @as(usize, @intCast(@divTrunc(vertexOffset, 4))) * 6 * @sizeOf(BatchIndex);
+            const indexType = if (es2) gl.GL_UNSIGNED_SHORT else gl.GL_UNSIGNED_INT;
+            gl.glad_glDrawElements.?(gl.GL_TRIANGLES, @divTrunc(draw.vertexCount, 4) * 6, indexType, @ptrFromInt(indexOffset));
+        }
+
+        vertexOffset += (draw.vertexCount + draw.vertexAlignment);
+    }
+
+    if (!RLGL.ExtSupported.vao) {
+        gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, 0);
+        gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, 0);
+    }
+
+    gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, 0);
 }
 
 // Set the active render batch for rlgl
@@ -1670,16 +1647,16 @@ export fn rlCheckRenderBatchLimit(vCount: c_int) callconv(.c) bool {
     var overflow = false;
     const batch = RLGL.currentBatch;
 
-    if ((RLGL.State.vertexCounter + vCount) >= (batch.vertexBuffer[@intCast(batch.currentBuffer)].elementCount * 4)) {
+    if ((RLGL.State.vertexCounter + vCount) >= (currentVertexBuffer(batch).elementCount * 4)) {
         overflow = true;
 
-        const currentMode = batch.draws[@intCast(batch.drawCounter - 1)].mode;
-        const currentTexture = batch.draws[@intCast(batch.drawCounter - 1)].textureId;
+        // Keep the current draw call's mode and texture across the flush
+        const current = lastDraw(batch).*;
 
         rlDrawRenderBatch(batch);
 
-        batch.draws[@intCast(batch.drawCounter - 1)].mode = currentMode;
-        batch.draws[@intCast(batch.drawCounter - 1)].textureId = currentTexture;
+        lastDraw(batch).mode = current.mode;
+        lastDraw(batch).textureId = current.textureId;
     }
 
     return overflow;
@@ -1730,24 +1707,20 @@ export fn rlLoadTexture(data: ?*const anyopaque, width: c_int, height: c_int, fo
     var mipHeight = height;
     var mipOffset: c_int = 0;
 
-    var dataPtr: ?[*]const u8 = null;
-    if (data != null) dataPtr = @ptrCast(data);
+    // Mipmap levels follow each other in `data`
+    var mipData: ?[*]const u8 = @ptrCast(data);
 
-    var i: c_int = 0;
-    while (i < mipmapCount) : (i += 1) {
+    var level: c_int = 0;
+    while (level < mipmapCount) : (level += 1) {
         const mipSize = rlGetPixelDataSize(mipWidth, mipHeight, format);
+        const glf = glTextureFormat(format);
 
-        var glInternalFormat: c_uint = undefined;
-        var glFormat: c_uint = undefined;
-        var glType: c_uint = undefined;
-        rlGetGlTextureFormats(format, &glInternalFormat, &glFormat, &glType);
+        TraceLog(RL_LOG_DEBUG, "TEXTURE: Load mipmap level %i (%i x %i), size: %i, offset: %i", level, mipWidth, mipHeight, mipSize, mipOffset);
 
-        TraceLog(RL_LOG_DEBUG, "TEXTURE: Load mipmap level %i (%i x %i), size: %i, offset: %i", i, mipWidth, mipHeight, mipSize, mipOffset);
-
-        if (glInternalFormat != 0) {
+        if (glf.internal != 0) {
             if (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-                gl.glad_glTexImage2D.?(gl.GL_TEXTURE_2D, i, @intCast(glInternalFormat), mipWidth, mipHeight, 0, glFormat, glType, dataPtr);
-            } else gl.glad_glCompressedTexImage2D.?(gl.GL_TEXTURE_2D, i, glInternalFormat, mipWidth, mipHeight, 0, mipSize, dataPtr);
+                gl.glad_glTexImage2D.?(gl.GL_TEXTURE_2D, level, @intCast(glf.internal), mipWidth, mipHeight, 0, glf.format, glf.type, mipData);
+            } else gl.glad_glCompressedTexImage2D.?(gl.GL_TEXTURE_2D, level, glf.internal, mipWidth, mipHeight, 0, mipSize, mipData);
 
             // Swizzle grayscale into RGB on GL 3.3. ES uploads these formats as
             // GL_LUMINANCE(_ALPHA) instead (rlGetGlTextureFormats).
@@ -1763,7 +1736,7 @@ export fn rlLoadTexture(data: ?*const anyopaque, width: c_int, height: c_int, fo
         mipWidth = @divTrunc(mipWidth, 2);
         mipHeight = @divTrunc(mipHeight, 2);
         mipOffset += mipSize;
-        if (data != null) dataPtr.? += @intCast(mipSize);
+        if (mipData) |*ptr| ptr.* += @intCast(mipSize);
 
         if (mipWidth < 1) mipWidth = 1;
         if (mipHeight < 1) mipHeight = 1;
@@ -1772,7 +1745,7 @@ export fn rlLoadTexture(data: ?*const anyopaque, width: c_int, height: c_int, fo
     // Texture parameters configuration
     if (es2) {
         // NOTE: OpenGL ES 2.0 with no GL_OES_texture_npot support (i.e. WebGL) has limited NPOT support, so CLAMP_TO_EDGE must be used
-        const texIsPOT = (width > 0 and (width & (width - 1)) == 0) and (height > 0 and (height & (height - 1)) == 0);
+        const texIsPOT = isPowerOfTwo(width) and isPowerOfTwo(height);
         const wrap = if (texIsPOT or RLGL.ExtSupported.texNPOT) gl.GL_REPEAT else gl.GL_CLAMP_TO_EDGE;
         gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, @intCast(wrap));
         gl.glad_glTexParameteri.?(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, @intCast(wrap));
@@ -1858,26 +1831,28 @@ export fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_i
 
     var mipSize = size;
 
-    var dataPtr: ?[*]const u8 = null;
-    if (data != null) dataPtr = @ptrCast(data);
+    // Six faces per mipmap level follow each other in `data`
+    var mipData: ?[*]const u8 = @ptrCast(data);
 
     var dataSize = rlGetPixelDataSize(size, size, format);
 
     gl.glad_glGenTextures.?(1, &id);
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_CUBE_MAP, id);
 
-    var glInternalFormat: c_uint = undefined;
-    var glFormat: c_uint = undefined;
-    var glType: c_uint = undefined;
-    rlGetGlTextureFormats(format, &glInternalFormat, &glFormat, &glType);
+    const glf = glTextureFormat(format);
 
-    if (glInternalFormat != 0) {
+    if (glf.internal != 0) {
         var i: c_int = 0;
         while (i < 6 * mipmapCount) : (i += 1) {
             const mipmapLevel = @divTrunc(i, 6);
             const face: c_uint = @intCast(@rem(i, 6));
 
-            if (data == null) {
+            if (mipData) |faces| {
+                const faceData = faces + @as(usize, face) * @as(usize, @intCast(dataSize));
+                if (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB) {
+                    gl.glad_glTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, @intCast(glf.internal), mipSize, mipSize, 0, glf.format, glf.type, faceData);
+                } else gl.glad_glCompressedTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, glf.internal, mipSize, mipSize, 0, dataSize, faceData);
+            } else {
                 if (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB) {
                     if ((format == RL_PIXELFORMAT_UNCOMPRESSED_R32) or
                         (format == RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32A32) or
@@ -1885,13 +1860,8 @@ export fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_i
                         (format == RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16A16))
                     {
                         TraceLog(RL_LOG_WARNING, "TEXTURES: Cubemap requested format not supported");
-                    } else gl.glad_glTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, @intCast(glInternalFormat), mipSize, mipSize, 0, glFormat, glType, null);
+                    } else gl.glad_glTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, @intCast(glf.internal), mipSize, mipSize, 0, glf.format, glf.type, null);
                 } else TraceLog(RL_LOG_WARNING, "TEXTURES: Empty cubemap creation does not support compressed format");
-            } else {
-                const facePtr = dataPtr.? + @as(usize, @intCast(face)) * @as(usize, @intCast(dataSize));
-                if (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB) {
-                    gl.glad_glTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, @intCast(glInternalFormat), mipSize, mipSize, 0, glFormat, glType, facePtr);
-                } else gl.glad_glCompressedTexImage2D.?(gl.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, mipmapLevel, glInternalFormat, mipSize, mipSize, 0, dataSize, facePtr);
             }
 
             // GL 3.3 only, as in rlLoadTexture
@@ -1905,7 +1875,7 @@ export fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_i
 
             if (face == 5) {
                 mipSize = @divTrunc(mipSize, 2);
-                if (data != null) dataPtr.? += @as(usize, @intCast(dataSize)) * 6;
+                if (mipData) |*ptr| ptr.* += @as(usize, @intCast(dataSize)) * 6;
 
                 if (mipSize < 1) mipSize = 1;
 
@@ -1936,127 +1906,74 @@ export fn rlLoadTextureCubemap(data: ?*const anyopaque, size: c_int, format: c_i
 export fn rlUpdateTexture(id: c_uint, offsetX: c_int, offsetY: c_int, width: c_int, height: c_int, format: c_int, data: ?*const anyopaque) callconv(.c) void {
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, id);
 
-    var glInternalFormat: c_uint = undefined;
-    var glFormat: c_uint = undefined;
-    var glType: c_uint = undefined;
-    rlGetGlTextureFormats(format, &glInternalFormat, &glFormat, &glType);
+    const glf = glTextureFormat(format);
 
-    if ((glInternalFormat != 0) and (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB)) {
-        gl.glad_glTexSubImage2D.?(gl.GL_TEXTURE_2D, 0, offsetX, offsetY, width, height, glFormat, glType, data);
+    if ((glf.internal != 0) and (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB)) {
+        gl.glad_glTexSubImage2D.?(gl.GL_TEXTURE_2D, 0, offsetX, offsetY, width, height, glf.format, glf.type, data);
     } else TraceLog(RL_LOG_WARNING, "TEXTURE: [ID %i] Failed to update for current texture format (%i)", id, format);
 }
 
-// Get OpenGL internal formats and data type from raylib PixelFormat (GL 3.3 branch)
-export fn rlGetGlTextureFormats(format: c_int, glInternalFormat: [*c]c_uint, glFormat: [*c]c_uint, glType: [*c]c_uint) callconv(.c) void {
-    glInternalFormat.* = 0;
-    glFormat.* = 0;
-    glType.* = 0;
+/// OpenGL's description of a raylib pixel format; all zero when unsupported.
+const GlTextureFormat = struct {
+    internal: c_uint = 0,
+    format: c_uint = 0,
+    type: c_uint = 0,
+};
 
+// Get OpenGL internal formats and data type from raylib PixelFormat
+export fn rlGetGlTextureFormats(format: c_int, glInternalFormat: [*c]c_uint, glFormat: [*c]c_uint, glType: [*c]c_uint) callconv(.c) void {
+    const glf = glTextureFormat(format);
+    glInternalFormat.* = glf.internal;
+    glFormat.* = glf.format;
+    glType.* = glf.type;
+}
+
+fn glTextureFormat(format: c_int) GlTextureFormat {
+    const ext = RLGL.ExtSupported;
     // NOTE: on OpenGL ES 2.0 (WebGL), internalFormat must match format and options
     // allowed are: GL_LUMINANCE, GL_RGB, GL_RGBA. rlgl.h keeps that rule on ES3. Its
     // ES float formats (GL_R32F_EXT, GL_RED_EXT, ...) have the same values as the
     // GL 3.3 names used below, so only the 8-bit formats differ.
-    switch (format) {
-        RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => {
-            glInternalFormat.* = if (es2) gl.GL_LUMINANCE else gl.GL_R8;
-            glFormat.* = if (es2) gl.GL_LUMINANCE else gl.GL_RED;
-            glType.* = gl.GL_UNSIGNED_BYTE;
+    // A format whose extension is missing keeps its format/type but gets no
+    // internal format, which callers treat as unsupported.
+    return switch (format) {
+        RL_PIXELFORMAT_UNCOMPRESSED_GRAYSCALE => .{
+            .internal = if (es2) gl.GL_LUMINANCE else gl.GL_R8,
+            .format = if (es2) gl.GL_LUMINANCE else gl.GL_RED,
+            .type = gl.GL_UNSIGNED_BYTE,
         },
-        RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => {
-            glInternalFormat.* = if (es2) gl.GL_LUMINANCE_ALPHA else gl.GL_RG8;
-            glFormat.* = if (es2) gl.GL_LUMINANCE_ALPHA else gl.GL_RG;
-            glType.* = gl.GL_UNSIGNED_BYTE;
+        RL_PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA => .{
+            .internal = if (es2) gl.GL_LUMINANCE_ALPHA else gl.GL_RG8,
+            .format = if (es2) gl.GL_LUMINANCE_ALPHA else gl.GL_RG,
+            .type = gl.GL_UNSIGNED_BYTE,
         },
-        RL_PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
-            glInternalFormat.* = if (es2) gl.GL_RGB else gl.GL_RGB565;
-            glFormat.* = gl.GL_RGB;
-            glType.* = gl.GL_UNSIGNED_SHORT_5_6_5;
+        RL_PIXELFORMAT_UNCOMPRESSED_R5G6B5 => .{ .internal = if (es2) gl.GL_RGB else gl.GL_RGB565, .format = gl.GL_RGB, .type = gl.GL_UNSIGNED_SHORT_5_6_5 },
+        RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8 => .{ .internal = if (es2) gl.GL_RGB else gl.GL_RGB8, .format = gl.GL_RGB, .type = gl.GL_UNSIGNED_BYTE },
+        RL_PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => .{ .internal = if (es2) gl.GL_RGBA else gl.GL_RGB5_A1, .format = gl.GL_RGBA, .type = gl.GL_UNSIGNED_SHORT_5_5_5_1 },
+        RL_PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => .{ .internal = if (es2) gl.GL_RGBA else gl.GL_RGBA4, .format = gl.GL_RGBA, .type = gl.GL_UNSIGNED_SHORT_4_4_4_4 },
+        RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => .{ .internal = if (es2) gl.GL_RGBA else gl.GL_RGBA8, .format = gl.GL_RGBA, .type = gl.GL_UNSIGNED_BYTE },
+        RL_PIXELFORMAT_UNCOMPRESSED_R32 => .{ .internal = if (ext.texFloat32) gl.GL_R32F else 0, .format = gl.GL_RED, .type = gl.GL_FLOAT },
+        RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32 => .{ .internal = if (ext.texFloat32) gl.GL_RGB32F else 0, .format = gl.GL_RGB, .type = gl.GL_FLOAT },
+        RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => .{ .internal = if (ext.texFloat32) gl.GL_RGBA32F else 0, .format = gl.GL_RGBA, .type = gl.GL_FLOAT },
+        RL_PIXELFORMAT_UNCOMPRESSED_R16 => .{ .internal = if (ext.texFloat16) gl.GL_R16F else 0, .format = gl.GL_RED, .type = gl.GL_HALF_FLOAT },
+        RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16 => .{ .internal = if (ext.texFloat16) gl.GL_RGB16F else 0, .format = gl.GL_RGB, .type = gl.GL_HALF_FLOAT },
+        RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => .{ .internal = if (ext.texFloat16) gl.GL_RGBA16F else 0, .format = gl.GL_RGBA, .type = gl.GL_HALF_FLOAT },
+        RL_PIXELFORMAT_COMPRESSED_DXT1_RGB => .{ .internal = if (ext.texCompDXT) gl.GL_COMPRESSED_RGB_S3TC_DXT1_EXT else 0 },
+        RL_PIXELFORMAT_COMPRESSED_DXT1_RGBA => .{ .internal = if (ext.texCompDXT) gl.GL_COMPRESSED_RGBA_S3TC_DXT1_EXT else 0 },
+        RL_PIXELFORMAT_COMPRESSED_DXT3_RGBA => .{ .internal = if (ext.texCompDXT) gl.GL_COMPRESSED_RGBA_S3TC_DXT3_EXT else 0 },
+        RL_PIXELFORMAT_COMPRESSED_DXT5_RGBA => .{ .internal = if (ext.texCompDXT) gl.GL_COMPRESSED_RGBA_S3TC_DXT5_EXT else 0 },
+        RL_PIXELFORMAT_COMPRESSED_ETC1_RGB => .{ .internal = if (ext.texCompETC1) gl.GL_ETC1_RGB8_OES else 0 },
+        RL_PIXELFORMAT_COMPRESSED_ETC2_RGB => .{ .internal = if (ext.texCompETC2) gl.GL_COMPRESSED_RGB8_ETC2 else 0 },
+        RL_PIXELFORMAT_COMPRESSED_ETC2_EAC_RGBA => .{ .internal = if (ext.texCompETC2) gl.GL_COMPRESSED_RGBA8_ETC2_EAC else 0 },
+        RL_PIXELFORMAT_COMPRESSED_PVRT_RGB => .{ .internal = if (ext.texCompPVRT) gl.GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG else 0 },
+        RL_PIXELFORMAT_COMPRESSED_PVRT_RGBA => .{ .internal = if (ext.texCompPVRT) gl.GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG else 0 },
+        RL_PIXELFORMAT_COMPRESSED_ASTC_4x4_RGBA => .{ .internal = if (ext.texCompASTC) gl.GL_COMPRESSED_RGBA_ASTC_4x4_KHR else 0 },
+        RL_PIXELFORMAT_COMPRESSED_ASTC_8x8_RGBA => .{ .internal = if (ext.texCompASTC) gl.GL_COMPRESSED_RGBA_ASTC_8x8_KHR else 0 },
+        else => blk: {
+            TraceLog(RL_LOG_WARNING, "TEXTURE: Current format not supported (%i)", format);
+            break :blk .{};
         },
-        RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8 => {
-            glInternalFormat.* = if (es2) gl.GL_RGB else gl.GL_RGB8;
-            glFormat.* = gl.GL_RGB;
-            glType.* = gl.GL_UNSIGNED_BYTE;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
-            glInternalFormat.* = if (es2) gl.GL_RGBA else gl.GL_RGB5_A1;
-            glFormat.* = gl.GL_RGBA;
-            glType.* = gl.GL_UNSIGNED_SHORT_5_5_5_1;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
-            glInternalFormat.* = if (es2) gl.GL_RGBA else gl.GL_RGBA4;
-            glFormat.* = gl.GL_RGBA;
-            glType.* = gl.GL_UNSIGNED_SHORT_4_4_4_4;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
-            glInternalFormat.* = if (es2) gl.GL_RGBA else gl.GL_RGBA8;
-            glFormat.* = gl.GL_RGBA;
-            glType.* = gl.GL_UNSIGNED_BYTE;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R32 => {
-            if (RLGL.ExtSupported.texFloat32) glInternalFormat.* = gl.GL_R32F;
-            glFormat.* = gl.GL_RED;
-            glType.* = gl.GL_FLOAT;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32 => {
-            if (RLGL.ExtSupported.texFloat32) glInternalFormat.* = gl.GL_RGB32F;
-            glFormat.* = gl.GL_RGB;
-            glType.* = gl.GL_FLOAT;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R32G32B32A32 => {
-            if (RLGL.ExtSupported.texFloat32) glInternalFormat.* = gl.GL_RGBA32F;
-            glFormat.* = gl.GL_RGBA;
-            glType.* = gl.GL_FLOAT;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R16 => {
-            if (RLGL.ExtSupported.texFloat16) glInternalFormat.* = gl.GL_R16F;
-            glFormat.* = gl.GL_RED;
-            glType.* = gl.GL_HALF_FLOAT;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-            if (RLGL.ExtSupported.texFloat16) glInternalFormat.* = gl.GL_RGB16F;
-            glFormat.* = gl.GL_RGB;
-            glType.* = gl.GL_HALF_FLOAT;
-        },
-        RL_PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-            if (RLGL.ExtSupported.texFloat16) glInternalFormat.* = gl.GL_RGBA16F;
-            glFormat.* = gl.GL_RGBA;
-            glType.* = gl.GL_HALF_FLOAT;
-        },
-        RL_PIXELFORMAT_COMPRESSED_DXT1_RGB => {
-            if (RLGL.ExtSupported.texCompDXT) glInternalFormat.* = gl.GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
-        },
-        RL_PIXELFORMAT_COMPRESSED_DXT1_RGBA => {
-            if (RLGL.ExtSupported.texCompDXT) glInternalFormat.* = gl.GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
-        },
-        RL_PIXELFORMAT_COMPRESSED_DXT3_RGBA => {
-            if (RLGL.ExtSupported.texCompDXT) glInternalFormat.* = gl.GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
-        },
-        RL_PIXELFORMAT_COMPRESSED_DXT5_RGBA => {
-            if (RLGL.ExtSupported.texCompDXT) glInternalFormat.* = gl.GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-        },
-        RL_PIXELFORMAT_COMPRESSED_ETC1_RGB => {
-            if (RLGL.ExtSupported.texCompETC1) glInternalFormat.* = gl.GL_ETC1_RGB8_OES;
-        },
-        RL_PIXELFORMAT_COMPRESSED_ETC2_RGB => {
-            if (RLGL.ExtSupported.texCompETC2) glInternalFormat.* = gl.GL_COMPRESSED_RGB8_ETC2;
-        },
-        RL_PIXELFORMAT_COMPRESSED_ETC2_EAC_RGBA => {
-            if (RLGL.ExtSupported.texCompETC2) glInternalFormat.* = gl.GL_COMPRESSED_RGBA8_ETC2_EAC;
-        },
-        RL_PIXELFORMAT_COMPRESSED_PVRT_RGB => {
-            if (RLGL.ExtSupported.texCompPVRT) glInternalFormat.* = gl.GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG;
-        },
-        RL_PIXELFORMAT_COMPRESSED_PVRT_RGBA => {
-            if (RLGL.ExtSupported.texCompPVRT) glInternalFormat.* = gl.GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG;
-        },
-        RL_PIXELFORMAT_COMPRESSED_ASTC_4x4_RGBA => {
-            if (RLGL.ExtSupported.texCompASTC) glInternalFormat.* = gl.GL_COMPRESSED_RGBA_ASTC_4x4_KHR;
-        },
-        RL_PIXELFORMAT_COMPRESSED_ASTC_8x8_RGBA => {
-            if (RLGL.ExtSupported.texCompASTC) glInternalFormat.* = gl.GL_COMPRESSED_RGBA_ASTC_8x8_KHR;
-        },
-        else => TraceLog(RL_LOG_WARNING, "TEXTURE: Current format not supported (%i)", format),
-    }
+    };
 }
 
 // Unload texture from GPU memory
@@ -2075,15 +1992,13 @@ export fn rlGenTextureMipmaps(id: c_uint, width: c_int, height: c_int, format: c
 
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, id);
 
-    var texIsPOT = false;
-    if (((width > 0) and ((width & (width - 1)) == 0)) and
-        ((height > 0) and ((height & (height - 1)) == 0))) texIsPOT = true;
+    const texIsPOT = isPowerOfTwo(width) and isPowerOfTwo(height);
 
     if (texIsPOT or RLGL.ExtSupported.texNPOT) {
         gl.glad_glGenerateMipmap.?(gl.GL_TEXTURE_2D);
 
-        const maxDim: f64 = @floatFromInt(if (width > height) width else height);
-        mipmaps.* = 1 + @as(c_int, @intFromFloat(floor(log(maxDim) / log(2))));
+        const maxDim: f64 = @floatFromInt(@max(width, height));
+        mipmaps.* = 1 + @as(c_int, @intFromFloat(@floor(log(maxDim) / log(2))));
         TraceLog(RL_LOG_INFO, "TEXTURE: [ID %i] Mipmaps generated automatically, total: %i", id, mipmaps.*);
     } else TraceLog(RL_LOG_WARNING, "TEXTURE: [ID %i] Failed to generate mipmaps", id);
 
@@ -2094,26 +2009,24 @@ export fn rlGenTextureMipmaps(id: c_uint, width: c_int, height: c_int, format: c
 export fn rlReadTexturePixels(id: c_uint, width: c_int, height: c_int, format: c_int) callconv(.c) ?*anyopaque {
     if (es2) return readTexturePixelsFramebuffer(id, width, height, format);
 
-    var pixels: ?*anyopaque = null;
+    var pixels: ?[]u8 = null;
 
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, id);
 
     gl.glad_glPixelStorei.?(gl.GL_PACK_ALIGNMENT, 1);
 
-    var glInternalFormat: c_uint = undefined;
-    var glFormat: c_uint = undefined;
-    var glType: c_uint = undefined;
-    rlGetGlTextureFormats(format, &glInternalFormat, &glFormat, &glType);
+    const glf = glTextureFormat(format);
     const size = rlGetPixelDataSize(width, height, format);
 
-    if ((glInternalFormat != 0) and (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB)) {
-        pixels = calloc(@intCast(size), 1);
-        gl.glad_glGetTexImage.?(gl.GL_TEXTURE_2D, 0, glFormat, glType, pixels);
+    if ((glf.internal != 0) and (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB)) {
+        // Returned to the caller, who releases it with free (cmem)
+        pixels = cmem.alloc(u8, @intCast(size)) catch null;
+        if (pixels) |p| gl.glad_glGetTexImage.?(gl.GL_TEXTURE_2D, 0, glf.format, glf.type, p.ptr);
     } else TraceLog(RL_LOG_WARNING, "TEXTURE: [ID %i] Data retrieval not suported for pixel format (%i)", id, format);
 
     gl.glad_glBindTexture.?(gl.GL_TEXTURE_2D, 0);
 
-    return pixels;
+    return if (pixels) |p| p.ptr else null;
 }
 
 /// rlReadTexturePixels on OpenGL ES, which has no glGetTexImage: attach the texture
@@ -2128,20 +2041,18 @@ fn readTexturePixelsFramebuffer(id: c_uint, width: c_int, height: c_int, format:
     gl.glad_glFramebufferTexture2D.?(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, id, 0);
 
     // We read data as RGBA because FBO texture is configured as RGBA, despite binding another texture format
-    const pixels = malloc(@intCast(rlGetPixelDataSize(width, height, format)));
+    // Returned to the caller, who releases it with free (cmem)
+    const pixels = cmem.alloc(u8, @intCast(rlGetPixelDataSize(width, height, format))) catch null;
 
-    var glInternalFormat: c_uint = 0;
-    var glFormat: c_uint = 0;
-    var glType: c_uint = 0;
-    rlGetGlTextureFormats(format, &glInternalFormat, &glFormat, &glType);
-    gl.glad_glReadPixels.?(0, 0, width, height, glFormat, glType, pixels);
+    const glf = glTextureFormat(format);
+    if (pixels) |p| gl.glad_glReadPixels.?(0, 0, width, height, glf.format, glf.type, p.ptr);
 
     gl.glad_glBindFramebuffer.?(gl.GL_FRAMEBUFFER, 0);
 
     // Clean up temporal fbo
     rlUnloadFramebuffer(fboId);
 
-    return pixels;
+    return if (pixels) |p| p.ptr else null;
 }
 
 // Copy framebuffer pixel data to internal buffer (software backend only - no-op for GL 3.3)
@@ -2164,35 +2075,15 @@ export fn rlResizeFramebuffer(width: c_int, height: c_int) callconv(.c) void {
 export fn rlReadScreenPixels(width: c_int, height: c_int) callconv(.c) [*c]u8 {
     const w: usize = @intCast(width);
     const h: usize = @intCast(height);
-    const imgData: [*c]u8 = @ptrCast(@alignCast(calloc(w * h * 4, @sizeOf(u8))));
+    // Returned to the caller, who releases it with free (cmem)
+    const pixels = cmem.alloc(u8, w * h * 4) catch return null;
 
-    gl.glad_glReadPixels.?(0, 0, width, height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, imgData);
+    gl.glad_glReadPixels.?(0, 0, width, height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, pixels.ptr);
 
-    // Flip image vertically
-    var y: c_int = height - 1;
-    while (y >= @divTrunc(height, 2)) : (y -= 1) {
-        var x: c_int = 0;
-        while (x < width * 4) : (x += 4) {
-            const s: usize = @intCast(((height - 1) - y) * width * 4 + x);
-            const e: usize = @intCast(y * width * 4 + x);
+    // Flip image vertically, and make it opaque
+    buffers.flipRowsOpaque(pixels, w, h);
 
-            const r = imgData[s];
-            const g = imgData[s + 1];
-            const b = imgData[s + 2];
-
-            imgData[s] = imgData[e];
-            imgData[s + 1] = imgData[e + 1];
-            imgData[s + 2] = imgData[e + 2];
-            imgData[s + 3] = 255;
-
-            imgData[e] = r;
-            imgData[e + 1] = g;
-            imgData[e + 2] = b;
-            imgData[e + 3] = 255;
-        }
-    }
-
-    return imgData;
+    return pixels.ptr;
 }
 
 // Get name string for pixel format
@@ -2416,9 +2307,15 @@ export fn rlDrawVertexArray(offset: c_int, count: c_int) callconv(.c) void {
 
 // Draw vertex array elements
 export fn rlDrawVertexArrayElements(offset: c_int, count: c_int, buffer: ?*const anyopaque) callconv(.c) void {
-    var bufferPtr: [*c]const u16 = @ptrCast(@alignCast(buffer));
-    if (offset > 0) bufferPtr += @intCast(offset);
-    gl.glad_glDrawElements.?(gl.GL_TRIANGLES, count, gl.GL_UNSIGNED_SHORT, bufferPtr);
+    gl.glad_glDrawElements.?(gl.GL_TRIANGLES, count, gl.GL_UNSIGNED_SHORT, indicesAt(buffer, offset));
+}
+
+/// `buffer` advanced by `offset` 16-bit indices. With an element buffer bound
+/// (raylib's meshes) `buffer` is null and GL reads the result as a byte offset
+/// into that buffer, so this is address arithmetic, as C's `NULL + offset` is.
+fn indicesAt(buffer: ?*const anyopaque, offset: c_int) ?*const anyopaque {
+    if (offset <= 0) return buffer;
+    return @ptrFromInt(@intFromPtr(buffer) + @as(usize, @intCast(offset)) * @sizeOf(u16));
 }
 
 // Draw vertex array instanced
@@ -2428,9 +2325,7 @@ export fn rlDrawVertexArrayInstanced(offset: c_int, count: c_int, instances: c_i
 
 // Draw vertex array elements instanced
 export fn rlDrawVertexArrayElementsInstanced(offset: c_int, count: c_int, buffer: ?*const anyopaque, instances: c_int) callconv(.c) void {
-    var bufferPtr: [*c]const u16 = @ptrCast(@alignCast(buffer));
-    if (offset > 0) bufferPtr += @intCast(offset);
-    gl.glad_glDrawElementsInstanced.?(gl.GL_TRIANGLES, count, gl.GL_UNSIGNED_SHORT, bufferPtr, instances);
+    gl.glad_glDrawElementsInstanced.?(gl.GL_TRIANGLES, count, gl.GL_UNSIGNED_SHORT, indicesAt(buffer, offset), instances);
 }
 
 // Enable vertex state pointer (OpenGL 1.1 only - no-op for GL 3.3)
@@ -2489,11 +2384,8 @@ export fn rlUnloadVertexBuffer(vboId: c_uint) callconv(.c) void {
 
 // Load (compile) shader and return shader id
 export fn rlLoadShader(code: [*c]const u8, type_: c_int) callconv(.c) c_uint {
-    var shaderId: c_uint = 0;
-
-    shaderId = gl.glad_glCreateShader.?(@intCast(type_));
-    var codePtr: [*c]const u8 = code;
-    gl.glad_glShaderSource.?(shaderId, 1, &codePtr, null);
+    var shaderId = gl.glad_glCreateShader.?(@intCast(type_));
+    gl.glad_glShaderSource.?(shaderId, 1, &code, null);
 
     var success: c_int = 0;
     gl.glad_glCompileShader.?(shaderId);
@@ -2509,14 +2401,7 @@ export fn rlLoadShader(code: [*c]const u8, type_: c_int) callconv(.c) c_uint {
 
         var maxLength: c_int = 0;
         gl.glad_glGetShaderiv.?(shaderId, gl.GL_INFO_LOG_LENGTH, &maxLength);
-
-        if (maxLength > 0) {
-            var length: c_int = 0;
-            const logbuf: [*c]u8 = @ptrCast(@alignCast(calloc(@intCast(maxLength), @sizeOf(u8))));
-            gl.glad_glGetShaderInfoLog.?(shaderId, maxLength, &length, logbuf);
-            TraceLog(RL_LOG_WARNING, "SHADER: [ID %i] Compile error: %s", shaderId, logbuf);
-            RL_FREE(logbuf);
-        }
+        traceInfoLog(shaderId, maxLength, gl.glad_glGetShaderInfoLog.?, "SHADER: [ID %i] Compile error: %s");
 
         gl.glad_glDeleteShader.?(shaderId);
         shaderId = 0;
@@ -2530,6 +2415,23 @@ export fn rlLoadShader(code: [*c]const u8, type_: c_int) callconv(.c) c_uint {
     }
 
     return shaderId;
+}
+
+/// glGetShaderInfoLog / glGetProgramInfoLog
+const GetInfoLog = @TypeOf(gl.glad_glGetShaderInfoLog.?);
+
+/// Logs the info log (`maxLength` bytes with its NUL) of a shader or program that
+/// failed to compile or link, as a warning with `format` ("... %i ... %s").
+fn traceInfoLog(id: c_uint, maxLength: c_int, getInfoLog: GetInfoLog, comptime format: [*:0]const u8) void {
+    if (maxLength <= 0) return;
+    const gpa = std.heap.c_allocator;
+    const text = gpa.alloc(u8, @intCast(maxLength)) catch return;
+    defer gpa.free(text);
+    @memset(text, 0);
+
+    var length: c_int = 0;
+    getInfoLog(id, maxLength, &length, text.ptr);
+    TraceLog(RL_LOG_WARNING, format, id, text.ptr);
 }
 
 // Load shader program from code strings
@@ -2602,14 +2504,7 @@ export fn rlLoadShaderProgramEx(vsId: c_uint, fsId: c_uint) callconv(.c) c_uint 
 
         var maxLength: c_int = 0;
         gl.glad_glGetProgramiv.?(programId, gl.GL_INFO_LOG_LENGTH, &maxLength);
-
-        if (maxLength > 0) {
-            var length: c_int = 0;
-            const logbuf: [*c]u8 = @ptrCast(@alignCast(calloc(@intCast(maxLength), @sizeOf(u8))));
-            gl.glad_glGetProgramInfoLog.?(programId, maxLength, &length, logbuf);
-            TraceLog(RL_LOG_WARNING, "SHADER: [ID %i] Link error: %s", programId, logbuf);
-            RL_FREE(logbuf);
-        }
+        traceInfoLog(programId, maxLength, gl.glad_glGetProgramInfoLog.?, "SHADER: [ID %i] Link error: %s");
 
         gl.glad_glDeleteProgram.?(programId);
         programId = 0;
@@ -2677,18 +2572,22 @@ export fn rlSetUniform(locIndex: c_int, value: ?*const anyopaque, uniformType: c
 // Set shader value attribute
 export fn rlSetVertexAttributeDefault(locIndex: c_int, value: ?*const anyopaque, attribType: c_int, count: c_int) callconv(.c) void {
     switch (attribType) {
-        RL_SHADER_ATTRIB_FLOAT => if (count == 1) gl.glad_glVertexAttrib1fv.?(@intCast(locIndex), @ptrCast(@alignCast(value))),
-        RL_SHADER_ATTRIB_VEC2 => if (count == 2) gl.glad_glVertexAttrib2fv.?(@intCast(locIndex), @ptrCast(@alignCast(value))),
-        RL_SHADER_ATTRIB_VEC3 => if (count == 3) gl.glad_glVertexAttrib3fv.?(@intCast(locIndex), @ptrCast(@alignCast(value))),
-        RL_SHADER_ATTRIB_VEC4 => if (count == 4) gl.glad_glVertexAttrib4fv.?(@intCast(locIndex), @ptrCast(@alignCast(value))),
+        RL_SHADER_ATTRIB_FLOAT => if (count == 1) gl.glad_glVertexAttrib1fv.?(attribIndex(locIndex), @ptrCast(@alignCast(value))),
+        RL_SHADER_ATTRIB_VEC2 => if (count == 2) gl.glad_glVertexAttrib2fv.?(attribIndex(locIndex), @ptrCast(@alignCast(value))),
+        RL_SHADER_ATTRIB_VEC3 => if (count == 3) gl.glad_glVertexAttrib3fv.?(attribIndex(locIndex), @ptrCast(@alignCast(value))),
+        RL_SHADER_ATTRIB_VEC4 => if (count == 4) gl.glad_glVertexAttrib4fv.?(attribIndex(locIndex), @ptrCast(@alignCast(value))),
         else => TraceLog(RL_LOG_WARNING, "SHADER: Failed to set attrib default value, data type not recognized"),
     }
 }
 
 // Set shader value uniform matrix
 export fn rlSetUniformMatrix(locIndex: c_int, mat: Matrix) callconv(.c) void {
-    var f = rlMatrixToFloatV(mat);
-    gl.glad_glUniformMatrix4fv.?(locIndex, 1, @intCast(gl.GL_FALSE), &f.v);
+    setUniformMatrix(locIndex, mat);
+}
+
+fn setUniformMatrix(locIndex: c_int, mat: Matrix) void {
+    const values = rlMatrixToFloatV(mat);
+    gl.glad_glUniformMatrix4fv.?(locIndex, 1, @intCast(gl.GL_FALSE), &values);
 }
 
 // Set shader value uniform matrices
@@ -2700,19 +2599,18 @@ export fn rlSetUniformMatrices(locIndex: c_int, matrices: [*c]const Matrix, coun
 
 // Set shader value uniform sampler
 export fn rlSetUniformSampler(locIndex: c_int, textureId: c_uint) callconv(.c) void {
-    var i: usize = 0;
-    while (i < @as(usize, @intCast(RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS))) : (i += 1) {
-        if (RLGL.State.activeTextureId[i] == textureId) {
-            gl.glad_glUniform1i.?(locIndex, @intCast(1 + i));
+    // Unit 0 is the batch's own texture: samplers use units 1 and up
+    for (RLGL.State.activeTextureId, 1..) |activeId, unit| {
+        if (activeId == textureId) {
+            gl.glad_glUniform1i.?(locIndex, @intCast(unit));
             return;
         }
     }
 
-    i = 0;
-    while (i < @as(usize, @intCast(RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS))) : (i += 1) {
-        if (RLGL.State.activeTextureId[i] == 0) {
-            gl.glad_glUniform1i.?(locIndex, @intCast(1 + i));
-            RLGL.State.activeTextureId[i] = textureId;
+    for (&RLGL.State.activeTextureId, 1..) |*activeId, unit| {
+        if (activeId.* == 0) {
+            gl.glad_glUniform1i.?(locIndex, @intCast(unit));
+            activeId.* = textureId;
             break;
         }
     }
@@ -2970,10 +2868,12 @@ const defaultFShaderCode =
 
 // Load default shader (just vertex positioning and texture coloring)
 fn rlLoadShaderDefault() void {
-    RLGL.State.defaultShaderLocs = @ptrCast(@alignCast(calloc(@intCast(RL_MAX_SHADER_LOCATIONS), @sizeOf(c_int))));
-
-    var i: usize = 0;
-    while (i < @as(usize, @intCast(RL_MAX_SHADER_LOCATIONS))) : (i += 1) RLGL.State.defaultShaderLocs[i] = -1;
+    // On the C heap: rlGetShaderLocsDefault hands it to C (rcore's LoadShader
+    // copies it, and Shader structs point at it). rlgl.h does not check this
+    // allocation, and rlgl cannot start without it.
+    const locs = cmem.alloc(c_int, RL_MAX_SHADER_LOCATIONS) catch @panic("RLGL: out of memory for default shader locations");
+    @memset(locs, -1);
+    RLGL.State.defaultShaderLocs = locs;
 
     RLGL.State.defaultVShaderId = rlLoadShader(defaultVShaderCode, RL_VERTEX_SHADER);
     RLGL.State.defaultFShaderId = rlLoadShader(defaultFShaderCode, RL_FRAGMENT_SHADER);
@@ -2983,13 +2883,13 @@ fn rlLoadShaderDefault() void {
     if (RLGL.State.defaultShaderId > 0) {
         TraceLog(RL_LOG_INFO, "SHADER: [ID %i] Default shader loaded successfully", RLGL.State.defaultShaderId);
 
-        RLGL.State.defaultShaderLocs[RL_SHADER_LOC_VERTEX_POSITION] = gl.glad_glGetAttribLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_ATTRIB_NAME_POSITION);
-        RLGL.State.defaultShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01] = gl.glad_glGetAttribLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_ATTRIB_NAME_TEXCOORD);
-        RLGL.State.defaultShaderLocs[RL_SHADER_LOC_VERTEX_COLOR] = gl.glad_glGetAttribLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_ATTRIB_NAME_COLOR);
+        locs[RL_SHADER_LOC_VERTEX_POSITION] = gl.glad_glGetAttribLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_ATTRIB_NAME_POSITION);
+        locs[RL_SHADER_LOC_VERTEX_TEXCOORD01] = gl.glad_glGetAttribLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_ATTRIB_NAME_TEXCOORD);
+        locs[RL_SHADER_LOC_VERTEX_COLOR] = gl.glad_glGetAttribLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_ATTRIB_NAME_COLOR);
 
-        RLGL.State.defaultShaderLocs[RL_SHADER_LOC_MATRIX_MVP] = gl.glad_glGetUniformLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_UNIFORM_NAME_MVP);
-        RLGL.State.defaultShaderLocs[RL_SHADER_LOC_COLOR_DIFFUSE] = gl.glad_glGetUniformLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_UNIFORM_NAME_COLOR);
-        RLGL.State.defaultShaderLocs[RL_SHADER_LOC_MAP_DIFFUSE] = gl.glad_glGetUniformLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_SAMPLER2D_NAME_TEXTURE0);
+        locs[RL_SHADER_LOC_MATRIX_MVP] = gl.glad_glGetUniformLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_UNIFORM_NAME_MVP);
+        locs[RL_SHADER_LOC_COLOR_DIFFUSE] = gl.glad_glGetUniformLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_UNIFORM_NAME_COLOR);
+        locs[RL_SHADER_LOC_MAP_DIFFUSE] = gl.glad_glGetUniformLocation.?(RLGL.State.defaultShaderId, RL_DEFAULT_SHADER_SAMPLER2D_NAME_TEXTURE0);
     } else TraceLog(RL_LOG_WARNING, "SHADER: [ID %i] Failed to load default shader", RLGL.State.defaultShaderId);
 }
 
@@ -3004,9 +2904,14 @@ fn rlUnloadShaderDefault() void {
 
     gl.glad_glDeleteProgram.?(RLGL.State.defaultShaderId);
 
-    RL_FREE(RLGL.State.defaultShaderLocs);
+    if (RLGL.State.defaultShaderLocs) |locs| cmem.free(locs.ptr);
+    RLGL.State.defaultShaderLocs = null;
 
     TraceLog(RL_LOG_INFO, "SHADER: [ID %i] Default shader unloaded successfully", RLGL.State.defaultShaderId);
+}
+
+fn isPowerOfTwo(n: c_int) bool {
+    return n > 0 and (n & (n - 1)) == 0;
 }
 
 // Get pixel data size in bytes (image or texture)
@@ -3076,8 +2981,6 @@ fn compressedDataSize(width: c_int, height: c_int, bytesPerBlock: u64) c_int {
 
 // Auxiliar math functions
 //-------------------------------------------------------------------------------
-const rl_float16 = struct { v: [16]f32 };
-
 fn rlMatrixIdentity() Matrix {
     var matIdentity = std.mem.zeroes(Matrix);
     matIdentity.m0 = 1.0;
@@ -3087,25 +2990,14 @@ fn rlMatrixIdentity() Matrix {
     return matIdentity;
 }
 
-fn rlMatrixToFloatV(mat: Matrix) rl_float16 {
-    var result: rl_float16 = .{ .v = undefined };
-    result.v[0] = mat.m0;
-    result.v[1] = mat.m1;
-    result.v[2] = mat.m2;
-    result.v[3] = mat.m3;
-    result.v[4] = mat.m4;
-    result.v[5] = mat.m5;
-    result.v[6] = mat.m6;
-    result.v[7] = mat.m7;
-    result.v[8] = mat.m8;
-    result.v[9] = mat.m9;
-    result.v[10] = mat.m10;
-    result.v[11] = mat.m11;
-    result.v[12] = mat.m12;
-    result.v[13] = mat.m13;
-    result.v[14] = mat.m14;
-    result.v[15] = mat.m15;
-    return result;
+/// The matrix as 16 floats in column-major order, as glUniformMatrix4fv expects.
+fn rlMatrixToFloatV(mat: Matrix) [16]f32 {
+    return .{
+        mat.m0,  mat.m1,  mat.m2,  mat.m3,
+        mat.m4,  mat.m5,  mat.m6,  mat.m7,
+        mat.m8,  mat.m9,  mat.m10, mat.m11,
+        mat.m12, mat.m13, mat.m14, mat.m15,
+    };
 }
 
 fn rlMatrixMultiply(left: Matrix, right: Matrix) Matrix {

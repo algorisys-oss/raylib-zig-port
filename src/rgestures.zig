@@ -147,7 +147,7 @@ export fn SetGesturesEnabled(flags: c_uint) callconv(.c) void {
 
 /// Check if gesture have been detected
 export fn IsGestureDetected(gesture: c_uint) callconv(.c) bool {
-    if ((GESTURES.enabledFlags & GESTURES.current) == gesture) return true else return false;
+    return (GESTURES.enabledFlags & GESTURES.current) == gesture;
 }
 
 /// Process gesture event and translate it into gestures

@@ -323,14 +323,14 @@ export fn DrawLineV(startPos: Vector2, endPos: Vector2, color: Color) callconv(.
 export fn DrawLineStrip(points: [*c]const Vector2, pointCount: c_int, color: Color) callconv(.c) void {
     if (pointCount < 2) return; // Security check
 
+    const strip = points[0..@intCast(pointCount)];
+
     rlBegin(RL_LINES);
     rlColor4ub(color.r, color.g, color.b, color.a);
 
-    var i: c_int = 0;
-    while (i < pointCount - 1) : (i += 1) {
-        const u: usize = @intCast(i);
-        rlVertex2f(points[u].x, points[u].y);
-        rlVertex2f(points[u + 1].x, points[u + 1].y);
+    for (strip[0 .. strip.len - 1], strip[1..]) |start, end| {
+        rlVertex2f(start.x, start.y);
+        rlVertex2f(end.x, end.y);
     }
     rlEnd();
 }
@@ -342,8 +342,7 @@ export fn DrawLineBezier(startPos: Vector2, endPos: Vector2, thick: f32, color: 
 
     var points = std.mem.zeroes([SPLINE_VERTEX_COUNT]Vector2);
 
-    var i: c_int = 1;
-    while (i <= SPLINE_SEGMENT_DIVISIONS) : (i += 1) {
+    for (1..SPLINE_SEGMENT_DIVISIONS + 1) |i| {
         // Cubic easing in-out
         // NOTE: Easing is calculated only for y position value
         current.y = easeCubicInOut(@floatFromInt(i), startPos.y, endPos.y - startPos.y, @floatFromInt(SPLINE_SEGMENT_DIVISIONS));
@@ -360,7 +359,7 @@ export fn DrawLineBezier(startPos: Vector2, endPos: Vector2, thick: f32, color: 
             points[1].y = previous.y + dx * size;
         }
 
-        const idx: usize = @intCast(2 * i);
+        const idx = 2 * i;
         points[idx + 1].x = current.x - dy * size;
         points[idx + 1].y = current.y + dx * size;
         points[idx].x = current.x + dy * size;
@@ -549,23 +548,25 @@ export fn DrawTriangleFan(points: [*c]const Vector2, pointCount: c_int, color: C
         rlSetTexture(GetShapesTexture().id);
         const shapeRect = GetShapesTextureRectangle();
 
+        const fan = points[0..@intCast(pointCount)];
+        const center = fan[0];
+
         rlBegin(RL_QUADS);
         rlColor4ub(color.r, color.g, color.b, color.a);
 
-        var i: c_int = 1;
-        while (i < pointCount - 1) : (i += 1) {
-            const u: usize = @intCast(i);
+        // Each triangle is a quad with its last vertex repeated
+        for (fan[1 .. fan.len - 1], fan[2..]) |current, next| {
             rlTexCoord2f(shapeRect.x / texW(), shapeRect.y / texH());
-            rlVertex2f(points[0].x, points[0].y);
+            rlVertex2f(center.x, center.y);
 
             rlTexCoord2f(shapeRect.x / texW(), (shapeRect.y + shapeRect.height) / texH());
-            rlVertex2f(points[u].x, points[u].y);
+            rlVertex2f(current.x, current.y);
 
             rlTexCoord2f((shapeRect.x + shapeRect.width) / texW(), (shapeRect.y + shapeRect.height) / texH());
-            rlVertex2f(points[u + 1].x, points[u + 1].y);
+            rlVertex2f(next.x, next.y);
 
             rlTexCoord2f((shapeRect.x + shapeRect.width) / texW(), shapeRect.y / texH());
-            rlVertex2f(points[u + 1].x, points[u + 1].y);
+            rlVertex2f(next.x, next.y);
         }
         rlEnd();
         rlSetTexture(0);
@@ -576,21 +577,17 @@ export fn DrawTriangleFan(points: [*c]const Vector2, pointCount: c_int, color: C
 // NOTE: Every new vertex connects with previous two
 export fn DrawTriangleStrip(points: [*c]const Vector2, pointCount: c_int, color: Color) callconv(.c) void {
     if (pointCount >= 3) {
+        const strip = points[0..@intCast(pointCount)];
+
         rlBegin(RL_TRIANGLES);
         rlColor4ub(color.r, color.g, color.b, color.a);
 
-        var i: c_int = 2;
-        while (i < pointCount) : (i += 1) {
-            const u: usize = @intCast(i);
-            if (@rem(i, 2) == 0) {
-                rlVertex2f(points[u].x, points[u].y);
-                rlVertex2f(points[u - 2].x, points[u - 2].y);
-                rlVertex2f(points[u - 1].x, points[u - 1].y);
-            } else {
-                rlVertex2f(points[u].x, points[u].y);
-                rlVertex2f(points[u - 1].x, points[u - 1].y);
-                rlVertex2f(points[u - 2].x, points[u - 2].y);
-            }
+        // Alternate the winding so every triangle faces the same way
+        for (strip[2..], strip[1 .. strip.len - 1], strip[0 .. strip.len - 2], 2..) |current, previous, first, i| {
+            const second, const third = if (i % 2 == 0) .{ first, previous } else .{ previous, first };
+            rlVertex2f(current.x, current.y);
+            rlVertex2f(second.x, second.y);
+            rlVertex2f(third.x, third.y);
         }
         rlEnd();
     }
@@ -1008,11 +1005,10 @@ export fn DrawRectangleRoundedLines(rec: Rectangle, roundness_in: f32, segments_
     }
 
     // And now the remaining 4 lines
-    var i: usize = 0;
-    while (i < points.len) : (i += 2) {
+    for (0..points.len / 2) |line| {
         rlColor4ub(color.r, color.g, color.b, color.a);
-        vertex(points[i]);
-        vertex(points[i + 1]);
+        vertex(points[2 * line]);
+        vertex(points[2 * line + 1]);
     }
     rlEnd();
 }
@@ -2298,24 +2294,23 @@ const NegativeRingCaps = struct {
 export fn DrawSplineLinear(points: [*c]const Vector2, pointCount: c_int, thick: f32, color: Color) callconv(.c) void {
     if (pointCount < 2) return;
 
-    var delta = Vector2{ .x = 0, .y = 0 };
-    var length: f32 = 0.0;
+    const line = points[0..@intCast(pointCount)];
+
+    // A zero-length segment keeps the previous segment's scale (as in rshapes.c)
     var scale: f32 = 0.0;
 
-    var i: c_int = 0;
-    while (i < pointCount - 1) : (i += 1) {
-        const u: usize = @intCast(i);
-        delta = .{ .x = points[u + 1].x - points[u].x, .y = points[u + 1].y - points[u].y };
-        length = sqrtf(delta.x * delta.x + delta.y * delta.y);
+    for (line[0 .. line.len - 1], line[1..]) |start, end| {
+        const delta = Vector2{ .x = end.x - start.x, .y = end.y - start.y };
+        const length = sqrtf(delta.x * delta.x + delta.y * delta.y);
 
         if (length > 0) scale = thick / (2 * length);
 
         const radius = Vector2{ .x = -scale * delta.y, .y = scale * delta.x };
         var strip = [4]Vector2{
-            .{ .x = points[u].x - radius.x, .y = points[u].y - radius.y },
-            .{ .x = points[u].x + radius.x, .y = points[u].y + radius.y },
-            .{ .x = points[u + 1].x - radius.x, .y = points[u + 1].y - radius.y },
-            .{ .x = points[u + 1].x + radius.x, .y = points[u + 1].y + radius.y },
+            .{ .x = start.x - radius.x, .y = start.y - radius.y },
+            .{ .x = start.x + radius.x, .y = start.y + radius.y },
+            .{ .x = end.x - radius.x, .y = end.y - radius.y },
+            .{ .x = end.x + radius.x, .y = end.y + radius.y },
         };
 
         DrawTriangleStrip(&strip, 4, color);
@@ -2336,14 +2331,10 @@ export fn DrawSplineBasis(points: [*c]const Vector2, pointCount: c_int, thick: f
     var nextPoint = Vector2{ .x = 0, .y = 0 };
     var vertices = std.mem.zeroes([SPLINE_VERTEX_COUNT]Vector2);
 
-    var i: c_int = 0;
-    while (i < (pointCount - 3)) : (i += 1) {
+    const spline = points[0..@intCast(pointCount)];
+    for (0..spline.len - 3) |i| {
         var t: f32 = 0.0;
-        const u: usize = @intCast(i);
-        const p1 = points[u];
-        const p2 = points[u + 1];
-        const p3 = points[u + 2];
-        const p4 = points[u + 3];
+        const p1, const p2, const p3, const p4 = spline[i..][0..4].*;
 
         a[0] = (-p1.x + 3.0 * p2.x - 3.0 * p3.x + p4.x) / 6.0;
         a[1] = (3.0 * p1.x - 6.0 * p2.x + 3.0 * p3.x) / 6.0;
@@ -2367,8 +2358,7 @@ export fn DrawSplineBasis(points: [*c]const Vector2, pointCount: c_int, thick: f
             vertices[1].y = currentPoint.y + dx * size;
         }
 
-        var j: c_int = 1;
-        while (j <= SPLINE_SEGMENT_DIVISIONS) : (j += 1) {
+        for (1..SPLINE_SEGMENT_DIVISIONS + 1) |j| {
             t = @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(SPLINE_SEGMENT_DIVISIONS));
 
             nextPoint.x = a[3] + t * (a[2] + t * (a[1] + t * a[0]));
@@ -2385,7 +2375,7 @@ export fn DrawSplineBasis(points: [*c]const Vector2, pointCount: c_int, thick: f
                 vertices[1].y = currentPoint.y + dx * size;
             }
 
-            const idx: usize = @intCast(2 * j);
+            const idx = 2 * j;
             vertices[idx + 1].x = nextPoint.x - dy * size;
             vertices[idx + 1].y = nextPoint.y + dx * size;
             vertices[idx].x = nextPoint.x + dy * size;
@@ -2415,14 +2405,10 @@ export fn DrawSplineCatmullRom(points: [*c]const Vector2, pointCount: c_int, thi
 
     DrawCircleV(currentPoint, thick / 2.0, color); // Draw init line circle-cap
 
-    var i: c_int = 0;
-    while (i < (pointCount - 3)) : (i += 1) {
+    const spline = points[0..@intCast(pointCount)];
+    for (0..spline.len - 3) |i| {
         var t: f32 = 0.0;
-        const u: usize = @intCast(i);
-        const p1 = points[u];
-        const p2 = points[u + 1];
-        const p3 = points[u + 2];
-        const p4 = points[u + 3];
+        const p1, const p2, const p3, const p4 = spline[i..][0..4].*;
 
         if (i > 0) {
             vertices[0].x = currentPoint.x + dy * size;
@@ -2431,8 +2417,7 @@ export fn DrawSplineCatmullRom(points: [*c]const Vector2, pointCount: c_int, thi
             vertices[1].y = currentPoint.y + dx * size;
         }
 
-        var j: c_int = 1;
-        while (j <= SPLINE_SEGMENT_DIVISIONS) : (j += 1) {
+        for (1..SPLINE_SEGMENT_DIVISIONS + 1) |j| {
             t = @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(SPLINE_SEGMENT_DIVISIONS));
 
             const q0 = (-1.0 * t * t * t) + (2.0 * t * t) + (-1.0 * t);
@@ -2454,7 +2439,7 @@ export fn DrawSplineCatmullRom(points: [*c]const Vector2, pointCount: c_int, thi
                 vertices[1].y = currentPoint.y + dx * size;
             }
 
-            const idx: usize = @intCast(2 * j);
+            const idx = 2 * j;
             vertices[idx + 1].x = nextPoint.x - dy * size;
             vertices[idx + 1].y = nextPoint.y + dx * size;
             vertices[idx].x = nextPoint.x + dy * size;
@@ -2473,10 +2458,12 @@ export fn DrawSplineCatmullRom(points: [*c]const Vector2, pointCount: c_int, thi
 // Draw spline: Quadratic Bezier, minimum 3 points (1 control point): [p1, c2, p3, c4...]
 export fn DrawSplineBezierQuadratic(points: [*c]const Vector2, pointCount: c_int, thick: f32, color: Color) callconv(.c) void {
     if (pointCount >= 3) {
-        var i: c_int = 0;
-        while (i < pointCount - 2) : (i += 2) {
-            const u: usize = @intCast(i);
-            DrawSplineSegmentBezierQuadratic(points[u], points[u + 1], points[u + 2], thick, color);
+        // Segments share their end points: [p1, c2, p3], [p3, c4, p5], ...
+        const spline = points[0..@intCast(pointCount)];
+        var start: usize = 0;
+        while (start + 2 < spline.len) : (start += 2) {
+            const segment = spline[start..][0..3];
+            DrawSplineSegmentBezierQuadratic(segment[0], segment[1], segment[2], thick, color);
         }
     }
 }
@@ -2484,10 +2471,12 @@ export fn DrawSplineBezierQuadratic(points: [*c]const Vector2, pointCount: c_int
 // Draw spline: Cubic Bezier, minimum 4 points (2 control points): [p1, c2, c3, p4, c5, c6...]
 export fn DrawSplineBezierCubic(points: [*c]const Vector2, pointCount: c_int, thick: f32, color: Color) callconv(.c) void {
     if (pointCount >= 4) {
-        var i: c_int = 0;
-        while (i < pointCount - 3) : (i += 3) {
-            const u: usize = @intCast(i);
-            DrawSplineSegmentBezierCubic(points[u], points[u + 1], points[u + 2], points[u + 3], thick, color);
+        // Segments share their end points: [p1, c2, c3, p4], [p4, c5, c6, p7], ...
+        const spline = points[0..@intCast(pointCount)];
+        var start: usize = 0;
+        while (start + 3 < spline.len) : (start += 3) {
+            const segment = spline[start..][0..4];
+            DrawSplineSegmentBezierCubic(segment[0], segment[1], segment[2], segment[3], thick, color);
         }
     }
 }
@@ -2539,8 +2528,7 @@ export fn DrawSplineSegmentBasis(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vect
     currentPoint.x = a[3];
     currentPoint.y = b[3];
 
-    var i: c_int = 0;
-    while (i <= SPLINE_SEGMENT_DIVISIONS) : (i += 1) {
+    for (0..SPLINE_SEGMENT_DIVISIONS + 1) |i| {
         t = step * @as(f32, @floatFromInt(i));
 
         nextPoint.x = a[3] + t * (a[2] + t * (a[1] + t * a[0]));
@@ -2557,7 +2545,7 @@ export fn DrawSplineSegmentBasis(p1: Vector2, p2: Vector2, p3: Vector2, p4: Vect
             points[1].y = currentPoint.y + dx * size;
         }
 
-        const idx: usize = @intCast(2 * i);
+        const idx = 2 * i;
         points[idx + 1].x = nextPoint.x - dy * size;
         points[idx + 1].y = nextPoint.y + dx * size;
         points[idx].x = nextPoint.x + dy * size;
@@ -2579,8 +2567,7 @@ export fn DrawSplineSegmentCatmullRom(p1: Vector2, p2: Vector2, p3: Vector2, p4:
 
     var points = std.mem.zeroes([SPLINE_VERTEX_COUNT]Vector2);
 
-    var i: c_int = 0;
-    while (i <= SPLINE_SEGMENT_DIVISIONS) : (i += 1) {
+    for (0..SPLINE_SEGMENT_DIVISIONS + 1) |i| {
         t = step * @as(f32, @floatFromInt(i));
 
         const q0 = (-1 * t * t * t) + (2 * t * t) + (-1 * t);
@@ -2602,7 +2589,7 @@ export fn DrawSplineSegmentCatmullRom(p1: Vector2, p2: Vector2, p3: Vector2, p4:
             points[1].y = currentPoint.y + dx * size;
         }
 
-        const idx: usize = @intCast(2 * i);
+        const idx = 2 * i;
         points[idx + 1].x = nextPoint.x - dy * size;
         points[idx + 1].y = nextPoint.y + dx * size;
         points[idx].x = nextPoint.x + dy * size;
@@ -2624,8 +2611,7 @@ export fn DrawSplineSegmentBezierQuadratic(p1: Vector2, c2: Vector2, p3: Vector2
 
     var points = std.mem.zeroes([SPLINE_VERTEX_COUNT]Vector2);
 
-    var i: c_int = 1;
-    while (i <= SPLINE_SEGMENT_DIVISIONS) : (i += 1) {
+    for (1..SPLINE_SEGMENT_DIVISIONS + 1) |i| {
         t = step * @as(f32, @floatFromInt(i));
 
         const a = powf(1.0 - t, 2);
@@ -2647,7 +2633,7 @@ export fn DrawSplineSegmentBezierQuadratic(p1: Vector2, c2: Vector2, p3: Vector2
             points[1].y = previous.y + dx * size;
         }
 
-        const idx: usize = @intCast(2 * i);
+        const idx = 2 * i;
         points[idx + 1].x = current.x - dy * size;
         points[idx + 1].y = current.y + dx * size;
         points[idx].x = current.x + dy * size;
@@ -2669,8 +2655,7 @@ export fn DrawSplineSegmentBezierCubic(p1: Vector2, c2: Vector2, c3: Vector2, p4
 
     var points = std.mem.zeroes([SPLINE_VERTEX_COUNT]Vector2);
 
-    var i: c_int = 1;
-    while (i <= SPLINE_SEGMENT_DIVISIONS) : (i += 1) {
+    for (1..SPLINE_SEGMENT_DIVISIONS + 1) |i| {
         t = step * @as(f32, @floatFromInt(i));
 
         const a = powf(1.0 - t, 3);
@@ -2692,7 +2677,7 @@ export fn DrawSplineSegmentBezierCubic(p1: Vector2, c2: Vector2, c3: Vector2, p4
             points[1].y = previous.y + dx * size;
         }
 
-        const idx: usize = @intCast(2 * i);
+        const idx = 2 * i;
         points[idx + 1].x = current.x - dy * size;
         points[idx + 1].y = current.y + dx * size;
         points[idx].x = current.x + dy * size;
@@ -2828,19 +2813,16 @@ export fn CheckCollisionPointPoly(point: Vector2, points: [*c]const Vector2, poi
     var collision = false;
 
     if (pointCount > 2) {
-        var i: c_int = 0;
-        var j: c_int = pointCount - 1;
-        while (i < pointCount) : ({
-            j = i;
-            i += 1;
-        }) {
-            const ui: usize = @intCast(i);
-            const uj: usize = @intCast(j);
-            if ((points[ui].y > point.y) != (points[uj].y > point.y) and
-                (point.x < (points[uj].x - points[ui].x) * (point.y - points[ui].y) / (points[uj].y - points[ui].y) + points[ui].x))
+        // Each edge runs from the previous vertex (the last one, for the first) to this one
+        const polygon = points[0..@intCast(pointCount)];
+        var previous = polygon[polygon.len - 1];
+        for (polygon) |current| {
+            if ((current.y > point.y) != (previous.y > point.y) and
+                (point.x < (previous.x - current.x) * (point.y - current.y) / (previous.y - current.y) + current.x))
             {
                 collision = !collision;
             }
+            previous = current;
         }
     }
 
