@@ -47,10 +47,6 @@ const UpdateGestures = rcore.UpdateGestures;
 const MatrixScale = rcore.MatrixScale;
 const rlGetVersion = rcore.rlGetVersion;
 const rlLoadExtensions = rcore.rlLoadExtensions;
-const RL_CALLOC = rcore.RL_CALLOC;
-const RL_FREE = rcore.RL_FREE;
-const snprintf = rcore.snprintf;
-const strchr = rcore.strchr;
 
 const LOG_INFO = rcore.LOG_INFO;
 const LOG_WARNING = rcore.LOG_WARNING;
@@ -670,7 +666,7 @@ pub export fn GetWindowScaleDPI() callconv(.c) Vector2 {
 // Set clipboard text content
 export fn SetClipboardText(text: [*c]const u8) callconv(.c) void {
     // Security check to (partially) avoid malicious code
-    if (strchr(text, '\'') != null) {
+    if (std.mem.indexOfScalar(u8, std.mem.span(text), '\'') != null) {
         TraceLog(LOG_WARNING, "SYSTEM: Provided Clipboard could be potentially malicious, avoid [\\'] character");
     } else rlWebClipboardWriteText(text);
 }
@@ -757,7 +753,7 @@ pub export fn GetTime() callconv(.c) f64 {
 // Avoid calling this function with user input non-validated strings
 export fn OpenURL(url: [*c]const u8) callconv(.c) void {
     // Security check to (partially) avoid malicious code on target platform
-    if (strchr(url, '\'') != null) {
+    if (std.mem.indexOfScalar(u8, std.mem.span(url), '\'') != null) {
         TraceLog(LOG_WARNING, "SYSTEM: Provided URL could be potentially malicious, avoid [\\'] character");
     } else em.emscripten_run_script(TextFormat("window.open('%s', '_blank')", url));
 }
@@ -1181,24 +1177,8 @@ fn WindowDropCallback(window: ?*GLFWwindow, count: c_int, paths: [*c][*c]const u
     _ = window;
     if (count <= 0) return;
 
-    // In case previous dropped filepaths have not been freed, free them
-    if (CORE.Window.dropFileCount > 0) {
-        for (0..CORE.Window.dropFileCount) |i| RL_FREE(CORE.Window.dropFilepaths[i]);
-
-        RL_FREE(CORE.Window.dropFilepaths);
-
-        CORE.Window.dropFileCount = 0;
-        CORE.Window.dropFilepaths = null;
-    }
-
-    // WARNING: Paths are freed by GLFW when the callback returns, an internal copy must freed
-    CORE.Window.dropFileCount = @intCast(count);
-    CORE.Window.dropFilepaths = @ptrCast(@alignCast(RL_CALLOC(CORE.Window.dropFileCount, @sizeOf([*c]u8))));
-
-    for (0..CORE.Window.dropFileCount) |i| {
-        CORE.Window.dropFilepaths[i] = @ptrCast(RL_CALLOC(MAX_FILEPATH_LENGTH, @sizeOf(u8)));
-        _ = snprintf(CORE.Window.dropFilepaths[i], MAX_FILEPATH_LENGTH, "%s", paths[i]);
-    }
+    // GLFW frees its paths when the callback returns: rcore keeps copies
+    rcore.setDroppedFiles(paths[0..@intCast(count)]);
 }
 
 // GLFW3: Called on keyboard interaction
@@ -1362,7 +1342,7 @@ fn EmscriptenGamepadCallback(eventType: c_int, gamepadEvent: [*c]const em.Emscri
     const index: usize = @intCast(event.index);
     if (event.connected and (index < MAX_GAMEPADS)) {
         CORE.Input.Gamepad.ready[index] = true;
-        _ = snprintf(&CORE.Input.Gamepad.name[index], MAX_GAMEPAD_NAME_LENGTH, "%s", &event.id);
+        rcore.copyCString(&CORE.Input.Gamepad.name[index], &event.id);
     } else if (index < MAX_GAMEPADS) CORE.Input.Gamepad.ready[index] = false;
 
     return true; // The event was consumed by the callback handler

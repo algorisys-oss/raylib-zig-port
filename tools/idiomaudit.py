@@ -42,6 +42,11 @@ qsort bsearch
 RL_MALLOC RL_CALLOC RL_REALLOC RL_FREE
 """.split()
 
+# Files whose job is to be the C boundary: counted and shown, never failed.
+BOUNDARY = {
+    "src/cmem.zig": "the C heap for memory raylib returns to C callers",
+}
+
 ALWAYS_C = {"RL_MALLOC", "RL_CALLOC", "RL_REALLOC", "RL_FREE"}
 
 NAMES = "|".join(LIBC)
@@ -138,6 +143,8 @@ def main():
 
     regressions = []
     for name, c in counts.items():
+        if name in BOUNDARY:
+            continue
         base = baseline.get(name, {"externs": 0, "calls": 0, "cptrs": 0})
         for key, value in c.items():
             if value > base[key]:
@@ -155,6 +162,8 @@ def main():
         return 0
 
     print_table(counts, baseline)
+    for name, reason in BOUNDARY.items():
+        print(f"boundary: {name} ({reason})")
     if regressions:
         print("\nidiomaudit: C idioms increased (the baseline only goes down):")
         for r in regressions:

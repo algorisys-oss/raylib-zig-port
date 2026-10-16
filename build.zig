@@ -822,6 +822,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "text_strings", .args = &.{} },
             .{ .name = "core_files", .args = &.{} },
             .{ .name = "core_fileio", .args = &.{} },
+            .{ .name = "core_automation", .args = &.{} },
             .{ .name = "shapes_sweep", .args = &.{} },
             .{ .name = "font_data", .args = &.{
                 fonts_dir ++ "/anonymous_pro_bold.ttf",

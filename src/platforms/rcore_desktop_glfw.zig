@@ -73,15 +73,14 @@ const MAX_TOUCH_POINTS = rcore.MAX_TOUCH_POINTS;
 const MOUSE_CURSOR_DEFAULT = rcore.MOUSE_CURSOR_DEFAULT;
 const MatrixScale = rcore.MatrixScale;
 const PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 = rcore.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-const RL_CALLOC = rcore.RL_CALLOC;
-const RL_FREE = rcore.RL_FREE;
 const RL_OPENGL_21 = rcore.RL_OPENGL_21;
 const RL_OPENGL_33 = rcore.RL_OPENGL_33;
 const RL_OPENGL_43 = rcore.RL_OPENGL_43;
 const RL_OPENGL_ES_20 = rcore.RL_OPENGL_ES_20;
 const RL_OPENGL_ES_30 = rcore.RL_OPENGL_ES_30;
-const RL_REALLOC = rcore.RL_REALLOC;
 const SetMouseScale = rcore.SetMouseScale;
+const cmem = @import("../cmem.zig");
+const copyCString = rcore.copyCString;
 const SetupViewport = rcore.SetupViewport;
 const TraceLog = rcore.TraceLog;
 const UpdateGestures = rcore.UpdateGestures;
@@ -89,12 +88,8 @@ const Vector2 = rcore.Vector2;
 const flagClear = rcore.flagClear;
 const flagIsSet = rcore.flagIsSet;
 const flagSet = rcore.flagSet;
-const memset = rcore.memset;
 const rlGetVersion = rcore.rlGetVersion;
 const rlLoadExtensions = rcore.rlLoadExtensions;
-const sprintf = rcore.sprintf;
-const strncpy = rcore.strncpy;
-const system = rcore.system;
 
 //----------------------------------------------------------------------------------
 // GLFW types and constants
@@ -543,20 +538,20 @@ export fn SetWindowIcons(images: [*c]Image, count: c_int) callconv(.c) void {
     if ((images == null) or (count <= 0)) {
         glfwSetWindowIcon(platform.handle, 0, null);
     } else {
-        var valid: c_int = 0;
-        const icons: [*c]GLFWimage = @ptrCast(@alignCast(RL_CALLOC(@intCast(count), @sizeOf(GLFWimage))));
+        const gpa = std.heap.c_allocator;
+        const icons = gpa.alloc(GLFWimage, @intCast(count)) catch return;
+        defer gpa.free(icons);
 
-        var i: c_int = 0;
-        while (i < count) : (i += 1) {
-            if (images[@intCast(i)].format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
-                icons[@intCast(valid)].width = images[@intCast(i)].width;
-                icons[@intCast(valid)].height = images[@intCast(i)].height;
-                icons[@intCast(valid)].pixels = @ptrCast(images[@intCast(i)].data);
-                valid += 1;
-            } else TraceLog(LOG_WARNING, "GLFW: Window icon image must be in R8G8B8A8 pixel format");
+        var valid: usize = 0;
+        for (images[0..@intCast(count)]) |image| {
+            if (image.format != PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) {
+                TraceLog(LOG_WARNING, "GLFW: Window icon image must be in R8G8B8A8 pixel format");
+                continue;
+            }
+            icons[valid] = .{ .width = image.width, .height = image.height, .pixels = @ptrCast(image.data) };
+            valid += 1;
         }
-        glfwSetWindowIcon(platform.handle, valid, icons);
-        RL_FREE(icons);
+        glfwSetWindowIcon(platform.handle, @intCast(valid), icons.ptr);
     }
 }
 
@@ -852,11 +847,14 @@ export fn OpenURL(url: [*c]const u8) callconv(.c) void {
     } else if (!std.mem.startsWith(u8, urlText, "http://") and !std.mem.startsWith(u8, urlText, "https://")) {
         TraceLog(LOG_WARNING, "SYSTEM: Provided URL must start with 'http://' or 'https://' protocols");
     } else {
-        const cmd: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(urlText.len + 16, 1)));
-        _ = sprintf(cmd, "xdg-open '%s'", url);
-        const result = system(cmd);
-        if (result == -1) TraceLog(LOG_WARNING, "OpenURL() child process could not be created");
-        RL_FREE(cmd);
+        // raylib runs `xdg-open '<url>'` through system(); starting xdg-open
+        // directly does the same without a shell to interpret the URL
+        const io = rcore.io();
+        var child = std.process.spawn(io, .{ .argv = &.{ "xdg-open", urlText } }) catch {
+            TraceLog(LOG_WARNING, "OpenURL() child process could not be created");
+            return;
+        };
+        _ = child.wait(io) catch {};
     }
 }
 
@@ -1078,24 +1076,7 @@ fn WindowFocusCallback(window: ?*GLFWwindow, focused: c_int) callconv(.c) void {
 
 fn WindowDropCallback(window: ?*GLFWwindow, count: c_int, paths: [*c][*c]const u8) callconv(.c) void {
     _ = window;
-    if (count > 0) {
-        if (CORE.Window.dropFileCount > 0) {
-            var i: c_uint = 0;
-            while (i < CORE.Window.dropFileCount) : (i += 1) RL_FREE(CORE.Window.dropFilepaths[i]);
-            RL_FREE(CORE.Window.dropFilepaths);
-            CORE.Window.dropFileCount = 0;
-            CORE.Window.dropFilepaths = null;
-        }
-
-        CORE.Window.dropFileCount = @intCast(count);
-        CORE.Window.dropFilepaths = @ptrCast(@alignCast(RL_CALLOC(CORE.Window.dropFileCount, @sizeOf([*c]u8))));
-
-        var i: c_uint = 0;
-        while (i < CORE.Window.dropFileCount) : (i += 1) {
-            CORE.Window.dropFilepaths[i] = @ptrCast(@alignCast(RL_CALLOC(MAX_FILEPATH_LENGTH, 1)));
-            _ = strncpy(CORE.Window.dropFilepaths[i], paths[i], MAX_FILEPATH_LENGTH - 1);
-        }
-    }
+    if (count > 0) rcore.setDroppedFiles(paths[0..@intCast(count)]);
 }
 
 fn KeyCallback(window: ?*GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.c) void {
@@ -1150,11 +1131,11 @@ fn CursorEnterCallback(window: ?*GLFWwindow, enter: c_int) callconv(.c) void {
 
 fn JoystickCallback(jid: c_int, event: c_int) callconv(.c) void {
     if (jid < MAX_GAMEPADS) {
+        const name = &CORE.Input.Gamepad.name[@intCast(jid)];
         if (event == GLFW_CONNECTED) {
-            _ = memset(@ptrCast(&CORE.Input.Gamepad.name[@intCast(jid)]), 0, MAX_GAMEPAD_NAME_LENGTH);
-            _ = strncpy(&CORE.Input.Gamepad.name[@intCast(jid)], glfwGetJoystickName(jid), MAX_GAMEPAD_NAME_LENGTH - 1);
+            copyCString(name, glfwGetJoystickName(jid));
         } else if (event == GLFW_DISCONNECTED) {
-            _ = memset(@ptrCast(&CORE.Input.Gamepad.name[@intCast(jid)]), 0, MAX_GAMEPAD_NAME_LENGTH);
+            @memset(name, 0);
         }
     }
 }
@@ -1165,15 +1146,17 @@ fn JoystickCallback(jid: c_int, event: c_int) callconv(.c) void {
 
 fn AllocateWrapper(size: usize, user: ?*anyopaque) callconv(.c) ?*anyopaque {
     _ = user;
-    return RL_CALLOC(size, 1);
+    const bytes = cmem.alloc(u8, size) catch return null;
+    return bytes.ptr;
 }
 fn ReallocateWrapper(block: ?*anyopaque, size: usize, user: ?*anyopaque) callconv(.c) ?*anyopaque {
     _ = user;
-    return RL_REALLOC(block, size);
+    const bytes = cmem.realloc(u8, @ptrCast(block), size) catch return null;
+    return bytes.ptr;
 }
 fn DeallocateWrapper(block: ?*anyopaque, user: ?*anyopaque) callconv(.c) void {
     _ = user;
-    RL_FREE(block);
+    cmem.free(block);
 }
 
 //----------------------------------------------------------------------------------
@@ -1421,7 +1404,7 @@ pub export fn InitPlatform() callconv(.c) c_int {
         if (glfwJoystickPresent(i) != 0) {
             CORE.Input.Gamepad.ready[@intCast(i)] = true;
             CORE.Input.Gamepad.axisCount[@intCast(i)] = GLFW_GAMEPAD_AXIS_LAST + 1;
-            _ = strncpy(&CORE.Input.Gamepad.name[@intCast(i)], glfwGetJoystickName(i), MAX_GAMEPAD_NAME_LENGTH - 1);
+            copyCString(&CORE.Input.Gamepad.name[@intCast(i)], glfwGetJoystickName(i));
         }
     }
 

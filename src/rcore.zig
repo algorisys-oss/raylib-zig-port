@@ -22,6 +22,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const c_va = @import("c_va.zig");
 const fs = @import("fs.zig");
+const automation = @import("automation.zig");
+const cmem = @import("cmem.zig");
 
 /// The platform backend: rcore.c `#include`s one `platforms/rcore_<platform>.c`, and
 /// rcore.zig imports one of these. Emscripten means the browser (PLATFORM_WEB, on
@@ -44,53 +46,19 @@ const SetWindowSize = backend.SetWindowSize;
 const SwapScreenBuffer = backend.SwapScreenBuffer;
 
 //----------------------------------------------------------------------------------
-// libc
+// libc: what rcore still needs from C, and why
 //----------------------------------------------------------------------------------
-extern fn malloc(usize) ?*anyopaque;
-extern fn calloc(usize, usize) ?*anyopaque;
-extern fn realloc(?*anyopaque, usize) ?*anyopaque;
-extern fn free(?*anyopaque) void;
-extern fn memcpy(noalias ?*anyopaque, noalias ?*const anyopaque, usize) ?*anyopaque;
-pub extern fn memset(?*anyopaque, c_int, usize) ?*anyopaque;
-extern fn strlen([*c]const u8) usize;
-pub extern fn strncpy(noalias [*c]u8, noalias [*c]const u8, usize) [*c]u8;
-extern fn strcat([*c]u8, [*c]const u8) [*c]u8;
-pub extern fn strchr([*c]const u8, c_int) [*c]u8;
-pub extern fn sprintf(noalias [*c]u8, noalias [*c]const u8, ...) c_int;
-pub extern fn snprintf(noalias [*c]u8, usize, noalias [*c]const u8, ...) c_int;
+// TraceLog formats a caller's printf string with its C variadic arguments
 extern fn vprintf([*c]const u8, c_va.Arg) c_int;
-pub extern fn system([*c]const u8) c_int;
-extern fn exit(c_int) noreturn;
+extern fn fflush(?*anyopaque) c_int;
+// The process clock comes from libc (time, std.c.clock_gettime, std.c.nanosleep),
+// not std.Io: the examples gate freezes it by preloading those libc symbols
+// (tools/exdiff/fakeclock.c)
 extern fn time(?*std.c.time_t) std.c.time_t;
-extern fn fabsf(f32) f32;
-extern fn roundf(f32) f32;
+const timespec = std.c.timespec;
+// The same libm as C, for bit-exact results (CLAUDE.md, "Float bit-exactness")
 extern fn tan(f64) f64;
 extern fn atan2f(f32, f32) f32;
-extern fn fflush(?*anyopaque) c_int;
-
-// stdio, for the automation events file (until it moves to fs.zig)
-const FILE = anyopaque;
-extern fn fopen([*c]const u8, [*c]const u8) ?*FILE;
-extern fn fclose(?*FILE) c_int;
-extern fn fgets([*c]u8, c_int, ?*FILE) [*c]u8;
-extern fn feof(?*FILE) c_int;
-extern fn sscanf([*c]const u8, [*c]const u8, ...) c_int;
-
-// clock / sleep
-const timespec = std.c.timespec;
-extern fn clock_gettime(c_int, *timespec) c_int;
-extern fn nanosleep(*const timespec, ?*timespec) c_int;
-const CLOCK_MONOTONIC: c_int = 1;
-
-pub inline fn RL_FREE(p: anytype) void {
-    free(@ptrCast(@constCast(p)));
-}
-pub inline fn RL_CALLOC(count: usize, sz: usize) ?*anyopaque {
-    return calloc(count, sz);
-}
-pub inline fn RL_REALLOC(p: ?*anyopaque, sz: usize) ?*anyopaque {
-    return realloc(p, sz);
-}
 
 //----------------------------------------------------------------------------------
 // Public ABI structs (extern struct, exact layout matching raylib.h)
@@ -187,11 +155,7 @@ pub const FilePathList = extern struct {
     count: c_uint,
     paths: [*c][*c]u8,
 };
-pub const AutomationEvent = extern struct {
-    frame: c_uint,
-    type: c_uint,
-    params: [4]c_int,
-};
+pub const AutomationEvent = automation.Event;
 pub const AutomationEventList = extern struct {
     capacity: c_uint,
     count: c_uint,
@@ -678,21 +642,6 @@ const WINDOW_RESIZE: c_uint = 21;
 const ACTION_TAKE_SCREENSHOT: c_uint = 22;
 const ACTION_SETTARGETFPS: c_uint = 23;
 
-const autoEventTypeName = [_][*c]const u8{
-    "EVENT_NONE",                "INPUT_KEY_UP",
-    "INPUT_KEY_DOWN",            "INPUT_KEY_PRESSED",
-    "INPUT_KEY_RELEASED",        "INPUT_MOUSE_BUTTON_UP",
-    "INPUT_MOUSE_BUTTON_DOWN",   "INPUT_MOUSE_POSITION",
-    "INPUT_MOUSE_WHEEL_MOTION",  "INPUT_GAMEPAD_CONNECT",
-    "INPUT_GAMEPAD_DISCONNECT",  "INPUT_GAMEPAD_BUTTON_UP",
-    "INPUT_GAMEPAD_BUTTON_DOWN", "INPUT_GAMEPAD_AXIS_MOTION",
-    "INPUT_TOUCH_UP",            "INPUT_TOUCH_DOWN",
-    "INPUT_TOUCH_POSITION",      "INPUT_GESTURE",
-    "WINDOW_CLOSE",              "WINDOW_MAXIMIZE",
-    "WINDOW_MINIMIZE",           "WINDOW_RESIZE",
-    "ACTION_TAKE_SCREENSHOT",    "ACTION_SETTARGETFPS",
-};
-
 var currentEventList: ?*AutomationEventList = null;
 var automationEventRecording: bool = false;
 
@@ -1053,7 +1002,7 @@ export fn LoadVrStereoConfig(device: VrDeviceInfo) callconv(.c) VrStereoConfig {
         config.rightScreenCenter[0] = 0.75;
         config.rightScreenCenter[1] = 0.5;
 
-        const lensRadius = fabsf(-1.0 - 4.0 * lensShift);
+        const lensRadius = @abs(-1.0 - 4.0 * lensShift);
         const lensRadiusSq = lensRadius * lensRadius;
         const distortionScale = device.lensDistortionValues[0] +
             device.lensDistortionValues[1] * lensRadiusSq +
@@ -1114,15 +1063,11 @@ export fn LoadShaderFromMemory(vsCode: [*c]const u8, fsCode: [*c]const u8) callc
     shader.id = rlLoadShaderProgram(vsCode, fsCode);
 
     if (shader.id == 0) {
-        shader.locs = @ptrCast(@alignCast(RL_CALLOC(@intCast(RL_MAX_SHADER_LOCATIONS), @sizeOf(c_int))));
-        var i: usize = 0;
-        while (i < RL_MAX_SHADER_LOCATIONS) : (i += 1) shader.locs[i] = -1;
+        shader.locs = newShaderLocations();
     } else if (shader.id == rlGetShaderIdDefault()) {
         shader.locs = rlGetShaderLocsDefault();
     } else if (shader.id > 0) {
-        shader.locs = @ptrCast(@alignCast(RL_CALLOC(@intCast(RL_MAX_SHADER_LOCATIONS), @sizeOf(c_int))));
-        var i: usize = 0;
-        while (i < RL_MAX_SHADER_LOCATIONS) : (i += 1) shader.locs[i] = -1;
+        shader.locs = newShaderLocations();
 
         shader.locs[SHADER_LOC_VERTEX_POSITION] = rlGetLocationAttrib(shader.id, RL_DEFAULT_SHADER_ATTRIB_NAME_POSITION);
         shader.locs[SHADER_LOC_VERTEX_TEXCOORD01] = rlGetLocationAttrib(shader.id, RL_DEFAULT_SHADER_ATTRIB_NAME_TEXCOORD);
@@ -1150,6 +1095,13 @@ export fn LoadShaderFromMemory(vsCode: [*c]const u8, fsCode: [*c]const u8) callc
     return shader;
 }
 
+/// A shader's location table with every entry unset (-1). UnloadShader frees it.
+fn newShaderLocations() [*c]c_int {
+    const locs = cmem.alloc(c_int, RL_MAX_SHADER_LOCATIONS) catch return null;
+    @memset(locs, -1);
+    return locs.ptr;
+}
+
 export fn IsShaderValid(shader: Shader) callconv(.c) bool {
     return (shader.id > 0) and (shader.locs != null);
 }
@@ -1157,7 +1109,7 @@ export fn IsShaderValid(shader: Shader) callconv(.c) bool {
 export fn UnloadShader(shader: Shader) callconv(.c) void {
     if (shader.id != rlGetShaderIdDefault()) {
         rlUnloadShaderProgram(shader.id);
-        RL_FREE(shader.locs);
+        cmem.free(shader.locs);
     }
 }
 
@@ -1340,7 +1292,7 @@ export fn GetFPS() callconv(.c) c_int {
 
         if (fps_capture_frames_counted > 0) {
             const counted: f32 = @floatFromInt(fps_capture_frames_counted);
-            fps = @intFromFloat(roundf(counted / (fps_average * @as(f32, @floatFromInt(FPS_CAPTURE_FRAMES_COUNT)))));
+            fps = @intFromFloat(@round(counted / (fps_average * @as(f32, @floatFromInt(FPS_CAPTURE_FRAMES_COUNT)))));
         }
     } else fps = 0;
 
@@ -1364,7 +1316,7 @@ export fn WaitTime(seconds: f64) callconv(.c) void {
     const nsec: c_long = @intFromFloat((sleepSeconds - @as(f64, @floatFromInt(sec))) * 1000000000.0);
     req.sec = sec;
     req.nsec = nsec;
-    while (nanosleep(&req, &req) == -1) continue;
+    while (std.c.nanosleep(&req, &req) == -1) continue;
 
     while (GetTime() < destinationTime) {}
 }
@@ -1397,7 +1349,7 @@ export fn UnloadRandomSequence(sequence: [*c]c_int) callconv(.c) void {
 }
 
 export fn TakeScreenshot(fileName: [*c]const u8) callconv(.c) void {
-    if (strchr(fileName, '\'') != null) {
+    if (std.mem.indexOfScalar(u8, std.mem.span(fileName), '\'') != null) {
         TraceLog(LOG_WARNING, "SYSTEM: Provided fileName could be potentially malicious, avoid ['] character");
         return;
     }
@@ -1408,16 +1360,17 @@ export fn TakeScreenshot(fileName: [*c]const u8) callconv(.c) void {
     const w: c_int = @intFromFloat(@as(f32, @floatFromInt(CORE.Window.render.width)) * scale.x);
     const h: c_int = @intFromFloat(@as(f32, @floatFromInt(CORE.Window.render.height)) * scale.y);
     const imgData = rlReadScreenPixels(w, h);
+    defer cmem.free(imgData);
     const image = Image{ .data = imgData, .width = w, .height = h, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
-    var path: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
-    const fullPath = if (!IsPathAbsolute(fileName)) TextFormat("%s/%s", CORE.Storage.basePath, fileName) else fileName;
-    _ = strncpy(&path, fullPath, MAX_FILEPATH_LENGTH - 1); // == snprintf("%s") into a zeroed buffer
+    // TextFormat's own length limit applies to a relative name, as in raylib
+    const fullPath = std.mem.span(if (IsPathAbsolute(fileName)) fileName else TextFormat("%s/%s", CORE.Storage.basePath, fileName));
+    var pathBuffer: [MAX_FILEPATH_LENGTH]u8 = undefined;
+    const path = returnInBuffer(&pathBuffer, fullPath[0..@min(fullPath.len, pathBuffer.len - 1)]);
 
-    _ = ExportImage(image, &path);
-    RL_FREE(imgData);
+    _ = ExportImage(image, path);
 
-    if (FileExists(&path)) TraceLog(LOG_INFO, "SYSTEM: [%s] Screenshot taken successfully", &path) else TraceLog(LOG_WARNING, "SYSTEM: [%s] Screenshot could not be saved", &path);
+    if (FileExists(path)) TraceLog(LOG_INFO, "SYSTEM: [%s] Screenshot taken successfully", path) else TraceLog(LOG_WARNING, "SYSTEM: [%s] Screenshot could not be saved", path);
 }
 
 export fn SetConfigFlags(flags: c_uint) callconv(.c) void {
@@ -1444,8 +1397,6 @@ pub export fn TraceLog(logType: c_int, text: [*c]const u8, ...) callconv(.c) voi
         return;
     }
 
-    var buffer: [MAX_TRACELOG_MSG_LENGTH]u8 = std.mem.zeroes([MAX_TRACELOG_MSG_LENGTH]u8);
-
     const prefix: []const u8 = switch (logType) {
         LOG_TRACE => "TRACE: ",
         LOG_DEBUG => "DEBUG: ",
@@ -1455,17 +1406,16 @@ pub export fn TraceLog(logType: c_int, text: [*c]const u8, ...) callconv(.c) voi
         LOG_FATAL => "FATAL: ",
         else => "",
     };
-    @memcpy(buffer[0..prefix.len], prefix);
+    const message = std.mem.span(text);
+    const kept = message[0..@min(message.len, MAX_TRACELOG_MSG_LENGTH - 12)];
+    var buffer: [MAX_TRACELOG_MSG_LENGTH]u8 = undefined;
+    const format = std.fmt.bufPrint(&buffer, "{s}{s}\n\x00", .{ prefix, kept }) catch unreachable;
 
-    const textLength: c_uint = @intCast(strlen(text));
-    const blen = strlen(&buffer);
-    const copyLen: usize = if (textLength < (MAX_TRACELOG_MSG_LENGTH - 12)) @intCast(textLength) else (MAX_TRACELOG_MSG_LENGTH - 12);
-    _ = memcpy(@ptrCast(&buffer[blen]), @ptrCast(text), copyLen);
-    _ = strcat(&buffer, "\n");
-    _ = vprintf(&buffer, c_va.arg(&ap));
+    // The message is a C printf format with C variadic arguments: only libc can format it
+    _ = vprintf(format.ptr, c_va.arg(&ap));
     _ = fflush(null);
 
-    if (logType == LOG_FATAL) exit(1);
+    if (logType == LOG_FATAL) std.process.exit(1);
 }
 
 export fn SetTraceLogCallback(callback: TraceLogCallback) callconv(.c) void {
@@ -1477,13 +1427,15 @@ export fn SetTraceLogCallback(callback: TraceLogCallback) callconv(.c) void {
 //----------------------------------------------------------------------------------
 
 export fn MemAlloc(size: c_uint) callconv(.c) ?*anyopaque {
-    return RL_CALLOC(size, 1);
+    const bytes = cmem.alloc(u8, size) catch return null;
+    return bytes.ptr;
 }
 export fn MemRealloc(ptr: ?*anyopaque, size: c_uint) callconv(.c) ?*anyopaque {
-    return RL_REALLOC(ptr, size);
+    const bytes = cmem.realloc(u8, @ptrCast(ptr), size) catch return null;
+    return bytes.ptr;
 }
 export fn MemFree(ptr: ?*anyopaque) callconv(.c) void {
-    RL_FREE(ptr);
+    cmem.free(ptr);
 }
 
 //----------------------------------------------------------------------------------
@@ -1497,7 +1449,7 @@ export fn MemFree(ptr: ?*anyopaque) callconv(.c) void {
 /// The `Io` for file system calls. Zig library code takes an `Io` from its
 /// caller, but raylib's C API has no parameter to carry one, so the C ABI
 /// edge uses std's process-wide instance.
-fn io() std.Io {
+pub fn io() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
 
@@ -1539,7 +1491,7 @@ export fn LoadFileData(fileName: [*c]const u8, dataSize: [*c]c_int) callconv(.c)
 }
 
 export fn UnloadFileData(data: [*c]u8) callconv(.c) void {
-    RL_FREE(data);
+    cmem.free(data);
 }
 
 export fn SaveFileData(fileName: [*c]const u8, data: ?*anyopaque, dataSize: c_int) callconv(.c) bool {
@@ -1605,7 +1557,7 @@ export fn LoadFileText(fileName: [*c]const u8) callconv(.c) [*c]u8 {
 }
 
 export fn UnloadFileText(text: [*c]u8) callconv(.c) void {
-    RL_FREE(text);
+    cmem.free(text);
 }
 
 export fn SaveFileText(fileName: [*c]const u8, text: [*c]u8) callconv(.c) bool {
@@ -1861,11 +1813,13 @@ export fn LoadDirectoryFilesEx(basePath: [*c]const u8, filter: [*c]const u8, sca
     return .{ .count = expected, .paths = paths.ptr };
 }
 
+// Memory C callers hand back is released with plain `free`: their struct's
+// `count`/`capacity` may not be the allocation's length, and Allocator.free
+// would write over that many bytes in safe builds.
 export fn UnloadDirectoryFiles(files: FilePathList) callconv(.c) void {
     if (files.paths == null) return;
-    const paths = files.paths[0..files.count];
-    for (paths) |path| c_allocator.free(path[0..MAX_FILEPATH_LENGTH]);
-    c_allocator.free(paths);
+    for (files.paths[0..files.count]) |path| cmem.free(path);
+    cmem.free(files.paths);
 }
 
 /// `count` paths, each a zeroed MAX_FILEPATH_LENGTH buffer as in raylib, so
@@ -1965,11 +1919,41 @@ export fn LoadDroppedFiles() callconv(.c) FilePathList {
 
 export fn UnloadDroppedFiles(files: FilePathList) callconv(.c) void {
     if (files.count == 0) return;
-    // Allocated by the platform backend with RL_CALLOC
-    for (files.paths[0..files.count]) |path| RL_FREE(path);
-    RL_FREE(files.paths);
+    for (files.paths[0..files.count]) |path| cmem.free(path);
+    cmem.free(files.paths);
     CORE.Window.dropFileCount = 0;
     CORE.Window.dropFilepaths = null;
+}
+
+/// Replaces the dropped-file list with copies of `paths`, which the platform
+/// frees when its callback returns. Each copy gets a MAX_FILEPATH_LENGTH
+/// buffer, as in raylib.
+pub fn setDroppedFiles(paths: []const [*c]const u8) void {
+    clearDroppedFiles();
+    const list = cmem.alloc([*c]u8, paths.len) catch return;
+    var copied: usize = 0;
+    for (list, paths) |*copy, path| {
+        const buf = cmem.alloc(u8, MAX_FILEPATH_LENGTH) catch break;
+        copyCString(buf, path);
+        copy.* = buf.ptr;
+        copied += 1;
+    }
+    CORE.Window.dropFilepaths = list.ptr;
+    CORE.Window.dropFileCount = @intCast(copied);
+}
+
+/// Frees a dropped-file list the user did not unload.
+pub fn clearDroppedFiles() void {
+    UnloadDroppedFiles(.{ .count = CORE.Window.dropFileCount, .paths = CORE.Window.dropFilepaths });
+}
+
+/// Copies the C string `src` into `dst`, cut to leave room for the terminator
+/// and zero-filled after it: C's `memset` + `strncpy(dst, src, len - 1)`.
+pub fn copyCString(dst: []u8, src: [*c]const u8) void {
+    @memset(dst, 0);
+    const text = cSpan(src) orelse return;
+    const len = @min(text.len, dst.len - 1);
+    @memcpy(dst[0..len], text[0..len]);
 }
 
 export fn GetDirectoryFileCount(dirPath: [*c]const u8) callconv(.c) c_uint {
@@ -1989,428 +1973,141 @@ export fn GetDirectoryFileCountEx(basePath: [*c]const u8, filter: [*c]const u8, 
 //----------------------------------------------------------------------------------
 
 export fn CompressData(data: [*c]const u8, dataSize: c_int, compDataSize: [*c]c_int) callconv(.c) [*c]u8 {
-    const COMPRESSION_QUALITY_DEFLATE: c_int = 8;
-    var compData: [*c]u8 = null;
+    const quality = 8; // COMPRESSION_QUALITY_DEFLATE
 
-    const sdeflPtr: *sdefl = @ptrCast(@alignCast(RL_CALLOC(1, rl_sizeof_sdefl())));
-    const bounds = sdefl_bound(dataSize);
-    compData = @ptrCast(@alignCast(RL_CALLOC(@intCast(bounds), 1)));
+    // sdefl's state is a C struct only rcore_impl.c knows the size of
+    const state = std.heap.c_allocator.alignedAlloc(u8, .of(std.c.max_align_t), rl_sizeof_sdefl()) catch return null;
+    defer std.heap.c_allocator.free(state);
+    @memset(state, 0);
 
-    compDataSize.* = sdeflate(sdeflPtr, @ptrCast(compData), @ptrCast(data), dataSize, COMPRESSION_QUALITY_DEFLATE);
-    RL_FREE(sdeflPtr);
+    const compressed = cmem.alloc(u8, @intCast(sdefl_bound(dataSize))) catch return null;
+    compDataSize.* = sdeflate(@ptrCast(state.ptr), compressed.ptr, data, dataSize, quality);
 
     TraceLog(LOG_INFO, "SYSTEM: Compress data: Original size: %i -> Comp. size: %i", dataSize, compDataSize.*);
-    return compData;
+    return compressed.ptr;
 }
 
 export fn DecompressData(compData: [*c]const u8, compDataSize: c_int, dataSize: [*c]c_int) callconv(.c) [*c]u8 {
-    var data: [*c]u8 = null;
-    const maxSize: c_int = @intCast(MAX_DECOMPRESSION_SIZE * 1024 * 1024);
+    const max_size = MAX_DECOMPRESSION_SIZE * 1024 * 1024;
 
-    const data0: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(maxSize), 1)));
-    const size = sinflate(@ptrCast(data0), maxSize, @ptrCast(compData), compDataSize);
+    // Inflate into the largest buffer raylib allows, then keep only what was used
+    const scratch = std.heap.c_allocator.alloc(u8, max_size) catch return null;
+    defer std.heap.c_allocator.free(scratch);
+    const size = sinflate(scratch.ptr, @intCast(max_size), compData, compDataSize);
+    if (size < 0) return null;
 
-    data = @ptrCast(@alignCast(RL_CALLOC(@intCast(size), 1)));
-    _ = memcpy(@ptrCast(data), @ptrCast(data0), @intCast(size));
-    _ = memset(@ptrCast(data0), 0, @intCast(maxSize));
-    RL_FREE(data0);
+    const data = cmem.alloc(u8, @intCast(size)) catch return null;
+    @memcpy(data, scratch[0..data.len]);
 
     TraceLog(LOG_INFO, "SYSTEM: Decompress data: Comp. size: %i -> Original size: %i", compDataSize, size);
-
     dataSize.* = size;
-    return data;
+    return data.ptr;
+}
+
+/// `size` bytes at `data` as a slice; empty for a null pointer or a size <= 0.
+fn cBytes(data: [*c]const u8, size: c_int) []const u8 {
+    return if (data == null or size <= 0) &.{} else data[0..@intCast(size)];
 }
 
 export fn EncodeDataBase64(data: [*c]const u8, dataSize: c_int, outputSize: [*c]c_int) callconv(.c) [*c]u8 {
-    const base64EncodeTable = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const encoder = std.base64.standard.Encoder;
+    const input = cBytes(data, dataSize);
 
-    var paddedSize = dataSize;
-    while (@rem(paddedSize, 3) != 0) paddedSize += 1;
-    var estimatedOutputSize = 4 * @divTrunc(paddedSize, 3);
-    const padding = paddedSize - dataSize;
+    // NUL-terminated, and the terminator counts in outputSize
+    const encoded = cmem.alloc(u8, encoder.calcSize(input.len) + 1) catch return null;
+    _ = encoder.encode(encoded[0 .. encoded.len - 1], input);
 
-    estimatedOutputSize += 1;
-
-    const encodedData: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(estimatedOutputSize), 1)));
-    if (encodedData == null) return null;
-
-    var outputCount: usize = 0;
-    var i: c_int = 0;
-    while (i < dataSize) {
-        const octetA: c_uint = data[@intCast(i)];
-        const octetB: c_uint = if ((i + 1) < dataSize) data[@intCast(i + 1)] else 0;
-        const octetC: c_uint = if ((i + 2) < dataSize) data[@intCast(i + 2)] else 0;
-
-        const octetPack: c_uint = (octetA << 16) | (octetB << 8) | octetC;
-
-        encodedData[outputCount + 0] = base64EncodeTable[(octetPack >> 18) & 0x3f];
-        encodedData[outputCount + 1] = base64EncodeTable[(octetPack >> 12) & 0x3f];
-        encodedData[outputCount + 2] = base64EncodeTable[(octetPack >> 6) & 0x3f];
-        encodedData[outputCount + 3] = base64EncodeTable[octetPack & 0x3f];
-        outputCount += 4;
-        i += 3;
-    }
-
-    var p: c_int = 0;
-    while (p < padding) : (p += 1) encodedData[outputCount - @as(usize, @intCast(p)) - 1] = '=';
-
-    encodedData[outputCount] = 0;
-    outputCount += 1;
-
-    if (outputCount != estimatedOutputSize) TraceLog(LOG_WARNING, "BASE64: Output size differs from estimation");
-
-    outputSize.* = estimatedOutputSize;
-    return encodedData;
+    outputSize.* = @intCast(encoded.len);
+    return encoded.ptr;
 }
 
+/// Base64 sextet values; anything outside the alphabet decodes as 0, as in raylib.
+const base64Values: [256]u8 = values: {
+    var table: [256]u8 = @splat(0);
+    for (std.base64.standard_alphabet_chars, 0..) |ch, value| table[ch] = value;
+    break :values table;
+};
+
+/// raylib's own decoder rather than std's: raylib accepts input std rejects
+/// (characters outside the alphabet, missing padding) and logs instead.
 export fn DecodeDataBase64(text: [*c]const u8, outputSize: [*c]c_int) callconv(.c) [*c]u8 {
-    var base64DecodeTable: [256]u8 = std.mem.zeroes([256]u8);
-    {
-        var c: u8 = 'A';
-        while (c <= 'Z') : (c += 1) base64DecodeTable[c] = c - 'A';
-        c = 'a';
-        while (c <= 'z') : (c += 1) base64DecodeTable[c] = c - 'a' + 26;
-        c = '0';
-        while (c <= '9') : (c += 1) base64DecodeTable[c] = c - '0' + 52;
-        base64DecodeTable['+'] = 62;
-        base64DecodeTable['/'] = 63;
-    }
-
     outputSize.* = 0;
-    if (text == null) return null;
+    const encoded = cSpan(text) orelse return null;
 
-    const dataSize: c_int = @intCast(strlen(text));
-    var ending = dataSize - 1;
-    var padding: c_int = 0;
-    while (text[@intCast(ending)] == '=') {
-        padding += 1;
-        ending -= 1;
-    }
-    const estimatedOutputSize = 3 * @divTrunc(dataSize, 4) - padding;
-    const maxOutputSize = 3 * @divTrunc(dataSize, 4);
+    const padding: c_int = @intCast(encoded.len - std.mem.trimEnd(u8, encoded, "=").len);
+    const maxOutputSize: c_int = @intCast(3 * (encoded.len / 4));
+    const estimatedOutputSize = maxOutputSize - padding;
 
-    const decodedData: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(maxOutputSize), 1)));
-    if (decodedData == null) return null;
-
-    var outputCount: c_int = 0;
-    var i: c_int = 0;
-    while (i < dataSize) {
-        if ((i + 2) >= dataSize) {
+    const decoded = cmem.alloc(u8, @intCast(maxOutputSize)) catch return null;
+    var count: usize = 0;
+    var i: usize = 0;
+    while (i < encoded.len) : (i += 4) {
+        if (i + 2 >= encoded.len) {
             TraceLog(LOG_WARNING, "BASE64: Decoding error: Input data size is not valid");
             break;
         }
+        const sextet = struct {
+            fn at(chars: []const u8, index: usize) u32 {
+                if (index >= chars.len or chars[index] == '=') return 0;
+                return base64Values[chars[index]];
+            }
+        }.at;
+        const pack = (@as(u32, base64Values[encoded[i]]) << 18) | (@as(u32, base64Values[encoded[i + 1]]) << 12) |
+            (sextet(encoded, i + 2) << 6) | sextet(encoded, i + 3);
 
-        const sixtetA: c_uint = base64DecodeTable[text[@intCast(i)]];
-        const sixtetB: c_uint = base64DecodeTable[text[@intCast(i + 1)]];
-        const sixtetC: c_uint = if (((i + 2) < dataSize) and (text[@intCast(i + 2)] != '=')) base64DecodeTable[text[@intCast(i + 2)]] else 0;
-        const sixtetD: c_uint = if (((i + 3) < dataSize) and (text[@intCast(i + 3)] != '=')) base64DecodeTable[text[@intCast(i + 3)]] else 0;
-
-        const octetPack: c_uint = (sixtetA << 18) | (sixtetB << 12) | (sixtetC << 6) | sixtetD;
-
-        if ((outputCount + 3) > maxOutputSize) {
+        if (count + 3 > decoded.len) {
             TraceLog(LOG_WARNING, "BASE64: Decoding error: Output data size is too small");
             break;
         }
-
-        decodedData[@intCast(outputCount + 0)] = @intCast((octetPack >> 16) & 0xff);
-        decodedData[@intCast(outputCount + 1)] = @intCast((octetPack >> 8) & 0xff);
-        decodedData[@intCast(outputCount + 2)] = @intCast(octetPack & 0xff);
-        outputCount += 3;
-        i += 4;
+        decoded[count..][0..3].* = .{ @truncate(pack >> 16), @truncate(pack >> 8), @truncate(pack) };
+        count += 3;
     }
 
-    if (estimatedOutputSize != (outputCount - padding)) TraceLog(LOG_WARNING, "BASE64: Decoded size differs from estimation");
+    if (estimatedOutputSize != @as(c_int, @intCast(count)) - padding) TraceLog(LOG_WARNING, "BASE64: Decoded size differs from estimation");
 
     outputSize.* = estimatedOutputSize;
-    return decodedData;
+    return decoded.ptr;
 }
-
-// CRC32 table (computed at comptime, standard reflected polynomial 0xEDB88320)
-const crcTable: [256]u32 = blk: {
-    @setEvalBranchQuota(20000);
-    var t: [256]u32 = undefined;
-    var n: u32 = 0;
-    while (n < 256) : (n += 1) {
-        var c: u32 = n;
-        var k: u32 = 0;
-        while (k < 8) : (k += 1) {
-            c = if ((c & 1) != 0) 0xedb88320 ^ (c >> 1) else (c >> 1);
-        }
-        t[n] = c;
-    }
-    break :blk t;
-};
 
 export fn ComputeCRC32(data: [*c]const u8, dataSize: c_int) callconv(.c) c_uint {
-    var crc: u32 = ~@as(u32, 0);
-    var i: c_int = 0;
-    while (i < dataSize) : (i += 1) {
-        crc = (crc >> 8) ^ crcTable[(data[@intCast(i)] ^ (crc & 0xff))];
-    }
-    return ~crc;
+    return std.hash.Crc32.hash(cBytes(data, dataSize));
 }
 
-inline fn rotl32(x: u32, c: u5) u32 {
-    return (x << c) | (x >> @intCast(32 - @as(u32, c)));
+/// A hash digest as raylib returns it: the hash state words, which MD5
+/// serializes little-endian and the SHA family big-endian.
+fn digestWords(comptime n: usize, digest: [4 * n]u8, endian: std.builtin.Endian) [n]c_uint {
+    var words: [n]c_uint = undefined;
+    for (&words, 0..) |*word, i| word.* = std.mem.readInt(u32, digest[4 * i ..][0..4], endian);
+    return words;
 }
 
-var md5_hash: [4]c_uint = std.mem.zeroes([4]c_uint);
+// raylib returns the hashes in static storage, overwritten by the next call
+var md5Hash: [4]c_uint = undefined;
+var sha1Hash: [5]c_uint = undefined;
+var sha256Hash: [8]c_uint = undefined;
+
 export fn ComputeMD5(data: [*c]const u8, dataSize: c_int) callconv(.c) [*c]c_uint {
-    const r = [_]u5{
-        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
-        5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20,
-        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
-        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
-    };
-    const k = [_]u32{
-        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
-        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
-        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
-        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
-        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
-        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
-        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
-        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
-    };
-
-    var hash = &md5_hash;
-    hash[0] = 0x67452301;
-    hash[1] = 0xefcdab89;
-    hash[2] = 0x98badcfe;
-    hash[3] = 0x10325476;
-
-    const newDataSize: c_int = ((@divTrunc(dataSize + 8, 64) + 1) * 64) - 8;
-
-    const msg: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(newDataSize + 64), 1)));
-    _ = memcpy(@ptrCast(msg), @ptrCast(data), @intCast(dataSize));
-    msg[@intCast(dataSize)] = 128;
-
-    const bitsLen: u32 = @bitCast(@as(i32, @intCast(8 * dataSize)));
-    _ = memcpy(@ptrCast(msg + @as(usize, @intCast(newDataSize))), @ptrCast(&bitsLen), 4);
-
-    var offset: c_int = 0;
-    while (offset < newDataSize) : (offset += 64) {
-        const w: [*c]align(1) u32 = @ptrCast(msg + @as(usize, @intCast(offset)));
-
-        var a: u32 = hash[0];
-        var b: u32 = hash[1];
-        var c: u32 = hash[2];
-        var d: u32 = hash[3];
-
-        var i: usize = 0;
-        while (i < 64) : (i += 1) {
-            var f: u32 = 0;
-            var g: usize = 0;
-            if (i < 16) {
-                f = (b & c) | ((~b) & d);
-                g = i;
-            } else if (i < 32) {
-                f = (d & b) | ((~d) & c);
-                g = (5 * i + 1) % 16;
-            } else if (i < 48) {
-                f = b ^ c ^ d;
-                g = (3 * i + 5) % 16;
-            } else {
-                f = c ^ (b | (~d));
-                g = (7 * i) % 16;
-            }
-
-            const temp = d;
-            d = c;
-            c = b;
-            b = b +% rotl32(a +% f +% k[i] +% w[g], r[i]);
-            a = temp;
-        }
-
-        hash[0] +%= a;
-        hash[1] +%= b;
-        hash[2] +%= c;
-        hash[3] +%= d;
-    }
-
-    RL_FREE(msg);
-    return @ptrCast(hash);
+    const Md5 = std.crypto.hash.Md5;
+    var digest: [Md5.digest_length]u8 = undefined;
+    Md5.hash(cBytes(data, dataSize), &digest, .{});
+    md5Hash = digestWords(4, digest, .little);
+    return &md5Hash;
 }
 
-inline fn rotl32s(x: u32, c: u5) u32 {
-    return (x << c) | (x >> @intCast(32 - @as(u32, c)));
-}
-
-var sha1_hash: [5]c_uint = std.mem.zeroes([5]c_uint);
 export fn ComputeSHA1(data: [*c]const u8, dataSize: c_int) callconv(.c) [*c]c_uint {
-    var hash = &sha1_hash;
-    hash[0] = 0x67452301;
-    hash[1] = 0xEFCDAB89;
-    hash[2] = 0x98BADCFE;
-    hash[3] = 0x10325476;
-    hash[4] = 0xC3D2E1F0;
-
-    const newDataSize: c_int = ((@divTrunc(dataSize + 8, 64) + 1) * 64);
-
-    const msg: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(newDataSize), 1)));
-    _ = memcpy(@ptrCast(msg), @ptrCast(data), @intCast(dataSize));
-    msg[@intCast(dataSize)] = 128;
-
-    const bitsLen: u64 = 8 *% @as(u64, @intCast(dataSize));
-    msg[@intCast(newDataSize - 1)] = @truncate(bitsLen);
-    msg[@intCast(newDataSize - 2)] = @truncate(bitsLen >> 8);
-    msg[@intCast(newDataSize - 3)] = @truncate(bitsLen >> 16);
-    msg[@intCast(newDataSize - 4)] = @truncate(bitsLen >> 24);
-    msg[@intCast(newDataSize - 5)] = @truncate(bitsLen >> 32);
-    msg[@intCast(newDataSize - 6)] = @truncate(bitsLen >> 40);
-    msg[@intCast(newDataSize - 7)] = @truncate(bitsLen >> 48);
-    msg[@intCast(newDataSize - 8)] = @truncate(bitsLen >> 56);
-
-    var offset: c_int = 0;
-    while (offset < newDataSize) : (offset += 64) {
-        var w: [80]u32 = std.mem.zeroes([80]u32);
-        var i: usize = 0;
-        while (i < 16) : (i += 1) {
-            const o: usize = @as(usize, @intCast(offset)) + i * 4;
-            w[i] = (@as(u32, msg[o + 0]) << 24) | (@as(u32, msg[o + 1]) << 16) | (@as(u32, msg[o + 2]) << 8) | (@as(u32, msg[o + 3]));
-        }
-        i = 16;
-        while (i < 80) : (i += 1) w[i] = rotl32s(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
-
-        var a: u32 = hash[0];
-        var b: u32 = hash[1];
-        var c: u32 = hash[2];
-        var d: u32 = hash[3];
-        var e: u32 = hash[4];
-
-        i = 0;
-        while (i < 80) : (i += 1) {
-            var f: u32 = 0;
-            var k: u32 = 0;
-            if (i < 20) {
-                f = (b & c) | ((~b) & d);
-                k = 0x5A827999;
-            } else if (i < 40) {
-                f = b ^ c ^ d;
-                k = 0x6ED9EBA1;
-            } else if (i < 60) {
-                f = (b & c) | (b & d) | (c & d);
-                k = 0x8F1BBCDC;
-            } else {
-                f = b ^ c ^ d;
-                k = 0xCA62C1D6;
-            }
-
-            const temp = rotl32s(a, 5) +% f +% e +% k +% w[i];
-            e = d;
-            d = c;
-            c = rotl32s(b, 30);
-            b = a;
-            a = temp;
-        }
-
-        hash[0] +%= a;
-        hash[1] +%= b;
-        hash[2] +%= c;
-        hash[3] +%= d;
-        hash[4] +%= e;
-    }
-
-    RL_FREE(msg);
-    return @ptrCast(hash);
+    const Sha1 = std.crypto.hash.Sha1;
+    var digest: [Sha1.digest_length]u8 = undefined;
+    Sha1.hash(cBytes(data, dataSize), &digest, .{});
+    sha1Hash = digestWords(5, digest, .big);
+    return &sha1Hash;
 }
 
-inline fn rotr32(x: u32, c: u5) u32 {
-    return (x >> c) | (x << @intCast(32 - @as(u32, c)));
-}
-inline fn sha256_a0(x: u32) u32 {
-    return rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> 3);
-}
-inline fn sha256_a1(x: u32) u32 {
-    return rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> 10);
-}
-
-var sha256_hash: [8]c_uint = std.mem.zeroes([8]c_uint);
 export fn ComputeSHA256(data: [*c]const u8, dataSize: c_int) callconv(.c) [*c]c_uint {
-    const k = [_]u32{
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-    };
-
-    var hash = &sha256_hash;
-    hash[0] = 0x6A09e667;
-    hash[1] = 0xbb67ae85;
-    hash[2] = 0x3c6ef372;
-    hash[3] = 0xa54ff53a;
-    hash[4] = 0x510e527f;
-    hash[5] = 0x9b05688c;
-    hash[6] = 0x1f83d9ab;
-    hash[7] = 0x5be0cd19;
-
-    const bitLen: u64 = 8 *% @as(u64, @intCast(dataSize));
-    var paddedSize: u64 = @as(u64, @intCast(dataSize)) + @sizeOf(u64); // room for the 64-bit message length
-    paddedSize += (64 - (paddedSize % 64));
-    const buffer: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(paddedSize), 1)));
-
-    _ = memcpy(@ptrCast(buffer), @ptrCast(data), @intCast(dataSize));
-    buffer[@intCast(dataSize)] = 0x80;
-    var ib: usize = 1;
-    while (ib <= @sizeOf(u64)) : (ib += 1) {
-        buffer[@intCast(paddedSize - @sizeOf(u64) + (ib - 1))] = @truncate((bitLen >> @intCast(8 * (@sizeOf(u64) - ib))) & 0xFF);
-    }
-
-    var blockN: u64 = 0;
-    while (blockN < paddedSize / 64) : (blockN += 1) {
-        var a: u32 = hash[0];
-        var b: u32 = hash[1];
-        var c: u32 = hash[2];
-        var d: u32 = hash[3];
-        var e: u32 = hash[4];
-        var f: u32 = hash[5];
-        var g: u32 = hash[6];
-        var h: u32 = hash[7];
-
-        const block = buffer + @as(usize, @intCast(blockN * 64));
-        var w: [64]u32 = std.mem.zeroes([64]u32);
-        var i: usize = 0;
-        while (i < 16) : (i += 1) {
-            w[i] = (@as(u32, block[i * 4 + 0]) << 24) | (@as(u32, block[i * 4 + 1]) << 16) | (@as(u32, block[i * 4 + 2]) << 8) | (@as(u32, block[i * 4 + 3]));
-        }
-        var t: usize = 16;
-        while (t < 64) : (t += 1) w[t] = sha256_a1(w[t - 2]) +% w[t - 7] +% sha256_a0(w[t - 15]) +% w[t - 16];
-
-        t = 0;
-        while (t < 64) : (t += 1) {
-            const e1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
-            const ch = (e & f) ^ (~e & g);
-            const t1 = h +% e1 +% ch +% k[t] +% w[t];
-            const e0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
-            const maj = (a & b) ^ (a & c) ^ (b & c);
-            const t2 = e0 +% maj;
-
-            h = g;
-            g = f;
-            f = e;
-            e = d +% t1;
-            d = c;
-            c = b;
-            b = a;
-            a = t1 +% t2;
-        }
-
-        hash[0] +%= a;
-        hash[1] +%= b;
-        hash[2] +%= c;
-        hash[3] +%= d;
-        hash[4] +%= e;
-        hash[5] +%= f;
-        hash[6] +%= g;
-        hash[7] +%= h;
-    }
-
-    RL_FREE(buffer);
-    return @ptrCast(hash);
+    const Sha256 = std.crypto.hash.sha2.Sha256;
+    var digest: [Sha256.digest_length]u8 = undefined;
+    Sha256.hash(cBytes(data, dataSize), &digest, .{});
+    sha256Hash = digestWords(8, digest, .big);
+    return &sha256Hash;
 }
 
 //----------------------------------------------------------------------------------
@@ -2418,82 +2115,59 @@ export fn ComputeSHA256(data: [*c]const u8, dataSize: c_int) callconv(.c) [*c]c_
 //----------------------------------------------------------------------------------
 
 export fn LoadAutomationEventList(fileName: [*c]const u8) callconv(.c) AutomationEventList {
-    var list = std.mem.zeroes(AutomationEventList);
-
-    list.events = @ptrCast(@alignCast(RL_CALLOC(MAX_AUTOMATION_EVENTS, @sizeOf(AutomationEvent))));
-    list.capacity = MAX_AUTOMATION_EVENTS;
+    const events = c_allocator.alloc(AutomationEvent, MAX_AUTOMATION_EVENTS) catch
+        return .{ .capacity = 0, .count = 0, .events = null };
+    @memset(events, std.mem.zeroes(AutomationEvent));
+    var list: AutomationEventList = .{ .capacity = MAX_AUTOMATION_EVENTS, .count = 0, .events = events.ptr };
 
     if (fileName == null) {
         TraceLog(LOG_INFO, "AUTOMATION: New empty events list loaded successfully");
-    } else {
-        const raeFile = fopen(fileName, "rt");
-        if (raeFile != null) {
-            var counter: c_uint = 0;
-            var buffer: [256]u8 = std.mem.zeroes([256]u8);
-            var eventDesc: [64]u8 = std.mem.zeroes([64]u8);
-
-            var result = fgets(&buffer, 256, raeFile);
-            if (result != @as([*c]u8, &buffer)) TraceLog(LOG_WARNING, "AUTOMATION: [%s] Issue reading line to buffer", fileName);
-
-            while (feof(raeFile) == 0) {
-                switch (buffer[0]) {
-                    'c' => _ = sscanf(&buffer, "c %i", &list.count),
-                    'e' => if (counter < list.capacity) {
-                        _ = sscanf(&buffer, "e %d %d %d %d %d %d %63[^\n]s", &list.events[counter].frame, &list.events[counter].type, &list.events[counter].params[0], &list.events[counter].params[1], &list.events[counter].params[2], &list.events[counter].params[3], &eventDesc);
-                        counter += 1;
-                    } else TraceLog(LOG_WARNING, "AUTOMATION: Event goes beyond automated list capacity (MAX: %u): %s", list.capacity, &buffer),
-                    else => {},
-                }
-                result = fgets(&buffer, 256, raeFile);
-                if (result != @as([*c]u8, &buffer)) TraceLog(LOG_WARNING, "AUTOMATION: [%s] Issue reading line to buffer", fileName);
-            }
-
-            if (counter != list.count) {
-                TraceLog(LOG_WARNING, "AUTOMATION: Events read from file [%i] do not mach event count specified [%i]", counter, list.count);
-                list.count = counter;
-            }
-
-            _ = fclose(raeFile);
-            TraceLog(LOG_INFO, "AUTOMATION: Events file loaded successfully");
-        }
-        TraceLog(LOG_INFO, "AUTOMATION: Events loaded from file: %i", list.count);
+        return list;
     }
 
+    // Read directly, as raylib does: the user file callbacks are not involved
+    var empty: [0]u8 = .{};
+    const contents: fs.Contents = fs.loadFile(io(), c_allocator, std.mem.span(fileName)) catch |err| switch (err) {
+        error.Empty => .{ .data = &empty, .read = 0 },
+        else => {
+            TraceLog(LOG_INFO, "AUTOMATION: Events loaded from file: %i", list.count);
+            return list;
+        },
+    };
+    defer c_allocator.free(contents.data);
+
+    const parsed = automation.parse(contents.data[0..contents.read], events, AutomationLog{ .fileName = fileName });
+    if (parsed.read != parsed.declared) {
+        TraceLog(LOG_WARNING, "AUTOMATION: Events read from file [%i] do not mach event count specified [%i]", parsed.read, parsed.declared);
+    }
+    list.count = parsed.read;
+    TraceLog(LOG_INFO, "AUTOMATION: Events file loaded successfully");
+    TraceLog(LOG_INFO, "AUTOMATION: Events loaded from file: %i", list.count);
     return list;
 }
 
+/// raylib's log lines for `automation.parse`.
+const AutomationLog = struct {
+    fileName: [*c]const u8,
+
+    pub fn readIssue(log: AutomationLog) void {
+        TraceLog(LOG_WARNING, "AUTOMATION: [%s] Issue reading line to buffer", log.fileName);
+    }
+
+    pub fn beyondCapacity(_: AutomationLog, line: [:0]const u8) void {
+        TraceLog(LOG_WARNING, "AUTOMATION: Event goes beyond automated list capacity (MAX: %u): %s", @as(c_uint, MAX_AUTOMATION_EVENTS), line.ptr);
+    }
+};
+
 export fn UnloadAutomationEventList(list: AutomationEventList) callconv(.c) void {
-    RL_FREE(list.events);
+    cmem.free(list.events);
 }
 
 export fn ExportAutomationEventList(list: AutomationEventList, fileName: [*c]const u8) callconv(.c) bool {
-    var result = false;
-
-    const txtData: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(256 * list.count + 2048, 1)));
-
-    var byteCount: c_int = 0;
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# Automation events exporter v1.0 - raylib automation events list\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#    c <events_count>\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#    e <frame> <event_type> <param0> <param1> <param2> <param3> // <event_type_name>\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# more info and bugs-report:  github.com/raysan5/raylib\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# feedback and support:       ray[at]raylib.com\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# Copyright (c) 2023-2026 Ramon Santamaria (@raysan5)\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#\n\n");
-
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "c %i\n", list.count);
-    var i: c_uint = 0;
-    while (i < list.count) : (i += 1) {
-        byteCount += snprintf(txtData + @as(usize, @intCast(byteCount)), 256, "e %i %i %i %i %i %i // Event: %s\n", list.events[i].frame, list.events[i].type, list.events[i].params[0], list.events[i].params[1], list.events[i].params[2], list.events[i].params[3], autoEventTypeName[list.events[i].type]);
-    }
-
-    result = SaveFileText(fileName, txtData);
-    RL_FREE(txtData);
-
-    return result;
+    const events: []const AutomationEvent = if (list.count == 0) &.{} else list.events[0..list.count];
+    const text = automation.format(c_allocator, events) catch return false;
+    defer c_allocator.free(text);
+    return SaveFileText(fileName, text.ptr);
 }
 
 export fn SetAutomationEventList(list: ?*AutomationEventList) callconv(.c) void {
@@ -2698,7 +2372,7 @@ export fn GetGamepadAxisMovement(gamepad: c_int, axis: c_int) callconv(.c) f32 {
     var value: f32 = if ((axis == GAMEPAD_AXIS_LEFT_TRIGGER) or (axis == GAMEPAD_AXIS_RIGHT_TRIGGER)) -1.0 else 0.0;
 
     if ((gamepad >= 0) and (gamepad < MAX_GAMEPADS) and CORE.Input.Gamepad.ready[@intCast(gamepad)] and (axis < MAX_GAMEPAD_AXES)) {
-        const movement = if (value < 0.0) CORE.Input.Gamepad.axisState[@intCast(gamepad)][@intCast(axis)] else fabsf(CORE.Input.Gamepad.axisState[@intCast(gamepad)][@intCast(axis)]);
+        const movement = if (value < 0.0) CORE.Input.Gamepad.axisState[@intCast(gamepad)][@intCast(axis)] else @abs(CORE.Input.Gamepad.axisState[@intCast(gamepad)][@intCast(axis)]);
         if (movement > value) value = CORE.Input.Gamepad.axisState[@intCast(gamepad)][@intCast(axis)];
     }
 
@@ -2776,7 +2450,7 @@ pub export fn SetMouseScale(scaleX: f32, scaleY: f32) callconv(.c) void {
 
 export fn GetMouseWheelMove() callconv(.c) f32 {
     var result: f32 = 0.0;
-    if (fabsf(CORE.Input.Mouse.currentWheelMove.x) > fabsf(CORE.Input.Mouse.currentWheelMove.y)) result = CORE.Input.Mouse.currentWheelMove.x else result = CORE.Input.Mouse.currentWheelMove.y;
+    if (@abs(CORE.Input.Mouse.currentWheelMove.x) > @abs(CORE.Input.Mouse.currentWheelMove.y)) result = CORE.Input.Mouse.currentWheelMove.x else result = CORE.Input.Mouse.currentWheelMove.y;
     return result;
 }
 
@@ -2818,7 +2492,7 @@ export fn GetTouchPointCount() callconv(.c) c_int {
 // Initialize hi-resolution timer
 pub fn InitTimer() void {
     var now = std.mem.zeroes(timespec);
-    if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+    if (std.c.clock_gettime(.MONOTONIC, &now) == 0) {
         CORE.Time.base = @as(c_ulonglong, @intCast(now.sec)) * 1000000000 + @as(c_ulonglong, @intCast(now.nsec));
     } else TraceLog(LOG_WARNING, "TIMER: Hi-resolution timer not available");
 

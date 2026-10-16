@@ -14,9 +14,19 @@
     "calls": 0,
     "cptrs": 2
   },
+  "src/automation.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
   "src/c_va.zig": {
     "externs": 0,
     "calls": 0,
+    "cptrs": 0
+  },
+  "src/cmem.zig": {
+    "externs": 0,
+    "calls": 3,
     "cptrs": 0
   },
   "src/fs.zig": {
@@ -36,13 +46,13 @@
   },
   "src/platforms/rcore_desktop_glfw.zig": {
     "externs": 0,
-    "calls": 17,
-    "cptrs": 30
+    "calls": 0,
+    "cptrs": 27
   },
   "src/platforms/rcore_web.zig": {
     "externs": 0,
-    "calls": 8,
-    "cptrs": 31
+    "calls": 0,
+    "cptrs": 30
   },
   "src/raudio.zig": {
     "externs": 9,
@@ -70,9 +80,9 @@
     "cptrs": 12
   },
   "src/rcore.zig": {
-    "externs": 19,
-    "calls": 73,
-    "cptrs": 169
+    "externs": 2,
+    "calls": 2,
+    "cptrs": 142
   },
   "src/rgestures.zig": {
     "externs": 0,
