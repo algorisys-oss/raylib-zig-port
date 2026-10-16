@@ -68,15 +68,20 @@ const c_defines = [_][]const u8{
     "-fno-sanitize=alignment",
 };
 
+/// Translated but only compiled, not pixel-gated: the C original is
+/// self-nondeterministic under CPU load (see test/examples.list).
+const api_examples_build_only = [_][]const u8{
+    "audio/audio_mixed_processor",
+    "audio/audio_stream_effects",
+};
+
 /// Upstream examples translated to the idiomatic Zig API (examples/zig/),
 /// gated by `zig build apiexamples` against the original C example.
 const api_examples = [_][]const u8{
-    "audio/audio_mixed_processor",
     "audio/audio_music_stream",
     "audio/audio_sound_loading",
     "audio/audio_sound_multi",
     "audio/audio_sound_positioning",
-    "audio/audio_stream_effects",
     "core/core_2d_camera",
     "core/core_2d_camera_mouse_zoom",
     "core/core_2d_camera_platformer",
@@ -194,6 +199,7 @@ const api_examples = [_][]const u8{
     "shapes/shapes_logo_raylib_anim",
     "shapes/shapes_math_angle_rotation",
     "shapes/shapes_mouse_trail",
+    "shapes/shapes_outlines_thickness",
     "shapes/shapes_penrose_tile",
     "shapes/shapes_polygon_lines",
     "shapes/shapes_rectangle_advanced",
@@ -409,6 +415,54 @@ fn linkExe(
     return b.addExecutable(.{ .name = name, .root_module = mod });
 }
 
+/// The `raygui` binding module over `api` (raygui is linked as C: compiled
+/// here with the same flags exdiff uses for upstream C examples, so a Zig
+/// program and its C counterpart run identical raygui code).
+fn rayguiModule(b: *std.Build, api: *std.Build.Module) *std.Build.Module {
+    const mod = b.createModule(.{ .root_source_file = b.path("src/raygui/raygui.zig") });
+    const c_mod = b.createModule(.{ .root_source_file = b.path("src/raygui/c.zig") });
+    c_mod.addImport("raygui", mod);
+    mod.addImport("raygui_c", c_mod);
+    mod.addImport("raylib", api);
+    mod.addIncludePath(b.path("vendor/raygui"));
+    mod.addIncludePath(b.path("vendor/raylib/src"));
+    mod.addCSourceFile(.{
+        .file = b.path("src/c/raygui_impl.c"),
+        .flags = &.{ "-std=gnu99", "-DPLATFORM_DESKTOP", "-ffp-contract=off" },
+    });
+    return mod;
+}
+
+/// What every gated Zig-API example links against.
+const ApiGate = struct {
+    api: *std.Build.Module,
+    raygui: *std.Build.Module,
+    lib: *std.Build.Step.Compile,
+    target: std.Build.ResolvedTarget,
+    optimize: ?std.builtin.Optimize,
+};
+
+/// One Zig-API example executable (examples/zig/<entry>.zig) on the gate
+/// API instance plus the exdiff determinism hooks.
+fn apiExample(b: *std.Build, gate: ApiGate, entry: []const u8, name: []const u8) *std.Build.Step.Compile {
+    const mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("examples/zig/{s}.zig", .{entry})),
+        .target = gate.target,
+        .optimize = gate.optimize,
+        .link_libc = true,
+    });
+    mod.addImport("raylib", gate.api);
+    mod.addImport("raygui", gate.raygui);
+    mod.addIncludePath(b.path("vendor/raylib/src"));
+    mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &.{"-std=c99"} });
+    mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+    mod.linkLibrary(gate.lib);
+    for (sys_libs) |l| mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
+    const exe = b.addExecutable(.{ .name = name, .root_module = mod });
+    exe.use_llvm = true;
+    return exe;
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -447,6 +501,8 @@ pub fn build(b: *std.Build) void {
     api_mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
     api_mod.linkLibrary(lib);
     for (sys_libs) |l| api_mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
+    // `raygui` module — Zig binding for raygui (vendor/raygui, linked as C).
+    b.modules.put(b.graph.arena, b.dupe("raygui"), rayguiModule(b, api_mod)) catch @panic("OOM");
 
     // `zig build apitest` — API structs layout-identical to raylib.h (via
     // translate-c), every wrapper compiles, enum/flag/color values match.
@@ -462,6 +518,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
         test_mod.addImport("raylib", api_mod);
+        test_mod.addImport("raygui", b.modules.get("raygui").?);
         test_mod.addImport("c_raylib", raylib_h.createModule());
         const rlgl_h = b.addTranslateC(.{
             .root_source_file = b.path("vendor/raylib/src/rlgl.h"),
@@ -491,6 +548,13 @@ pub fn build(b: *std.Build) void {
         const gate_c = b.createModule(.{ .root_source_file = b.path("src/api/c_exdiff.zig") });
         gate_c.addImport("raylib", gate_api);
         gate_api.addImport("raylib_c", gate_c);
+        const gate: ApiGate = .{
+            .api = gate_api,
+            .raygui = rayguiModule(b, gate_api),
+            .lib = lib,
+            .target = target,
+            .optimize = optimize,
+        };
 
         const step = b.step("apiexamples", "Zig-API example translations vs upstream C examples (pixel diff)");
         const list = b.addWriteFiles();
@@ -501,28 +565,20 @@ pub fn build(b: *std.Build) void {
             const name = entry[category.len + 1 ..];
             list_text.appendSlice(b.allocator, b.fmt("{s}/{s}.c\n", .{ category, name })) catch @panic("OOM");
 
-            const mod = b.createModule(.{
-                .root_source_file = b.path(b.fmt("examples/zig/{s}.zig", .{entry})),
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            });
-            mod.addImport("raylib", gate_api);
-            mod.addIncludePath(b.path("vendor/raylib/src"));
-            mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &.{"-std=c99"} });
-            mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
-            mod.linkLibrary(lib);
-            for (sys_libs) |l| mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
-            const exe = b.addExecutable(.{ .name = name, .root_module = mod });
-            exe.use_llvm = true;
+            const exe = apiExample(b, gate, entry, name);
             _ = bin_dir.addCopyFile(exe.getEmittedBin(), name);
+        }
+        for (api_examples_build_only) |entry| {
+            const name = entry[std.mem.indexOfScalar(u8, entry, '/').? + 1 ..];
+            step.dependOn(&apiExample(b, gate, entry, name).step);
         }
         const list_file = list.add("apiexamples.list", list_text.items);
 
         const diff = b.addSystemCommand(&.{"tools/exdiff.sh"});
         diff.addArtifactArg(oracle);
         diff.addArtifactArg(lib);
-        diff.addArg(""); // no name filter
+        // -Dapi-filter=<substring>: only diff matching examples (all are still built).
+        diff.addArg(b.option([]const u8, "api-filter", "apiexamples: only diff examples whose path contains this") orelse "");
         diff.addFileArg(list_file);
         diff.addDirectoryArg(bin_dir.getDirectory()); // Zig-API binaries, one per example
         diff.has_side_effects = true;

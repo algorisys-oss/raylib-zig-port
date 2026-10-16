@@ -13,6 +13,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const c = @import("c_raylib");
 const c_rlgl = @import("c_rlgl");
+const gui = @import("raygui");
 
 test "API structs are layout-identical to raylib.h" {
     var checked: usize = 0;
@@ -52,6 +53,7 @@ test "all API wrappers compile" {
     std.testing.refAllDecls(rl);
     std.testing.refAllDecls(rl.math);
     std.testing.refAllDecls(rl.gl);
+    std.testing.refAllDecls(gui);
 }
 
 test "generic wrappers instantiate (refAllDecls skips anytype functions)" {
