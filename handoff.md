@@ -4,8 +4,8 @@
 
 ## 1. State right now
 
-- **Round 2 (idiomatic Zig internals) is complete** and merged on local
-  `main`; **not pushed** (needs the owner's go-ahead). Worktrees and the
+- **Round 2 (idiomatic Zig internals) is complete**, merged on `main` and
+  **pushed** (origin/main 36137d1 + this handoff, 2026-10-16 22:45). Worktrees and the
   `idiom/*` branches are removed (all merged).
 - idiomaudit: libc externs / calls / `[*c]` = **6 / 9 / 1517** (start of day
   90 / 978 / 2136). Remaining C is documented: vprintf/vsnprintf (C printf
@@ -33,8 +33,8 @@
 
 ## 3. Next step on resume
 
-1. Owner: send the reviewer reply (drafted in the session), decide on pushing
-   main, and whether to report the BMFont use-after-free upstream.
+1. Owner: send the reviewer reply (docs/migration-status.md, appendix) and
+   decide whether to report the BMFont use-after-free upstream.
 2. Phase W (web) resume list: textures, then text in `web_examples`; GLSL
    version constant then shaders; per-example .data; example manifest;
    Asyncify vs frame callback.
