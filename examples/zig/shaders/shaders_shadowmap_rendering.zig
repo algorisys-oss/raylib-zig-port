@@ -59,7 +59,7 @@ pub fn main() !void {
     cube.materials.?[0].shader = shadow_shader;
     const robot = try rl.loadModel("resources/models/robot.glb");
     defer rl.unloadModel(robot);
-    for (robot.materials.?[0..@intCast(robot.materialCount)]) |*material| material.shader = shadow_shader;
+    for (robot.materialSlice()) |*material| material.shader = shadow_shader;
 
     const anims = try rl.loadModelAnimations("resources/models/robot.glb");
     defer rl.unloadModelAnimations(anims);

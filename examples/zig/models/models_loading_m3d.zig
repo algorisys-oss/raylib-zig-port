@@ -79,7 +79,7 @@ pub fn main() !void {
             rl.drawGrid(10, 1.0);
         }
 
-        rl.drawText(rl.textFormat("Current animation: {s}", .{std.mem.sliceTo(&anim.name, 0)}), 10, 10, 20, .light_gray);
+        rl.drawText(rl.textFormat("Current animation: {s}", .{anim.nameSlice()}), 10, 10, 20, .light_gray);
         rl.drawText("Press SPACE to draw skeleton", 10, 40, 20, .maroon);
         rl.drawText("(c) CesiumMan model by KhronosGroup", rl.getScreenWidth() - 210, rl.getScreenHeight() - 20, 10, .gray);
     }

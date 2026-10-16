@@ -56,7 +56,7 @@ pub fn main() !void {
     var bone_socket_index: [bone_sockets]?usize = @splat(null);
     const skeleton = character_model.skeleton;
     for (skeleton.bones.?[0..skeleton.boneCount], 0..) |bone, i| {
-        const name = std.mem.sliceTo(&bone.name, 0);
+        const name = bone.nameSlice();
         for (socket_bone_names, &bone_socket_index) |socket_name, *index| {
             if (std.mem.eql(u8, name, socket_name)) {
                 index.* = i;

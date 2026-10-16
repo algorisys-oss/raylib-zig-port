@@ -85,7 +85,7 @@ pub fn main() !void {
 
     // Assign out lighting shader to model
     for (models) |model| {
-        for (model.materials.?[0..@intCast(model.materialCount)]) |*material| material.shader = shader;
+        for (model.materialSlice()) |*material| material.shader = shader;
     }
 
     // Create lights

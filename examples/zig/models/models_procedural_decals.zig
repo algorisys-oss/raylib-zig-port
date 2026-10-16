@@ -103,7 +103,7 @@ pub fn main() !void {
         var collision = std.mem.zeroes(rl.RayCollision);
 
         if (rl.getRayCollisionBox(ray, model_bbox).hit and decal_count < max_decals) {
-            for (model.meshes.?[0..@intCast(model.meshCount)]) |mesh| {
+            for (model.meshSlice()) |mesh| {
                 const mesh_hit = rl.getRayCollisionMesh(ray, mesh, model.transform);
                 if (mesh_hit.hit and (!collision.hit or mesh_hit.distance < collision.distance)) collision = mesh_hit;
             }
@@ -151,7 +151,7 @@ pub fn main() !void {
         // Vertex/triangle counts: base model vs total once decal geometry is added
         var base_vertices: i32 = 0;
         var base_triangles: i32 = 0;
-        for (model.meshes.?[0..@intCast(model.meshCount)]) |mesh| {
+        for (model.meshSlice()) |mesh| {
             base_vertices += mesh.vertexCount;
             base_triangles += mesh.triangleCount;
         }
@@ -215,7 +215,7 @@ fn genMeshDecal(gpa: std.mem.Allocator, model: rl.Model, projection: rl.Matrix, 
 
     // Gather triangles that land anywhere near the decal box; this is a loose, cheap
     // pre-filter meant to skip most of the model, the precise clip happens below
-    for (model.meshes.?[0..@intCast(model.meshCount)]) |mesh| {
+    for (model.meshSlice()) |mesh| {
         const vertices = mesh.vertices.?;
 
         for (0..@intCast(mesh.triangleCount)) |tri| {

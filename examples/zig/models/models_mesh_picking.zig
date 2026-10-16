@@ -113,7 +113,7 @@ pub fn main() !void {
             hit_object_name = "Box";
 
             // Check ray collision against model meshes, stopping at the first mesh hit
-            for (tower.meshes.?[0..@intCast(tower.meshCount)]) |mesh| {
+            for (tower.meshSlice()) |mesh| {
                 // NOTE: We consider the model.transform for the collision check but
                 // it can be checked against any transform Matrix, used when checking against same
                 // model drawn multiple times with multiple transforms

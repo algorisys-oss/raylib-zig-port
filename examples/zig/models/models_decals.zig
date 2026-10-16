@@ -104,7 +104,7 @@ pub fn main() !void {
         if (box_hit_info.hit and decal_count < max_decals) {
             // Check ray collision against model meshes
             var mesh_hit_info = std.mem.zeroes(rl.RayCollision);
-            for (model.meshes.?[0..@intCast(model.meshCount)]) |mesh| {
+            for (model.meshSlice()) |mesh| {
                 // NOTE: We consider the model.transform for the collision check but
                 // it can be checked against any transform Matrix, used when checking against same
                 // model drawn multiple times with multiple transforms
@@ -176,7 +176,7 @@ pub fn main() !void {
         var vertex_count: i32 = 0;
         var triangle_count: i32 = 0;
 
-        for (model.meshes.?[0..@intCast(model.meshCount)]) |mesh| {
+        for (model.meshSlice()) |mesh| {
             vertex_count += mesh.vertexCount;
             triangle_count += mesh.triangleCount;
         }
@@ -258,7 +258,7 @@ const DecalBuilder = struct {
         var list_index: usize = 0;
 
         // First pass, just get any triangle inside the bounding box (for each mesh of the model)
-        for (target.meshes.?[0..@intCast(target.meshCount)]) |mesh| {
+        for (target.meshSlice()) |mesh| {
             const vertices = mesh.vertices.?;
             for (0..@intCast(mesh.triangleCount)) |tri| {
                 var triangle: [3]rl.Vector3 = undefined;

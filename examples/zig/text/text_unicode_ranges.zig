@@ -156,7 +156,7 @@ pub fn main() !void {
 /// Add codepoint range to existing font, reloading it from `path` with the
 /// current glyphs plus the provided range (regenerating font image and texture)
 fn addCodepointRange(allocator: std.mem.Allocator, font: *rl.Font, path: [:0]const u8, range: Range) !void {
-    const current_glyphs = font.glyphs.?[0..@intCast(font.glyphCount)];
+    const current_glyphs = font.glyphSlice();
     const range_size: usize = @intCast(range.stop - range.start + 1);
 
     const updated_codepoints = try allocator.alloc(i32, current_glyphs.len + range_size);

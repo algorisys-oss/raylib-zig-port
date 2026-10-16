@@ -71,7 +71,7 @@ pub fn main() !void {
             rl.drawGrid(10, 1.0);
         }
 
-        rl.drawText(rl.textFormat("Current animation: {s}", .{std.mem.sliceTo(&anim.name, 0)}), 10, 40, 20, .maroon);
+        rl.drawText(rl.textFormat("Current animation: {s}", .{anim.nameSlice()}), 10, 40, 20, .maroon);
         rl.drawText("Use the LEFT/RIGHT keys to switch animation", 10, 10, 20, .gray);
     }
 }

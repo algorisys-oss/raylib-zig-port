@@ -79,7 +79,7 @@ pub fn main() !void {
             rl.drawGrid(10, 1.0);
         }
 
-        rl.drawText(rl.textFormat("Current animation: {s}", .{std.mem.sliceTo(&anim.name, 0)}), 10, 10, 20, .maroon);
+        rl.drawText(rl.textFormat("Current animation: {s}", .{anim.nameSlice()}), 10, 10, 20, .maroon);
         rl.drawText(rl.textFormat("Animation speed: {d:.2}", .{anim_speed}), 10, 40, 20, .maroon);
         rl.drawText("Use left and right arrow keys to change current animation", 10, screen_height - 34, 10, .black);
         rl.drawText("Use up and down arrow keys to change animation speed", 10, screen_height - 20, 10, .black);

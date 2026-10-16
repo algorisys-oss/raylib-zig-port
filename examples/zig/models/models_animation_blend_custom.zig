@@ -101,8 +101,8 @@ pub fn main() !void {
         }
 
         // Draw UI
-        rl.drawText(rl.textFormat("ANIM 0: {s}", .{std.mem.sliceTo(&anim0.name, 0)}), 10, 10, 20, .gray);
-        rl.drawText(rl.textFormat("ANIM 1: {s}", .{std.mem.sliceTo(&anim1.name, 0)}), 10, 40, 20, .gray);
+        rl.drawText(rl.textFormat("ANIM 0: {s}", .{anim0.nameSlice()}), 10, 10, 20, .gray);
+        rl.drawText(rl.textFormat("ANIM 1: {s}", .{anim1.nameSlice()}), 10, 40, 20, .gray);
         rl.drawText(
             rl.textFormat("[SPACE] Toggle blending mode: {s}", .{if (upper_body_blend) "Upper/Lower Body Blending" else "Uniform Blending"}),
             10,
@@ -167,7 +167,7 @@ fn updateModelAnimationBoneCustom(model: *rl.Model, anim0: rl.ModelAnimation, fr
 
         // If upper body blending is enabled, use different blend factors for upper vs lower body
         if (upper_body_blend) {
-            const bone_name = std.mem.sliceTo(&bones[bone_index].name, 0);
+            const bone_name = bones[bone_index].nameSlice();
 
             // Upper body: use anim1 (attack), Lower body: use anim0 (walk)
             // blend = 0.0 means full anim0 (walk), 1.0 means full anim1 (attack)
@@ -199,7 +199,7 @@ fn updateModelAnimationBoneCustom(model: *rl.Model, anim0: rl.ModelAnimation, fr
 
     // CPU skinning, updates CPU buffers and uploads them to GPU (if available)
     // NOTE: Fallback in case GPU skinning is not supported or enabled
-    for (model.meshes.?[0..@intCast(model.meshCount)]) |mesh| {
+    for (model.meshSlice()) |mesh| {
         // Skip if missing bone data or missing anim buffers initialization
         const bone_weights = mesh.boneWeights orelse continue;
         const bone_indices = mesh.boneIndices orelse continue;
