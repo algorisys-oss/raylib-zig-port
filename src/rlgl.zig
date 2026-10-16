@@ -626,9 +626,8 @@ export fn rlVertex3f(x: f32, y: f32, z: f32) callconv(.c) void {
     }
 
     const batch = RLGL.currentBatch;
-    const vbuf = &batch.vertexBuffer[@intCast(batch.currentBuffer)];
 
-    if (RLGL.State.vertexCounter > (vbuf.elementCount * 4 - 4)) {
+    if (RLGL.State.vertexCounter > (batch.vertexBuffer[@intCast(batch.currentBuffer)].elementCount * 4 - 4)) {
         const dc = batch.draws[@intCast(batch.drawCounter - 1)];
         if ((dc.mode == RL_LINES) and (@rem(dc.vertexCount, 2) == 0)) {
             _ = rlCheckRenderBatchLimit(2 + 1);
@@ -639,6 +638,8 @@ export fn rlVertex3f(x: f32, y: f32, z: f32) callconv(.c) void {
         }
     }
 
+    // The check above may have flushed the batch and moved to its next buffer
+    const vbuf = &batch.vertexBuffer[@intCast(batch.currentBuffer)];
     const vc: usize = @intCast(RLGL.State.vertexCounter);
 
     // Add vertices
@@ -1392,29 +1393,29 @@ export fn rlLoadRenderBatch(numBuffers: c_int, bufferElements: c_int) callconv(.
         gl.glad_glGenBuffers.?(1, &vb.vboId[0]);
         gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[0]);
         gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 3 * 4 * @sizeOf(f32)), vb.vertices, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]));
-        gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
+        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]));
+        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
 
         // Vertex texcoord buffer (shader-location = 1)
         gl.glad_glGenBuffers.?(1, &vb.vboId[1]);
         gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[1]);
         gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 2 * 4 * @sizeOf(f32)), vb.texcoords, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
-        gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
+        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
+        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
 
         // Vertex normal buffer (shader-location = 2)
         gl.glad_glGenBuffers.?(1, &vb.vboId[2]);
         gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[2]);
         gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 3 * 4 * @sizeOf(f32)), vb.normals, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]));
-        gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
+        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]));
+        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
 
         // Vertex color buffer (shader-location = 3)
         gl.glad_glGenBuffers.?(1, &vb.vboId[3]);
         gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, vb.vboId[3]);
         gl.glad_glBufferData.?(gl.GL_ARRAY_BUFFER, @intCast(be * 4 * 4 * @sizeOf(u8)), vb.colors, gl.GL_DYNAMIC_DRAW);
-        gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]));
-        gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
+        gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]));
+        gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
 
         // Fill index buffer
         gl.glad_glGenBuffers.?(1, &vb.vboId[4]);
@@ -1560,20 +1561,20 @@ export fn rlDrawRenderBatch(batch: *rlRenderBatch) callconv(.c) void {
                 gl.glad_glBindVertexArray.?(batch.vertexBuffer[cb].vaoId);
             } else {
                 gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[0]);
-                gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]));
+                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]), 3, gl.GL_FLOAT, 0, 0, null);
+                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_POSITION]));
 
                 gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[1]);
-                gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
+                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]), 2, gl.GL_FLOAT, 0, 0, null);
+                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_TEXCOORD01]));
 
                 gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[2]);
-                gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]));
+                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]), 3, gl.GL_FLOAT, 0, 0, null);
+                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_NORMAL]));
 
                 gl.glad_glBindBuffer.?(gl.GL_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[3]);
-                gl.glad_glVertexAttribPointer.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
-                gl.glad_glEnableVertexAttribArray.?(@intCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]));
+                gl.glad_glVertexAttribPointer.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]), 4, gl.GL_UNSIGNED_BYTE, @intCast(gl.GL_TRUE), 0, null);
+                gl.glad_glEnableVertexAttribArray.?(@bitCast(RLGL.State.currentShaderLocs[RL_SHADER_LOC_VERTEX_COLOR]));
 
                 gl.glad_glBindBuffer.?(gl.GL_ELEMENT_ARRAY_BUFFER, batch.vertexBuffer[cb].vboId[4]);
             }
