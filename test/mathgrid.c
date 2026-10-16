@@ -78,6 +78,9 @@ int main(void) {
         p4(QuaternionSlerp(Q1, Q2, 0.35f)); p4(QuaternionNlerp(Q1, Q2, 0.35f)); p4(Q1); p4(Q2);
         pm(QuaternionToMatrix(Q1)); p4(QuaternionFromMatrix(MB)); p3(Vector3RotateByQuaternion(A3, Q1));
         p3(QuaternionToEuler(Q2));
+        // Cubic Hermite interpolation (glTF CUBICSPLINE animation sampling)
+        p3(Vector3CubicHermite(A3, B3, C3, A3, 0.3f)); p3(Vector3CubicHermite(A3, B3, C3, A3, 0.85f));
+        p4(QuaternionCubicHermiteSpline(Q1, A4, Q2, B4, 0.3f)); p4(QuaternionCubicHermiteSpline(Q1, A4, Q2, B4, 0.85f));
 
         // --- 6.2 additions: from->to rotation (incl. both opposite-vector
         // branches), TRS compose/decompose round-trip ---

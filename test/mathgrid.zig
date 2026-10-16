@@ -103,6 +103,8 @@ extern fn QuaternionNlerp(Quaternion, Quaternion, f32) Quaternion;
 extern fn QuaternionToMatrix(Quaternion) Matrix;
 extern fn QuaternionFromMatrix(Matrix) Quaternion;
 extern fn QuaternionToEuler(Quaternion) Vector3;
+extern fn Vector3CubicHermite(Vector3, Vector3, Vector3, Vector3, f32) Vector3;
+extern fn QuaternionCubicHermiteSpline(Quaternion, Quaternion, Quaternion, Quaternion, f32) Quaternion;
 extern fn QuaternionFromVector3ToVector3(Vector3, Vector3) Quaternion;
 extern fn MatrixCompose(Vector3, Quaternion, Vector3) Matrix;
 extern fn MatrixDecompose(Matrix, *Vector3, *Quaternion, *Vector3) void;
@@ -262,6 +264,11 @@ pub fn main() void {
         p4(QuaternionFromMatrix(MB));
         p3(Vector3RotateByQuaternion(A3, Q1));
         p3(QuaternionToEuler(Q2));
+        // Cubic Hermite interpolation (glTF CUBICSPLINE animation sampling)
+        p3(Vector3CubicHermite(A3, B3, C3, A3, 0.3));
+        p3(Vector3CubicHermite(A3, B3, C3, A3, 0.85));
+        p4(QuaternionCubicHermiteSpline(Q1, A4, Q2, B4, 0.3));
+        p4(QuaternionCubicHermiteSpline(Q1, A4, Q2, B4, 0.85));
 
         // 6.2 additions: from->to rotation (incl. both opposite-vector
         // branches), TRS compose/decompose round-trip
@@ -282,8 +289,6 @@ pub fn main() void {
         p4(R);
         p3(S3);
 
-        _ = A4;
-        _ = B4;
         _ = printf("\n");
     }
 }

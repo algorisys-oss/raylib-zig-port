@@ -564,7 +564,19 @@ fn linkExe(
     // Direct -l linking (we know the .so dir via addLibraryPath); skip pkg-config,
     // which isn't configured for GL/mesa in this environment.
     for (sys_libs) |l| mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
-    return b.addExecutable(.{ .name = name, .root_module = mod });
+    const exe = b.addExecutable(.{ .name = name, .root_module = mod });
+    pinCompilerRtMath(exe);
+    return exe;
+}
+
+/// Makes `exe` take sinf/cosf/... from compiler_rt, whatever else it links.
+/// compiler_rt is one archive member that also carries weak libm functions:
+/// once anything pulls it in (Zig code nearly always does), its sinf replaces
+/// glibc's. A pure-C oracle pulls it in only by accident of optimization level,
+/// so without this the C and Zig sides of a gate could use different libms
+/// (found by models_data in ReleaseFast: glTF poses off by a few ULPs).
+fn pinCompilerRtMath(exe: *std.Build.Step.Compile) void {
+    exe.forceUndefinedSymbol("__multi3"); // defined only by compiler_rt
 }
 
 /// The `raygui` binding module over `api` (raygui is linked as C: compiled

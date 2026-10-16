@@ -96,8 +96,10 @@ while read -r entry frames; do
       continue
     fi
     lib="$ORACLE_LIB"; [ "$side" = zig ] && lib="$ZIG_LIB"
+    # -u __multi3: both sides take sinf/cosf/... from compiler_rt, never one from
+    # glibc and one from compiler_rt (see pinCompilerRtMath in build.zig)
     zig cc "$TMP/$name.o" "$TMP/driver.o" "$TMP/hooks.o" "$lib" -o "$TMP/${name}_$side" \
-      -L/usr/lib/x86_64-linux-gnu "${SYS_LIBS[@]}" 2> "$TMP/$name.$side.ld.log" || ok=0
+      -Wl,-u,__multi3 -L/usr/lib/x86_64-linux-gnu "${SYS_LIBS[@]}" 2> "$TMP/$name.$side.ld.log" || ok=0
   done
   if [ "$ok" = 0 ]; then
     broken=$((broken+1)); failures+=("$name (link)")
