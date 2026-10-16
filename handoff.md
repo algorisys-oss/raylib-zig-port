@@ -1,10 +1,10 @@
-# handoff.md — fresh-session bootstrap (written 2026-10-16 13:40 IST)
+# handoff.md — fresh-session bootstrap (written 2026-10-16 15:00 IST)
 
 > Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
 ## 1. State right now
 
-- `main` is green and pushed (latest: Zig-API coverage 226/227 + docs). Tag
+- `main` is green and pushed (latest: typed shader values + slice accessors). Tag
   `raylib-6.2-parity` marks the 6.2 rebase. No open branches or worktrees.
 - **Port (C ABI):** 10/10 modules Zig, raylib 6.2. Gates vs the all-C oracle:
   pixel 12/12 · audio 43/43 · datacheck · mathtest 90,200 · camtest · gesttest ·
@@ -35,15 +35,19 @@
 
 ## 3. Next step on resume
 
-Nothing in flight. Open (user's call, offered 2026-10-16, not yet answered):
-1. Typed `setShaderValue(shader, loc, &value)` inferring the uniform type at
-   comptime (added beside the raylib-shaped one).
-2. Slice accessors for pointer+count struct fields (`model.meshSlice()`…).
-3. `others/embedded_files_loading` ships ~290 KB raw resources in git —
-   could be generated at build time from the upstream header instead.
-Example coverage is complete (226/227). Note: every filtered apiexamples run
-still builds all ~226 example exes — a cold full run can push a cache to
-13–27 GB; clear `~/.cache/zig-local` / worktree `.zcache` when disk is low.
+Nothing in flight; no open decisions. The three API choices offered on
+2026-10-16 were taken per recommendation and landed: typed
+`setShaderValue`/`setShaderValueV` (uniform type inferred at comptime),
+`xSlice()` accessors from an explicit table, and the embedded example data
+kept in git with provenance (`tools/c_array_to_raw.py`, byte-verified).
+Example coverage is complete (226/227). Possible next steps if wanted: a
+raylib release bump (same playbook as 6.2), or more API ergonomics surfaced
+by the translation agents (raygui `i32` results → bool helpers; `textCopy`
+taking `[]u8`).
+
+Note: every filtered apiexamples run still builds all ~226 example exes — a
+cold full run can push a cache to 13–27 GB; clear `~/.cache/zig-local` /
+worktree `.zcache` when disk is low.
 
 ## 4. Open issues / gotchas hit
 
