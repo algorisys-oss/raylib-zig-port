@@ -21,6 +21,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const c_va = @import("c_va.zig");
+const fs = @import("fs.zig");
 
 /// The platform backend: rcore.c `#include`s one `platforms/rcore_<platform>.c`, and
 /// rcore.zig imports one of these. Emscripten means the browser (PLATFORM_WEB, on
@@ -51,19 +52,13 @@ extern fn realloc(?*anyopaque, usize) ?*anyopaque;
 extern fn free(?*anyopaque) void;
 extern fn memcpy(noalias ?*anyopaque, noalias ?*const anyopaque, usize) ?*anyopaque;
 pub extern fn memset(?*anyopaque, c_int, usize) ?*anyopaque;
-extern fn strcmp([*c]const u8, [*c]const u8) c_int;
 extern fn strlen([*c]const u8) usize;
 pub extern fn strncpy(noalias [*c]u8, noalias [*c]const u8, usize) [*c]u8;
 extern fn strcat([*c]u8, [*c]const u8) [*c]u8;
-extern fn strrchr([*c]const u8, c_int) [*c]u8;
-extern fn strpbrk([*c]const u8, [*c]const u8) [*c]u8;
-extern fn strstr([*c]const u8, [*c]const u8) [*c]u8;
 pub extern fn strchr([*c]const u8, c_int) [*c]u8;
 pub extern fn sprintf(noalias [*c]u8, noalias [*c]const u8, ...) c_int;
 pub extern fn snprintf(noalias [*c]u8, usize, noalias [*c]const u8, ...) c_int;
 extern fn vprintf([*c]const u8, c_va.Arg) c_int;
-extern fn rename([*c]const u8, [*c]const u8) c_int;
-extern fn remove([*c]const u8) c_int;
 pub extern fn system([*c]const u8) c_int;
 extern fn exit(c_int) noreturn;
 extern fn time(?*std.c.time_t) std.c.time_t;
@@ -73,60 +68,13 @@ extern fn tan(f64) f64;
 extern fn atan2f(f32, f32) f32;
 extern fn fflush(?*anyopaque) c_int;
 
-// stdio FILE handling via opaque pointer
+// stdio, for the automation events file (until it moves to fs.zig)
 const FILE = anyopaque;
 extern fn fopen([*c]const u8, [*c]const u8) ?*FILE;
 extern fn fclose(?*FILE) c_int;
-extern fn fseek(?*FILE, c_long, c_int) c_int;
-extern fn ftell(?*FILE) c_long;
-extern fn fread(?*anyopaque, usize, usize, ?*FILE) usize;
-extern fn fwrite(?*const anyopaque, usize, usize, ?*FILE) usize;
-extern fn fprintf(?*FILE, [*c]const u8, ...) c_int;
 extern fn fgets([*c]u8, c_int, ?*FILE) [*c]u8;
 extern fn feof(?*FILE) c_int;
 extern fn sscanf([*c]const u8, [*c]const u8, ...) c_int;
-const SEEK_SET: c_int = 0;
-const SEEK_END: c_int = 2;
-
-// POSIX file/dir
-extern fn access([*c]const u8, c_int) c_int;
-extern fn getcwd([*c]u8, usize) [*c]u8;
-extern fn chdir([*c]const u8) c_int;
-extern fn mkdir([*c]const u8, c_uint) c_int;
-extern fn readlink([*c]const u8, [*c]u8, usize) isize;
-const F_OK: c_int = 0;
-
-// dirent
-const DIR = anyopaque;
-extern fn opendir([*c]const u8) ?*DIR;
-extern fn closedir(?*DIR) c_int;
-extern fn readdir(?*DIR) ?*std.c.dirent;
-
-// stat: std.c has Emscripten's layout but none for Linux (std uses statx there),
-// so the desktop keeps glibc's x86-64 `struct stat`, under std.c's field names.
-const stat_t = switch (builtin.os.tag) {
-    .emscripten => std.c.Stat,
-    else => extern struct {
-        dev: c_ulong,
-        ino: c_ulong,
-        nlink: c_ulong,
-        mode: c_uint,
-        uid: c_uint,
-        gid: c_uint,
-        __pad0: c_uint,
-        rdev: c_ulong,
-        size: c_long,
-        blksize: c_long,
-        blocks: c_long,
-        atim: timespec,
-        mtim: timespec,
-        ctim: timespec,
-        __glibc_reserved: [3]c_long,
-    },
-};
-extern fn stat([*c]const u8, *stat_t) c_int;
-const S_IFMT: c_uint = 0o170000;
-const S_IFREG: c_uint = 0o100000;
 
 // clock / sleep
 const timespec = std.c.timespec;
@@ -1539,42 +1487,55 @@ export fn MemFree(ptr: ?*anyopaque) callconv(.c) void {
 }
 
 //----------------------------------------------------------------------------------
-// Module Functions Definition: File System management - File I/O
+// Module Functions Definition: File System management
+//
+// The C API over fs.zig. These wrappers turn C strings into slices, pass the
+// process `Io` and the C allocator, and turn errors into raylib's log lines;
+// the file system logic itself lives in fs.zig.
 //----------------------------------------------------------------------------------
 
+/// The `Io` for file system calls. Zig library code takes an `Io` from its
+/// caller, but raylib's C API has no parameter to carry one, so the C ABI
+/// edge uses std's process-wide instance.
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
+/// For memory handed to C callers, who release it with `free` (through
+/// UnloadFileData, UnloadFileText, MemFree): at these alignments
+/// `c_allocator` is `malloc`.
+const c_allocator = std.heap.c_allocator;
+
+fn cSpan(text: [*c]const u8) ?[:0]const u8 {
+    return if (text == null) null else std.mem.span(text);
+}
+
 export fn LoadFileData(fileName: [*c]const u8, dataSize: [*c]c_int) callconv(.c) [*c]u8 {
-    var data: [*c]u8 = null;
     dataSize.* = 0;
+    const path = cSpan(fileName) orelse {
+        TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
+        return null;
+    };
+    if (loadFileDataCallbackPtr) |callback| return callback(fileName, dataSize);
 
-    if (fileName != null) {
-        if (loadFileDataCallbackPtr) |cb| return cb(fileName, dataSize);
+    const contents = fs.loadFile(io(), c_allocator, path) catch |err| {
+        switch (err) {
+            error.OpenFailed => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open file", fileName),
+            error.Empty => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to read file", fileName),
+            error.TooBig => TraceLog(LOG_WARNING, "FILEIO: [%s] File is bigger than 2147483647 bytes, avoid using LoadFileData()", fileName),
+            // C sizes a directory with ftell, which reports LLONG_MAX on ext4: the allocation fails
+            error.IsDir, error.OutOfMemory => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to allocated memory for file reading", fileName),
+        }
+        return null;
+    };
 
-        const file = fopen(fileName, "rb");
-        if (file != null) {
-            _ = fseek(file, 0, SEEK_END);
-            const size = ftell(file);
-            _ = fseek(file, 0, SEEK_SET);
-
-            if (size > 0) {
-                data = @ptrCast(@alignCast(RL_CALLOC(@intCast(size), 1)));
-                if (data != null) {
-                    const count = fread(@ptrCast(data), 1, @intCast(size), file);
-                    if (count > 2147483647) {
-                        TraceLog(LOG_WARNING, "FILEIO: [%s] File is bigger than 2147483647 bytes, avoid using LoadFileData()", fileName);
-                        RL_FREE(data);
-                        data = null;
-                    } else {
-                        dataSize.* = @intCast(count);
-                        if (dataSize.* != @as(c_int, @intCast(size))) TraceLog(LOG_WARNING, "FILEIO: [%s] File partially loaded (%i bytes out of %i)", fileName, dataSize.*, @as(c_int, @intCast(size))) else TraceLog(LOG_INFO, "FILEIO: [%s] File loaded successfully", fileName);
-                    }
-                } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to allocated memory for file reading", fileName);
-            } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to read file", fileName);
-
-            _ = fclose(file);
-        } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open file", fileName);
-    } else TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
-
-    return data;
+    dataSize.* = @intCast(contents.read);
+    if (contents.read != contents.data.len) {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] File partially loaded (%i bytes out of %i)", fileName, dataSize.*, @as(c_int, @intCast(contents.data.len)));
+    } else {
+        TraceLog(LOG_INFO, "FILEIO: [%s] File loaded successfully", fileName);
+    }
+    return contents.data.ptr;
 }
 
 export fn UnloadFileData(data: [*c]u8) callconv(.c) void {
@@ -1582,98 +1543,65 @@ export fn UnloadFileData(data: [*c]u8) callconv(.c) void {
 }
 
 export fn SaveFileData(fileName: [*c]const u8, data: ?*anyopaque, dataSize: c_int) callconv(.c) bool {
-    var result = false;
+    const path = cSpan(fileName) orelse {
+        TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
+        return false;
+    };
+    if (saveFileDataCallbackPtr) |callback| return callback(fileName, data, dataSize);
 
-    if (fileName != null) {
-        if (saveFileDataCallbackPtr) |cb| return cb(fileName, data, dataSize);
+    const bytes: []const u8 = if (data != null and dataSize > 0) @as([*]const u8, @ptrCast(data.?))[0..@intCast(dataSize)] else &.{};
+    fs.saveFile(io(), path, bytes) catch |err| {
+        switch (err) {
+            error.OpenFailed => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open file", fileName),
+            error.WriteFailed => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to write file", fileName),
+        }
+        return false;
+    };
 
-        const file = fopen(fileName, "wb");
-        if (file != null) {
-            const count: c_int = @intCast(fwrite(data, 1, @intCast(dataSize), file));
-            if (count == 0) TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to write file", fileName) else if (count != dataSize) TraceLog(LOG_WARNING, "FILEIO: [%s] File partially written", fileName) else TraceLog(LOG_INFO, "FILEIO: [%s] File saved successfully", fileName);
-
-            const closed = fclose(file);
-            if (closed == 0) result = true;
-        } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open file", fileName);
-    } else TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
-
-    return result;
+    // raylib reports writing zero bytes as a failed write, but the save succeeds
+    if (bytes.len == 0) {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to write file", fileName);
+    } else {
+        TraceLog(LOG_INFO, "FILEIO: [%s] File saved successfully", fileName);
+    }
+    return true;
 }
 
 export fn ExportDataAsCode(data: [*c]const u8, dataSize: c_int, fileName: [*c]const u8) callconv(.c) bool {
-    var result = false;
-    const TEXT_BYTES_PER_LINE: c_int = 20;
+    const saved = saved: {
+        const path = cSpan(fileName) orelse break :saved false;
+        if (data == null or dataSize <= 0) break :saved false;
+        const text = fs.dataAsCode(c_allocator, data[0..@intCast(dataSize)], path) catch break :saved false;
+        defer c_allocator.free(text);
+        break :saved SaveFileText(fileName, text.ptr);
+    };
 
-    const txtData: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(dataSize * 6 + 2000), 1)));
-
-    var byteCount: c_int = 0;
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "////////////////////////////////////////////////////////////////////////////////////////\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// DataAsCode exporter v1.0 - Raw data exported as an array of bytes                  //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// more info and bugs-report:  github.com/raysan5/raylib                              //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// feedback and support:       ray[at]raylib.com                                      //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// Copyright (c) 2022-2026 Ramon Santamaria (@raysan5)                                //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "////////////////////////////////////////////////////////////////////////////////////////\n\n");
-
-    var varFileName: [256]u8 = std.mem.zeroes([256]u8);
-    _ = strncpy(&varFileName, GetFileNameWithoutExt(fileName), 256 - 1);
-    var i: usize = 0;
-    while (varFileName[i] != 0) : (i += 1) {
-        if ((varFileName[i] >= 'a') and (varFileName[i] <= 'z')) {
-            varFileName[i] = varFileName[i] - 32;
-        } else if (varFileName[i] == '.' or varFileName[i] == '-' or varFileName[i] == '?' or varFileName[i] == '!' or varFileName[i] == '+') {
-            varFileName[i] = '_';
-        }
+    if (saved) {
+        TraceLog(LOG_INFO, "FILEIO: [%s] Data as code exported successfully", fileName);
+    } else {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to export data as code", fileName);
     }
-
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#define %s_DATA_SIZE     %i\n\n", &varFileName, dataSize);
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static unsigned char %s_DATA[%s_DATA_SIZE] = { ", &varFileName, &varFileName);
-    var k: c_int = 0;
-    while (k < (dataSize - 1)) : (k += 1) {
-        const fmt: [*c]const u8 = if (@rem(k, TEXT_BYTES_PER_LINE) == 0) "0x%x,\n" else "0x%x, ";
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), fmt, @as(c_int, data[@intCast(k)]));
-    }
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "0x%x };\n", @as(c_int, data[@intCast(dataSize - 1)]));
-
-    result = SaveFileText(fileName, txtData);
-
-    RL_FREE(txtData);
-
-    if (result) TraceLog(LOG_INFO, "FILEIO: [%s] Data as code exported successfully", fileName) else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to export data as code", fileName);
-
-    return result;
+    return saved;
 }
 
 export fn LoadFileText(fileName: [*c]const u8) callconv(.c) [*c]u8 {
-    var text: [*c]u8 = null;
+    const path = cSpan(fileName) orelse {
+        TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
+        return null;
+    };
+    if (loadFileTextCallbackPtr) |callback| return callback(fileName);
 
-    if (fileName != null) {
-        if (loadFileTextCallbackPtr) |cb| return cb(fileName);
+    const text = fs.loadText(io(), c_allocator, path) catch |err| {
+        switch (err) {
+            error.OpenFailed => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open text file", fileName),
+            error.Empty, error.IsDir => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to read text file", fileName),
+            error.TooBig, error.OutOfMemory => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to allocated memory for file reading", fileName),
+        }
+        return null;
+    };
 
-        const file = fopen(fileName, "rt");
-        if (file != null) {
-            _ = fseek(file, 0, SEEK_END);
-            const size: c_uint = @intCast(ftell(file));
-            _ = fseek(file, 0, SEEK_SET);
-
-            if (size > 0) {
-                text = @ptrCast(@alignCast(RL_CALLOC(size + 1, 1)));
-                if (text != null) {
-                    const count: c_uint = @intCast(fread(@ptrCast(text), 1, size, file));
-                    if (count < size) text = @ptrCast(@alignCast(RL_REALLOC(@ptrCast(text), count + 1)));
-                    text[count] = 0;
-                    TraceLog(LOG_INFO, "FILEIO: [%s] Text file loaded successfully", fileName);
-                } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to allocated memory for file reading", fileName);
-            } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to read text file", fileName);
-
-            _ = fclose(file);
-        } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open text file", fileName);
-    } else TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
-
-    return text;
+    TraceLog(LOG_INFO, "FILEIO: [%s] Text file loaded successfully", fileName);
+    return text.ptr;
 }
 
 export fn UnloadFileText(text: [*c]u8) callconv(.c) void {
@@ -1681,22 +1609,22 @@ export fn UnloadFileText(text: [*c]u8) callconv(.c) void {
 }
 
 export fn SaveFileText(fileName: [*c]const u8, text: [*c]u8) callconv(.c) bool {
-    var result = false;
+    const path = cSpan(fileName) orelse {
+        TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
+        return false;
+    };
+    if (saveFileTextCallbackPtr) |callback| return callback(fileName, text);
 
-    if (fileName != null) {
-        if (saveFileTextCallbackPtr) |cb| return cb(fileName, text);
+    fs.saveFile(io(), path, cSpan(text) orelse "") catch |err| {
+        switch (err) {
+            error.OpenFailed => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open text file", fileName),
+            error.WriteFailed => TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to write text file", fileName),
+        }
+        return false;
+    };
 
-        const file = fopen(fileName, "wt");
-        if (file != null) {
-            const count = fprintf(file, "%s", text);
-            if (count < 0) TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to write text file", fileName) else TraceLog(LOG_INFO, "FILEIO: [%s] Text file saved successfully", fileName);
-
-            const closed = fclose(file);
-            if (closed == 0) result = true;
-        } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to open text file", fileName);
-    } else TraceLog(LOG_WARNING, "FILEIO: File name provided is not valid");
-
-    return result;
+    TraceLog(LOG_INFO, "FILEIO: [%s] Text file saved successfully", fileName);
+    return true;
 }
 
 export fn SetLoadFileDataCallback(callback: LoadFileDataCallback) callconv(.c) void {
@@ -1713,133 +1641,82 @@ export fn SetSaveFileTextCallback(callback: SaveFileTextCallback) callconv(.c) v
 }
 
 export fn FileRename(fileName: [*c]const u8, fileRename: [*c]const u8) callconv(.c) c_int {
-    var result: c_int = -1;
-    if (FileExists(fileName)) result = rename(fileName, fileRename);
-    return result;
+    if (!FileExists(fileName)) return -1;
+    const new_path = cSpan(fileRename) orelse return -1;
+    const cwd = std.Io.Dir.cwd();
+    cwd.rename(std.mem.span(fileName), cwd, new_path, io()) catch return -1;
+    return 0;
 }
 
 export fn FileRemove(fileName: [*c]const u8) callconv(.c) c_int {
-    var result: c_int = -1;
-    if (FileExists(fileName)) result = remove(fileName);
-    return result;
+    if (!FileExists(fileName)) return -1;
+    fs.remove(io(), std.mem.span(fileName)) catch return -1;
+    return 0;
 }
 
 export fn FileCopy(srcPath: [*c]const u8, dstPath: [*c]const u8) callconv(.c) c_int {
-    var result: c_int = -1;
-    var srcDataSize: c_int = 0;
-    const srcFileData = LoadFileData(srcPath, &srcDataSize);
+    var size: c_int = 0;
+    const data = LoadFileData(srcPath, &size);
+    defer UnloadFileData(data);
 
-    if (DirectoryExists(GetDirectoryPath(dstPath))) result = 0 else result = MakeDirectory(GetDirectoryPath(dstPath));
-
-    if (result == 0) {
-        if ((srcFileData != null) and (srcDataSize > 0)) {
-            const saved = SaveFileData(dstPath, @ptrCast(srcFileData), srcDataSize);
-            if (saved) result = 0;
-        }
-    }
-
-    UnloadFileData(srcFileData);
+    // raylib's result says only whether the destination directory exists or
+    // could be made: a missing source or a failed write still returns 0
+    const dstDir = GetDirectoryPath(dstPath);
+    const result = if (DirectoryExists(dstDir)) 0 else MakeDirectory(dstDir);
+    if (result == 0 and data != null and size > 0) _ = SaveFileData(dstPath, data, size);
     return result;
 }
 
 export fn FileMove(srcPath: [*c]const u8, dstPath: [*c]const u8) callconv(.c) c_int {
-    var result: c_int = -1;
+    if (!FileExists(srcPath)) {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] Source file does not exist", srcPath);
+        return -1;
+    }
 
-    if (FileExists(srcPath)) {
-        result = FileCopy(srcPath, dstPath);
-        if (result == 0) {
-            if (FileExists(dstPath) and (GetFileLength(srcPath) == GetFileLength(dstPath))) {
-                result = FileRemove(srcPath);
-                if (result != 0) TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to remove source file after copy", srcPath);
-            } else TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to copy file to [%s]", srcPath, dstPath);
-        }
-    } else TraceLog(LOG_WARNING, "FILEIO: [%s] Source file does not exist", srcPath);
+    const copied = FileCopy(srcPath, dstPath);
+    if (copied != 0) return copied;
 
-    return result;
+    if (!FileExists(dstPath) or GetFileLength(srcPath) != GetFileLength(dstPath)) {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to copy file to [%s]", srcPath, dstPath);
+        return copied;
+    }
+    const removed = FileRemove(srcPath);
+    if (removed != 0) TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to remove source file after copy", srcPath);
+    return removed;
 }
 
 export fn FileTextReplace(fileName: [*c]const u8, search: [*c]const u8, replacement: [*c]const u8) callconv(.c) c_int {
-    var result: c_int = -1;
+    if (!FileExists(fileName)) return -1;
 
-    if (FileExists(fileName)) {
-        const fileText = LoadFileText(fileName);
-        const fileTextUpdated = TextReplaceAlloc(fileText, search, replacement);
-        if (fileTextUpdated != null) {
-            const saved = SaveFileText(fileName, fileTextUpdated);
-            if (saved) result = 0;
-            MemFree(@ptrCast(fileTextUpdated));
-        }
-        UnloadFileText(fileText);
-    }
+    const text = LoadFileText(fileName);
+    defer UnloadFileText(text);
+    const updated = TextReplaceAlloc(text, search, replacement);
+    if (updated == null) return -1;
+    defer MemFree(updated);
 
-    return result;
+    return if (SaveFileText(fileName, updated)) 0 else -1;
 }
 
 export fn FileTextFindIndex(fileName: [*c]const u8, search: [*c]const u8) callconv(.c) c_int {
-    var result: c_int = -1;
-    if (FileExists(fileName)) {
-        const fileText = LoadFileText(fileName);
-        if (fileText != null) {
-            const ptr = strstr(fileText, search);
-            if (ptr != null) result = @intCast(@intFromPtr(ptr) - @intFromPtr(fileText));
-            UnloadFileText(fileText);
-        }
-    }
-    return result;
+    if (!FileExists(fileName)) return -1;
+
+    const text = LoadFileText(fileName);
+    if (text == null) return -1;
+    defer UnloadFileText(text);
+
+    const index = std.mem.indexOf(u8, std.mem.span(text), std.mem.span(search)) orelse return -1;
+    return @intCast(index);
 }
 
 export fn FileExists(fileName: [*c]const u8) callconv(.c) bool {
-    var result = false;
-    if ((fileName != null) and (access(fileName, F_OK) != -1)) result = true;
-    return result;
+    const path = cSpan(fileName) orelse return false;
+    return fs.exists(io(), path);
 }
 
 export fn IsFileExtension(fileName: [*c]const u8, ext: [*c]const u8) callconv(.c) bool {
-    const MAX_FILE_EXTENSIONS: usize = 32;
-    var result = false;
-    const fileExt = GetFileExtension(fileName);
-
-    if (fileExt != null) {
-        const fileExtLength: usize = strlen(fileExt);
-        var fileExtLower: [16]u8 = std.mem.zeroes([16]u8);
-        var i: usize = 0;
-        while ((i < fileExtLength) and (i < 15)) : (i += 1) {
-            if ((fileExt[i] >= 'A') and (fileExt[i] <= 'Z')) fileExtLower[i] = fileExt[i] + 32 else fileExtLower[i] = fileExt[i];
-        }
-
-        var extCount: usize = 1;
-        const extLength: usize = strlen(ext);
-        const extList: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(extLength + 1, 1)));
-        var extListPtrs: [MAX_FILE_EXTENSIONS][*c]u8 = std.mem.zeroes([MAX_FILE_EXTENSIONS][*c]u8);
-        _ = memcpy(@ptrCast(extList), @ptrCast(ext), extLength);
-        extListPtrs[0] = extList;
-
-        var j: usize = 0;
-        while (j < extLength) : (j += 1) {
-            if ((extList[j] >= 'A') and (extList[j] <= 'Z')) extList[j] += 32;
-            if (extList[j] == ';') {
-                extList[j] = 0;
-                if (extCount < MAX_FILE_EXTENSIONS) {
-                    extListPtrs[extCount] = extList + j + 1;
-                    extCount += 1;
-                }
-            }
-        }
-
-        var m: usize = 0;
-        while (m < extCount) : (m += 1) {
-            var fileExtLowerPtr: [*c]u8 = &fileExtLower;
-            if (extListPtrs[m][0] != '.') fileExtLowerPtr += 1;
-            if (strcmp(fileExtLowerPtr, extListPtrs[m]) == 0) {
-                result = true;
-                break;
-            }
-        }
-
-        RL_FREE(extList);
-    }
-
-    return result;
+    const path = cSpan(fileName) orelse return false;
+    const extensions = cSpan(ext) orelse return false;
+    return fs.hasExtension(path, extensions);
 }
 
 /// POSIX rule: a file or directory is hidden when its base name starts with '.'
@@ -1853,105 +1730,60 @@ export fn IsFileHidden(filePath: [*c]const u8) callconv(.c) bool {
 }
 
 export fn DirectoryExists(dirPath: [*c]const u8) callconv(.c) bool {
-    var result = false;
-    const dir = opendir(dirPath);
-    if (dir != null) {
-        result = true;
-        _ = closedir(dir);
-    }
-    return result;
+    const path = cSpan(dirPath) orelse return false;
+    return fs.isDirectory(io(), path);
 }
 
 export fn GetFileLength(fileName: [*c]const u8) callconv(.c) c_int {
-    var size: c_int = 0;
-    const file = fopen(fileName, "rb");
-    if (file != null) {
-        _ = fseek(file, 0, SEEK_END);
-        const fileSize = ftell(file);
-        if (fileSize > 2147483647) TraceLog(LOG_WARNING, "[%s] File size overflows expected limit, do not use GetFileLength()", fileName) else size = @intCast(fileSize);
-        _ = fclose(file);
+    const path = cSpan(fileName) orelse return 0;
+    const size = fs.fileLength(io(), path) catch |err| switch (err) {
+        error.OpenFailed => return 0,
+        // C sizes a directory with ftell, which reports LLONG_MAX on ext4
+        error.IsDir => std.math.maxInt(u64),
+    };
+    if (size > std.math.maxInt(c_int)) {
+        TraceLog(LOG_WARNING, "[%s] File size overflows expected limit, do not use GetFileLength()", fileName);
+        return 0;
     }
-    return size;
+    return @intCast(size);
 }
 
 export fn GetFileModTime(fileName: [*c]const u8) callconv(.c) c_long {
-    var result = std.mem.zeroes(stat_t);
-    var modTime: c_long = 0;
-    if (stat(fileName, &result) == 0) modTime = @truncate(result.mtim.sec); // time_t -> long, as C
-    return modTime;
+    const path = cSpan(fileName) orelse return 0;
+    const seconds = fs.modTime(io(), path) orelse return 0;
+    return @truncate(seconds); // time_t -> long, as C
 }
 
 export fn GetFileExtension(fileName: [*c]const u8) callconv(.c) [*c]const u8 {
-    const dot = strrchr(fileName, '.');
-    if (dot == null or (dot == fileName)) return null;
-    return dot;
-}
-
-// String pointer reverse break: rightmost occurrence of charset in text
-fn strprbrk(text_in: [*c]const u8, charset: [*c]const u8) [*c]const u8 {
-    var latestMatch: [*c]const u8 = null;
-    var text = text_in;
-    while (text != null) {
-        text = strpbrk(text, charset);
-        if (text == null) break;
-        latestMatch = text;
-        text += 1;
-    }
-    return latestMatch;
+    const path = cSpan(fileName) orelse return null;
+    const ext = fs.extension(path) orelse return null;
+    return ext.ptr;
 }
 
 export fn GetFileName(filePath: [*c]const u8) callconv(.c) [*c]const u8 {
-    var fileName: [*c]const u8 = null;
-    if (filePath != null) fileName = strprbrk(filePath, "\\/");
-    if (fileName == null) return filePath;
-    return fileName + 1;
+    const path = cSpan(filePath) orelse return null;
+    return fs.fileName(path).ptr;
 }
 
-var gfnwe_fileName: [256]u8 = std.mem.zeroes([256]u8);
+/// Copies `text` into `buf` with a terminator: the static buffers behind the
+/// path functions that return `const char *`.
+fn returnInBuffer(buf: []u8, text: []const u8) [*:0]const u8 {
+    @memcpy(buf[0..text.len], text);
+    buf[text.len] = 0;
+    return buf[0..text.len :0];
+}
+
+var fileNameBuffer: [fs.max_file_name_len + 1]u8 = undefined;
 export fn GetFileNameWithoutExt(filePath: [*c]const u8) callconv(.c) [*c]const u8 {
-    const MAX_FILENAME_LENGTH: usize = 256;
-    _ = memset(@ptrCast(&gfnwe_fileName), 0, MAX_FILENAME_LENGTH);
-
-    if (filePath != null) {
-        _ = strncpy(&gfnwe_fileName, GetFileName(filePath), MAX_FILENAME_LENGTH - 1);
-        const fileNameLength: c_int = @intCast(strlen(&gfnwe_fileName));
-        var i: c_int = fileNameLength;
-        while (i > 0) : (i -= 1) {
-            if (gfnwe_fileName[@intCast(i)] == '.') {
-                gfnwe_fileName[@intCast(i)] = 0;
-                break;
-            }
-        }
-    }
-    return &gfnwe_fileName;
+    const stem = if (cSpan(filePath)) |path| fs.fileStem(path) else "";
+    return returnInBuffer(&fileNameBuffer, stem);
 }
 
-var gdp_dirPath: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
+var dirPathBuffer: [MAX_FILEPATH_LENGTH]u8 = undefined;
 export fn GetDirectoryPath(filePath: [*c]const u8) callconv(.c) [*c]const u8 {
-    _ = memset(@ptrCast(&gdp_dirPath), 0, MAX_FILEPATH_LENGTH);
-
-    if ((filePath[1] != ':') and (filePath[0] != '\\') and (filePath[0] != '/')) {
-        gdp_dirPath[0] = '.';
-        gdp_dirPath[1] = '/';
-    }
-
-    const lastSlash = strprbrk(filePath, "\\/");
-    if (lastSlash != null) {
-        if (lastSlash == filePath) {
-            gdp_dirPath[0] = filePath[0];
-            gdp_dirPath[1] = 0;
-        } else {
-            var dirPathPtr: [*c]u8 = &gdp_dirPath;
-            const hasNoRoot = (filePath[1] != ':') and (filePath[0] != '\\') and (filePath[0] != '/');
-            if (hasNoRoot) dirPathPtr += 2;
-            const copyLen = strlen(filePath) - (strlen(lastSlash) - 1);
-            _ = memcpy(@ptrCast(dirPathPtr), @ptrCast(filePath), copyLen);
-            const idx = strlen(filePath) - strlen(lastSlash) + (if (hasNoRoot) @as(usize, 2) else @as(usize, 0));
-            gdp_dirPath[idx] = 0;
-        }
-    }
-
-    return &gdp_dirPath;
+    const dir = fs.directoryPath(dirPathBuffer[0 .. dirPathBuffer.len - 1], cSpan(filePath) orelse "");
+    dirPathBuffer[dir.len] = 0;
+    return &dirPathBuffer;
 }
 
 var gpdp_prevDirPath: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
@@ -1983,108 +1815,128 @@ export fn GetPrevDirectoryPath(dirPath: [*c]const u8) callconv(.c) [*c]const u8 
     return &gpdp_prevDirPath;
 }
 
-var gwd_currentDir: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
+var workingDirBuffer: [MAX_FILEPATH_LENGTH]u8 = undefined;
 pub export fn GetWorkingDirectory() callconv(.c) [*c]const u8 {
-    _ = memset(@ptrCast(&gwd_currentDir), 0, MAX_FILEPATH_LENGTH);
-    return getcwd(&gwd_currentDir, MAX_FILEPATH_LENGTH);
+    const len = std.process.currentPath(io(), workingDirBuffer[0 .. workingDirBuffer.len - 1]) catch return null;
+    workingDirBuffer[len] = 0;
+    return &workingDirBuffer;
 }
 
-var gad_appDir: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
+var appDirBuffer: [MAX_FILEPATH_LENGTH]u8 = undefined;
 export fn GetApplicationDirectory() callconv(.c) [*c]const u8 {
-    _ = memset(@ptrCast(&gad_appDir), 0, MAX_FILEPATH_LENGTH);
-
-    const size = MAX_FILEPATH_LENGTH;
-    const len = readlink("/proc/self/exe", &gad_appDir, size);
-    if (len > 0) {
-        var i: isize = len;
-        while (i >= 0) : (i -= 1) {
-            if (gad_appDir[@intCast(i)] == '/') {
-                gad_appDir[@intCast(i + 1)] = 0;
-                break;
-            }
-        }
-    } else {
-        gad_appDir[0] = '.';
-        gad_appDir[1] = '/';
+    var len = std.process.executableDirPath(io(), appDirBuffer[0 .. appDirBuffer.len - 2]) catch
+        return returnInBuffer(&appDirBuffer, "./");
+    if (appDirBuffer[len - 1] != '/') {
+        appDirBuffer[len] = '/';
+        len += 1;
     }
-
-    return &gad_appDir;
+    appDirBuffer[len] = 0;
+    return &appDirBuffer;
 }
 
 export fn LoadDirectoryFiles(dirPath: [*c]const u8) callconv(.c) FilePathList {
     return LoadDirectoryFilesEx(dirPath, FILE_FILTER_TAG_ALL, false);
 }
 
-export fn LoadDirectoryFilesEx(basePath: [*c]const u8, filter_in: [*c]const u8, scanSubdirs: bool) callconv(.c) FilePathList {
-    var files = std.mem.zeroes(FilePathList);
-    var filter = filter_in;
+export fn LoadDirectoryFilesEx(basePath: [*c]const u8, filter: [*c]const u8, scanSubdirs: bool) callconv(.c) FilePathList {
+    if (!DirectoryExists(basePath)) {
+        TraceLog(LOG_WARNING, "FILEIO: Directory cannot be opened (%s)", basePath);
+        return .{ .count = 0, .paths = null };
+    }
 
-    if (DirectoryExists(basePath)) {
-        if ((filter != null) and (filter[0] == 0)) filter = null;
+    // Unlike GetDirectoryFileCountEx, an empty filter here means no filter
+    const effectiveFilter: [*c]const u8 = if (filter != null and filter[0] == 0) null else filter;
 
-        const fileCounter = GetDirectoryFileCountEx(basePath, filter, scanSubdirs);
+    // Count first, then fill a list of that size: raylib's two passes, each
+    // logging what it skips
+    const expected = GetDirectoryFileCountEx(basePath, effectiveFilter, scanSubdirs);
+    if (expected == 0) return .{ .count = 0, .paths = null };
+    const paths = allocPathList(expected) catch return .{ .count = 0, .paths = null };
 
-        files.paths = @ptrCast(@alignCast(RL_CALLOC(fileCounter, @sizeOf([*c]u8))));
-        var i: c_uint = 0;
-        while (i < fileCounter) : (i += 1) files.paths[i] = @ptrCast(@alignCast(RL_CALLOC(MAX_FILEPATH_LENGTH, 1)));
-
-        ScanDirectoryFiles(basePath, &files, filter, fileCounter, scanSubdirs);
-
-        if (files.count != fileCounter) {
-            TraceLog(LOG_WARNING, "FILEIO: Read files count (%u) does not match capacity allocated (%u)", files.count, fileCounter);
-            files.count = fileCounter;
-        }
-    } else TraceLog(LOG_WARNING, "FILEIO: Directory cannot be opened (%s)", basePath);
-
-    return files;
+    var filler: PathListFiller = .{ .paths = paths };
+    directoryScan(effectiveFilter, scanSubdirs).walk(std.mem.span(basePath), &filler) catch |err| switch (err) {};
+    if (filler.count != expected) {
+        TraceLog(LOG_WARNING, "FILEIO: Read files count (%u) does not match capacity allocated (%u)", @as(c_uint, @intCast(filler.count)), expected);
+    }
+    return .{ .count = expected, .paths = paths.ptr };
 }
 
 export fn UnloadDirectoryFiles(files: FilePathList) callconv(.c) void {
-    if (files.paths != null) {
-        var i: c_uint = 0;
-        while (i < files.count) : (i += 1) RL_FREE(files.paths[i]);
-        RL_FREE(files.paths);
+    if (files.paths == null) return;
+    const paths = files.paths[0..files.count];
+    for (paths) |path| c_allocator.free(path[0..MAX_FILEPATH_LENGTH]);
+    c_allocator.free(paths);
+}
+
+/// `count` paths, each a zeroed MAX_FILEPATH_LENGTH buffer as in raylib, so
+/// C callers may rewrite a path in place.
+fn allocPathList(count: usize) std.mem.Allocator.Error![][*c]u8 {
+    const paths = try c_allocator.alloc([*c]u8, count);
+    var allocated: usize = 0;
+    errdefer {
+        for (paths[0..allocated]) |path| c_allocator.free(path[0..MAX_FILEPATH_LENGTH]);
+        c_allocator.free(paths);
+    }
+    for (paths) |*path| {
+        const buf = try c_allocator.alloc(u8, MAX_FILEPATH_LENGTH);
+        @memset(buf, 0);
+        path.* = buf.ptr;
+        allocated += 1;
+    }
+    return paths;
+}
+
+/// Copies scanned paths into a list from `allocPathList`, until it is full.
+const PathListFiller = struct {
+    paths: [][*c]u8,
+    count: usize = 0,
+
+    pub const Error = error{};
+
+    pub fn full(filler: *const PathListFiller) bool {
+        return filler.count == filler.paths.len;
+    }
+
+    pub fn visit(filler: *PathListFiller, path: [:0]const u8) Error!void {
+        @memcpy(filler.paths[filler.count][0..path.len], path);
+        filler.count += 1;
+    }
+};
+
+fn directoryScan(filter: [*c]const u8, recursive: bool) fs.Scan {
+    return .{ .io = io(), .filter = .parse(cSpan(filter)), .recursive = recursive, .on_skip = logSkippedPath };
+}
+
+fn logSkippedPath(skipped: fs.Skipped) void {
+    switch (skipped) {
+        .cannot_open => |dir| TraceLog(LOG_WARNING, "FILEIO: Directory cannot be opened (%s)", dir.ptr),
+        .path_too_long => |dir| TraceLog(LOG_WARNING, "FILEIO: Path longer than %d characters (%s...)", @as(c_int, MAX_FILEPATH_LENGTH), dir.ptr),
     }
 }
 
 export fn MakeDirectory(dirPath: [*c]const u8) callconv(.c) c_int {
-    if ((dirPath == null) or (dirPath[0] == 0)) return -1;
-    if (DirectoryExists(dirPath)) return 0;
+    const path = cSpan(dirPath) orelse return -1;
+    if (path.len == 0) return -1;
+    if (fs.isDirectory(io(), path)) return 0;
 
-    const dirPathLength: usize = strlen(dirPath) + 1;
-    const pathcpy: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(dirPathLength, 1)));
-    _ = memcpy(@ptrCast(pathcpy), @ptrCast(dirPath), dirPathLength);
-
-    var i: usize = 0;
-    while ((i < dirPathLength) and (pathcpy[i] != 0)) : (i += 1) {
-        if (pathcpy[i] == ':') {
-            i += 1;
-        } else {
-            if ((pathcpy[i] == '\\') or (pathcpy[i] == '/')) {
-                pathcpy[i] = 0;
-                if (!DirectoryExists(pathcpy)) _ = mkdir(pathcpy, 0o777);
-                pathcpy[i] = '/';
-            }
-        }
-    }
-
-    if (!DirectoryExists(pathcpy)) _ = mkdir(pathcpy, 0o777);
-    RL_FREE(pathcpy);
-
-    if (!DirectoryExists(dirPath)) return -1;
-    return 0;
+    // Checked against the path as given: "a\\b" makes "a/b" yet returns -1, as in raylib
+    fs.makeDirectories(io(), path) catch return -1;
+    return if (fs.isDirectory(io(), path)) 0 else -1;
 }
 
 export fn ChangeDirectory(dirPath: [*c]const u8) callconv(.c) c_int {
-    const result = chdir(dirPath);
-    if (result != 0) TraceLog(LOG_WARNING, "SYSTEM: Failed to change to directory: %s", dirPath) else TraceLog(LOG_INFO, "SYSTEM: Working Directory: %s", dirPath);
-    return result;
+    const path = cSpan(dirPath) orelse "";
+    std.process.setCurrentPath(io(), path) catch {
+        TraceLog(LOG_WARNING, "SYSTEM: Failed to change to directory: %s", dirPath);
+        return -1;
+    };
+    TraceLog(LOG_INFO, "SYSTEM: Working Directory: %s", dirPath);
+    return 0;
 }
 
 export fn IsPathFile(path: [*c]const u8) callconv(.c) bool {
-    var info = std.mem.zeroes(stat_t);
-    _ = stat(path, &info);
-    return (info.mode & S_IFMT) == S_IFREG;
+    const p = cSpan(path) orelse return false;
+    return fs.isFile(io(), p);
 }
 
 /// NOTE: Mirrors raylib 6.2 exactly: any path that is not a regular file
@@ -2099,30 +1951,8 @@ export fn IsPathAbsolute(path: [*c]const u8) callconv(.c) bool {
 }
 
 export fn IsFileNameValid(fileName: [*c]const u8) callconv(.c) bool {
-    var valid = true;
-
-    if ((fileName != null) and (fileName[0] != 0)) {
-        const fileNameLength: c_int = @intCast(strlen(fileName));
-        var allPeriods = true;
-
-        var i: c_int = 0;
-        while (i < fileNameLength) : (i += 1) {
-            const ch = fileName[@intCast(i)];
-            if ((ch == '<') or (ch == '>') or (ch == ':') or (ch == '\"') or (ch == '/') or (ch == '\\') or (ch == '|') or (ch == '?') or (ch == '*')) {
-                valid = false;
-                break;
-            }
-            if (ch < 32) {
-                valid = false;
-                break;
-            }
-            if (ch != '.') allPeriods = false;
-        }
-
-        if (allPeriods) valid = false;
-    }
-
-    return valid;
+    const name = cSpan(fileName) orelse return true;
+    return fs.isValidFileName(name);
 }
 
 export fn IsFileDropped() callconv(.c) bool {
@@ -2130,20 +1960,16 @@ export fn IsFileDropped() callconv(.c) bool {
 }
 
 export fn LoadDroppedFiles() callconv(.c) FilePathList {
-    var files = std.mem.zeroes(FilePathList);
-    files.count = CORE.Window.dropFileCount;
-    files.paths = CORE.Window.dropFilepaths;
-    return files;
+    return .{ .count = CORE.Window.dropFileCount, .paths = CORE.Window.dropFilepaths };
 }
 
 export fn UnloadDroppedFiles(files: FilePathList) callconv(.c) void {
-    if (files.count > 0) {
-        var i: c_uint = 0;
-        while (i < files.count) : (i += 1) RL_FREE(files.paths[i]);
-        RL_FREE(files.paths);
-        CORE.Window.dropFileCount = 0;
-        CORE.Window.dropFilepaths = null;
-    }
+    if (files.count == 0) return;
+    // Allocated by the platform backend with RL_CALLOC
+    for (files.paths[0..files.count]) |path| RL_FREE(path);
+    RL_FREE(files.paths);
+    CORE.Window.dropFileCount = 0;
+    CORE.Window.dropFilepaths = null;
 }
 
 export fn GetDirectoryFileCount(dirPath: [*c]const u8) callconv(.c) c_uint {
@@ -2151,58 +1977,11 @@ export fn GetDirectoryFileCount(dirPath: [*c]const u8) callconv(.c) c_uint {
 }
 
 export fn GetDirectoryFileCountEx(basePath: [*c]const u8, filter: [*c]const u8, scanSubdirs: bool) callconv(.c) c_uint {
-    var fileCounter: c_uint = 0;
-    var path: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
-
-    const dir = opendir(basePath);
-    if (dir != null) {
-        while (readdir(dir)) |entity| {
-            if ((strcmp(&entity.name, ".") != 0) and (strcmp(&entity.name, "..") != 0)) {
-                const pathLength = snprintf(&path, MAX_FILEPATH_LENGTH, "%s/%s", basePath, &entity.name);
-                if ((pathLength < 0) or (pathLength >= MAX_FILEPATH_LENGTH)) {
-                    TraceLog(LOG_WARNING, "FILEIO: Path longer than %d characters (%s...)", @as(c_int, MAX_FILEPATH_LENGTH), basePath);
-                } else if (IsPathFile(&path)) {
-                    if ((filter == null) or (strstr(filter, FILE_FILTER_TAG_ALL) != null) or (strstr(filter, FILE_FILTER_TAG_FILE_ONLY) != null) or IsFileExtension(&path, filter)) fileCounter += 1;
-                } else {
-                    if ((filter != null) and ((strstr(filter, FILE_FILTER_TAG_ALL) != null) or (strstr(filter, FILE_FILTER_TAG_DIR_ONLY) != null))) fileCounter += 1;
-                    if (scanSubdirs) fileCounter += GetDirectoryFileCountEx(&path, filter, scanSubdirs);
-                }
-            }
-        }
-        _ = closedir(dir);
-    } else TraceLog(LOG_WARNING, "FILEIO: Directory cannot be opened (%s)", basePath);
-
-    return fileCounter;
-}
-
-// Scan all files and directories in a base path (internal helper)
-fn ScanDirectoryFiles(basePath: [*c]const u8, files: *FilePathList, filter: [*c]const u8, expectedFileCount: c_uint, scanSubdirs: bool) void {
-    var path: [MAX_FILEPATH_LENGTH]u8 = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
-
-    const dir = opendir(basePath);
-    if (dir != null) {
-        while (files.count < expectedFileCount) {
-            const dp = readdir(dir) orelse break;
-            if ((strcmp(&dp.name, ".") != 0) and (strcmp(&dp.name, "..") != 0)) {
-                const pathLength = snprintf(&path, MAX_FILEPATH_LENGTH, "%s/%s", basePath, &dp.name);
-                if ((pathLength < 0) or (pathLength >= MAX_FILEPATH_LENGTH)) {
-                    TraceLog(LOG_WARNING, "FILEIO: Path longer than %d characters (%s...)", @as(c_int, MAX_FILEPATH_LENGTH), basePath);
-                } else if (IsPathFile(&path)) {
-                    if ((filter == null) or (strstr(filter, FILE_FILTER_TAG_ALL) != null) or (strstr(filter, FILE_FILTER_TAG_FILE_ONLY) != null) or IsFileExtension(&path, filter)) {
-                        _ = memcpy(@ptrCast(files.paths[files.count]), @ptrCast(&path), @intCast(pathLength));
-                        files.count += 1;
-                    }
-                } else {
-                    if ((filter != null) and ((strstr(filter, FILE_FILTER_TAG_DIR_ONLY) != null) or (strstr(filter, FILE_FILTER_TAG_ALL) != null))) {
-                        _ = memcpy(@ptrCast(files.paths[files.count]), @ptrCast(&path), @intCast(pathLength));
-                        files.count += 1;
-                    }
-                    if (scanSubdirs) ScanDirectoryFiles(&path, files, filter, expectedFileCount, scanSubdirs);
-                }
-            }
-        }
-        _ = closedir(dir);
-    } else TraceLog(LOG_WARNING, "FILEIO: Directory cannot be opened (%s)", basePath);
+    const base = cSpan(basePath) orelse {
+        TraceLog(LOG_WARNING, "FILEIO: Directory cannot be opened (%s)", basePath);
+        return 0;
+    };
+    return directoryScan(filter, scanSubdirs).count(base);
 }
 
 //----------------------------------------------------------------------------------

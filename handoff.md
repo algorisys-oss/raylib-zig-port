@@ -1,54 +1,58 @@
-# handoff.md — fresh-session bootstrap (written 2026-10-16 18:50 IST)
+# handoff.md — fresh-session bootstrap (written 2026-10-16 19:56 IST)
 
 > Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
 ## 1. State right now
 
-- Desktop port unchanged in behaviour: pixel 12/12 · exdiff **217/217** ·
-  apiexamples **217/217** · cdiff 4/4 · audio 43/43 · datacheck · math/cam/gest
-  · apitest · constaudit 0. (exdiff/apiexamples ran before the last change,
-  src/c_va.zig; that change is identical machine code on x86-64, and the cheap
-  gates plus cdiff text_strings re-ran green after it.)
-- **Phase W (web target) started** — see PROGRESS.md "Phase W" and docs/web.md.
-  `zig build webexamples -Demsdk=$HOME/emsdk`: browser gate **46/46**
-  (core_basic_window + all 45 shapes), Debug and ReleaseFast. `zig build webdemos` feeds the
-  site (raylib-zig-web, `npm run sync`).
-- Committed at the end of this run (see git log); not pushed (pushing needs the
-  owner's go-ahead).
+- All gates green after round 2.1: pixel 12/12 · exdiff **217/217** · cdiff
+  **5/5** (Debug + ReleaseFast) · audio 43/43 · datacheck · math/cam/gest ·
+  apitest · constaudit 0 · idiomaudit OK · browser gate **46/46**.
+- Committed locally at the end of this run (see git log); **not pushed**
+  (pushing needs the owner's go-ahead). origin/main had no new commits at 19:50.
+- Two workstreams are live: **Round 2 idiomatic internals** (this run; plan in
+  IMPLEMENT-idiomatic-zig.md) and **Phase W web target** (driven from the
+  raylib-zig-web session; resume list in §3b).
 
 ## 2. What this run did
 
-- rcore split: desktop GLFW backend -> src/platforms/rcore_desktop_glfw.zig;
-  new src/platforms/rcore_web.zig + rcore_web.js (PLATFORM_WEB); backend picked
-  at comptime from the target OS.
-- rlgl.zig: GRAPHICS_API_OPENGL_ES3 path (diffed from preprocessed rlgl.h);
-  src/gles3.zig binds the same glad_gl* names to WebGL 2.
-- build.zig: `Platform`/`LibTarget`; `web`, `webexamples`, `webdemos` steps;
-  tools/webdiff.sh + tools/webdiff/{run.mjs,page.html} (Playwright).
-- Fixed two port bugs x86-64 hid: libc types (time_t etc. from std.c) and
-  va_list forwarding (src/c_va.zig).
-- gen_api.py: rl.gl.VertexBuffer.indices / default batch size follow the target.
+- Review feedback ("C with Zig keywords") accepted; reply drafted for the reviewer.
+- `tools/idiomaudit.py` + baseline: ratchet on libc externs / calls / `[*c]`
+  (HEAD e73f1c0: 90 / 978 / 2136 → now 70 / 875 / 2101).
+- `test/cdiff/core_fileio.c`: C-vs-Zig file I/O differential (real file tree,
+  every TraceLog line); green before and after the rewrite.
+- `src/fs.zig` (std-only, 9 leak-checked tests) + rcore.zig file system
+  section rewritten as thin `export fn` wrappers.
+- docs/idioms.md (lessons), docs/compatibility.md (§3 cdiff 5/5, §5 file
+  system misuse cases), CLAUDE.md gotcha, CHANGELOG.md, PROGRESS.md.
 
 ## 3. Next step on resume
 
-1. Grow `web_examples` in build.zig category by category (core_basic_window
-   and all 45 shapes are in, 0dba149; next textures, then text), recording each browser exclusion with its reason.
-2. GLSL version as one comptime constant for the web (examples load
-   resources/shaders/glsl100 or glsl300es there), then the shaders category.
-3. Per-example .data with only the files the example loads (now: whole
-   category resources/).
-4. Example manifest for the site (phase W step 7) to replace raylib-zig-web's
-   parsing of build.zig lists.
-5. Measure Asyncify vs a frame callback (size and speed).
+1. Check the raylib-zig-web pushes the owner mentioned (2026-10-16 ~19:45):
+   pull there, run its sync (`npm run sync`) against this repo, confirm nothing
+   in `zig build webdemos` / the site broke.
+2. Round 2.1b: rcore automation events file (LoadAutomationEventList /
+   ExportAutomationEventList) into fs.zig-style code. Write a cdiff driver
+   first; C's loop has fgets 255-byte chunking, a last line without '\n' that
+   is never processed, an "Issue reading line" warning at EOF, and `%i`
+   (accepts 0x hex and leading-0 octal). Then delete FILE/fopen/fgets/feof/sscanf.
+3. Round 2.2+: rtext, rtextures, rmodels, raudio, rlgl — same pattern
+   (cdiff first, std-only file, thin wrappers, `idiomaudit.py --update`).
+
+### 3b. Phase W (web) resume list, unchanged
+
+1. Grow `web_examples` in build.zig category by category (textures next, then text).
+2. GLSL version as one comptime constant for the web, then shaders.
+3. Per-example .data with only the files an example loads.
+4. Example manifest for the site (phase W step 7).
+5. Measure Asyncify vs a frame callback.
 
 ## 4. Open issues / gotchas hit
 
-- `npm install` once in tools/webdiff (Playwright 1.61.1). emsdk at ~/emsdk
-  needed `npm ci` inside upstream/emscripten (acorn) — done.
-- run.mjs now fails a crashed tab instead of hanging (a crashed page never
-  satisfies waitForFunction).
-- Two `libraylib_oracle.a` in the cache now (desktop and wasm): CLAUDE.md says
-  how to pick the desktop one.
-- tools/gen_api.py output must be run through `zig fmt` to match the committed
-  src/api/*.zig.
-- Disk: ~/.cache/zig-local reached 74 GB and was cleared this run.
+- The browser gate does not yet exercise file I/O on the web (no gated web
+  example loads files): fs.zig on emscripten is proven to compile and link,
+  not to run. The textures category (step 3b.1) will exercise it.
+- `std.Io` in a C-ABI library: wrappers use
+  `std.Io.Threaded.global_single_threaded.io()`; fs.zig takes `io` as a parameter.
+- Zig 0.18: `**` array repetition is gone (`@splat`); a multiline `\\` literal's
+  last line has no trailing newline; cross-file `anytype` visitors need `pub` decls.
+- Run concurrent builds with a private `--cache-dir` (used for web + ReleaseFast here).

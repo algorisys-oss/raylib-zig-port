@@ -282,6 +282,17 @@ before claiming a module done.
   array on x86-64 (decays to a pointer) and a plain pointer on wasm32. Passing
   `&ap` everywhere made TraceLog/TextFormat format stack garbage on the web,
   and crashed the tab in ReleaseFast. Use `c_va.arg(&ap)` (src/c_va.zig).
+- **The gates prove behaviour, not idiom.** (External review, 2026-10-16: the
+  first-pass modules were "C with Zig keywords" — ~980 libc/raw-alloc calls,
+  no `Allocator`, almost no `defer` — while every gate was green.) Idiom is now
+  enforced by `tools/idiomaudit.py` (a ratchet: counts per file may only go
+  down). Pattern for every cleanup: a std-only file (`src/fs.zig`) with
+  slices/error unions/`Io`/`Allocator` and its own leak-checked tests, plus
+  thin `export fn` wrappers in the module; write the cdiff driver FIRST and
+  see it pass against the old code. Lessons: docs/idioms.md. Zig 0.18 notes
+  from that work: `**` array repetition is gone (use `@splat`); a multiline
+  `\\` literal's last line has no trailing newline; an `anytype` visitor from
+  another file needs `pub` decls.
 - **`Color` is 4×`u8` packed; `Vector*`/`Matrix` are `f32`.** Match field types
   and struct packing exactly; raylib passes these **by value** across the ABI
   (e.g. `DrawRectangle(..., Color)`), which is calling-convention-sensitive for
@@ -402,6 +413,7 @@ zig build                      # libraylib.a (Zig-swapped) + all-C oracle lib
 zig build test                 # 12 pixel scenes, C vs Zig (llvmpipe)
 zig build mathtest camtest gesttest datacheck audiocheck   # numeric/data/PCM gates
 python3 tools/constaudit.py    # mirrored-constant audit
+python3 tools/idiomaudit.py    # C-idiom ratchet (libc calls, [*c]); counts only go down
 tools/exdiff.sh <oracle.a> zig-out/lib/libraylib.a [filter]  # examples gate
 ```
 

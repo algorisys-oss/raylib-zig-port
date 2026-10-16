@@ -50,7 +50,7 @@ Zig output **byte-for-byte** — no tolerances.
 | `zig build camtest` / `gesttest` | rcamera functions over an input grid / rgestures over scripted touch events | **7,500** / **3,200** values bit-identical |
 | `zig build audiocheck` | decoded PCM (WAV/OGG/MP3/QOA/XM/MOD), Wave ops, export round-trips, stream/music metadata | **43/43** identical |
 | `zig build datacheck` | compression, base64, file/data helpers | 0 failures |
-| `zig build cdiff` | paths examples can't reach: Text* edge cases, LoadFontData default/bitmap/SDF over 5 TTFs, SHA256/SHA1/MD5 for lengths 0..200, path predicates, 720-frame rshapes thickness/angle/segment sweep | **4/4** programs identical |
+| `zig build cdiff` | paths examples can't reach: Text* edge cases, LoadFontData default/bitmap/SDF over 5 TTFs, SHA256/SHA1/MD5 for lengths 0..200, path predicates, 720-frame rshapes thickness/angle/segment sweep, file system I/O on a real file tree (load/save/export, copy/move/rename/remove, directory scans with every filter, callbacks, every TraceLog line) | **5/5** programs identical |
 | Real GPU spot check (`EXDIFF_GPU=1`) | examples on Intel Iris Xe (Mesa 25.2.8, GL 4.6) instead of llvmpipe | **219/219** identical (run before the last two audio exclusions) |
 | ReleaseFast | all non-example gates at `-Doptimize=ReleaseFast` | pixel 12/12, math, cam, gest, data, audio 43/43, cdiff 4/4 identical |
 | ReleaseFast examples sweep | full examples gate, optimized Zig library vs optimized C oracle | **217/217** identical |
@@ -98,8 +98,9 @@ These are limits of the evidence, not known incompatibilities:
 | Non-default `config.h` | The Zig modules implement raylib's **default** feature set. Code behind default-off flags is not ported: image formats TGA, JPG, PSD, HDR, PIC, PNM, KTX, ASTC, PKM, PVR, PEP; font format BDF; audio format FLAC; rshapes' triangles fallback (`SUPPORT_QUADS_DRAW_MODE=0`). Rebuilding with different `SUPPORT_*` values changes the C oracle but not the Zig port. |
 | Other platforms / GL versions | Not compiled (see §1, not-migrated.md). |
 | Shared library | Only a static archive is built. |
+| File system misuse | Where C raylib's result depends on undefined behaviour or on the filesystem, the Zig port picks one documented answer: `LoadFileText` on a directory returns NULL ("Failed to read text file"); C's answer varies by filesystem (on ext4 it returns ""). `LoadFileData`/`GetFileLength` on a directory match C on ext4. `ExportDataAsCode` with `dataSize <= 0` returns false (C reads `data[-1]`). NULL paths return NULL/false/0 where C would crash, and `SaveFileText(f, NULL)` writes an empty file (glibc writes "(null)"). A failed write makes `SaveFileData`/`SaveFileText` return false. `LoadDirectoryFilesEx` with no matches returns `paths == NULL` (C returns a `calloc(0)` pointer); `count` is 0 either way and `UnloadDirectoryFiles` accepts both. |
 
-There are **no known behavioral differences** within the configuration of §1.
+There are **no known behavioral differences** for valid inputs within the configuration of §1.
 
 ## 6. The idiomatic Zig API (a separate surface)
 

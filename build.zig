@@ -821,6 +821,7 @@ pub fn build(b: *std.Build) void {
         const programs = [_]struct { name: []const u8, args: []const []const u8 }{
             .{ .name = "text_strings", .args = &.{} },
             .{ .name = "core_files", .args = &.{} },
+            .{ .name = "core_fileio", .args = &.{} },
             .{ .name = "shapes_sweep", .args = &.{} },
             .{ .name = "font_data", .args = &.{
                 fonts_dir ++ "/anonymous_pro_bold.ttf",

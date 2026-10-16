@@ -186,3 +186,9 @@
 # Session total ~408.4M main-loop (incl. cache reads) + ~3.87M agents.
 # 2026-10-16 15:24-17:10 phase W (web target) was done from the raylib-zig-web session; its tokens are recorded in raylib-zig-web/tokens.txt, not here.
 # 2026-10-16 18:07-18:50 shapes browser gate (46/46) was done from the raylib-zig-web session; tokens in raylib-zig-web/tokens.txt row 9.
+# --- new session 2026-10-16 19:19-19:55: idiomatic-Zig round 2.1 (review feedback: "C with Zig keywords")
+1	2026-10-16	19:19:32	19:20:18	16	77792	631742	8465	718015	718015	review feedback assessed: ~980 libc/raw-alloc calls, 0 Allocator
+2	2026-10-16	19:21:10	19:21:23	4	6214	180314	2096	188628	906643	reply to reviewer drafted
+3	2026-10-16	19:21:50	19:41:14	344	529511	36109886	282850	36922591	37829234	core_fileio cdiff; idiomaudit ratchet; src/fs.zig + rcore wrappers
+4	2026-10-16	19:46:12	19:55:00+	22	7747	2799991	5304	2813064	40642298	(in progress at record) gates: cdiff 5/5, pixel 12/12, exdiff 217/217, web 46/46; docs; commit
+# Session total so far ~40.6M main-loop (incl. cache reads).

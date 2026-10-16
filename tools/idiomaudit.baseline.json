@@ -1,0 +1,107 @@
+{
+  "src/api/c.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 379
+  },
+  "src/api/c_exdiff.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 379
+  },
+  "src/api/raylib.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 2
+  },
+  "src/c_va.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
+  "src/fs.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
+  "src/gl33.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 47
+  },
+  "src/gles3.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 46
+  },
+  "src/platforms/rcore_desktop_glfw.zig": {
+    "externs": 0,
+    "calls": 17,
+    "cptrs": 30
+  },
+  "src/platforms/rcore_web.zig": {
+    "externs": 0,
+    "calls": 8,
+    "cptrs": 31
+  },
+  "src/raudio.zig": {
+    "externs": 9,
+    "calls": 99,
+    "cptrs": 100
+  },
+  "src/raygui/c.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 94
+  },
+  "src/raygui/raygui.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
+  "src/raymath.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
+  "src/rcamera.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 12
+  },
+  "src/rcore.zig": {
+    "externs": 19,
+    "calls": 73,
+    "cptrs": 169
+  },
+  "src/rgestures.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 0
+  },
+  "src/rlgl.zig": {
+    "externs": 7,
+    "calls": 24,
+    "cptrs": 36
+  },
+  "src/rmodels.zig": {
+    "externs": 13,
+    "calls": 362,
+    "cptrs": 393
+  },
+  "src/rshapes.zig": {
+    "externs": 0,
+    "calls": 0,
+    "cptrs": 10
+  },
+  "src/rtext.zig": {
+    "externs": 12,
+    "calls": 160,
+    "cptrs": 203
+  },
+  "src/rtextures.zig": {
+    "externs": 10,
+    "calls": 132,
+    "cptrs": 170
+  }
+}

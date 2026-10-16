@@ -4,6 +4,25 @@ Authoritative current state. Update at every milestone. See [plan.md](plan.md)
 for the roadmap, [CLAUDE.md](CLAUDE.md) for conventions, [tokens.txt](tokens.txt)
 for cost.
 
+## Round 2 — idiomatic Zig internals — in progress (started 2026-10-16)
+
+External review: the ported modules read as "C with Zig keywords". Fixing the
+internals module by module behind the same C ABI; plan and contract in
+[IMPLEMENT-idiomatic-zig.md](IMPLEMENT-idiomatic-zig.md), lessons in
+[docs/idioms.md](docs/idioms.md).
+
+- `tools/idiomaudit.py`: ratchet on libc externs / libc+RL_* calls / `[*c]`
+  per file (baseline at HEAD e73f1c0: 90 / 978 / 2136).
+- **2.1 rcore file system ✅** — `src/fs.zig` (std-only: slices, error unions,
+  `std.Io`, `Allocator`, 9 leak-checked tests) + thin wrappers in rcore.zig.
+  rcore: externs 39→19, calls 176→73, `[*c]` 204→169. Total now 70 / 875 / 2101.
+  New gate `test/cdiff/core_fileio.c` (353 lines, passed before and after the
+  rewrite; caught a one-blank-line header bug in the first draft).
+  Gates: cdiff 5/5 (Debug + ReleaseFast), pixel 12/12, exdiff 217/217,
+  audio 43/43, data, math/cam/gest, apitest, constaudit 0, web 46/46.
+- Next: 2.1b automation events file I/O (last fopen/fgets/sscanf in rcore),
+  then rtext, rtextures, rmodels, raudio, rlgl.
+
 ## Phase W — web target (for raylib-zig-web) — in progress (started 2026-10-16)
 
 The browser build of the port, for the documentation site. Details: docs/web.md.
