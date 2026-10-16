@@ -829,6 +829,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "audio_wave", .args = &.{} },
             .{ .name = "image_ops", .args = &.{"/home/rajesh/opensource/graphics/raylib-6.2/examples/textures/resources/scarfy_run.gif"} },
             .{ .name = "text_fonts", .args = &.{fonts_dir} },
+            .{ .name = "models_data", .args = &.{"/home/rajesh/opensource/graphics/raylib-6.2/examples"} },
             .{ .name = "font_data", .args = &.{
                 fonts_dir ++ "/anonymous_pro_bold.ttf",
                 fonts_dir ++ "/pixantiqua.ttf",
