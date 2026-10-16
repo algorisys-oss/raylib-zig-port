@@ -62,6 +62,9 @@ pub fn main() !void {
 | color `#define` (`RAYWHITE`) | `Color` decl (`.ray_white`) | `clearBackground(.ray_white)` |
 | enum constant (`KEY_LEFT_SHIFT`) | enum tag without prefix | `.left_shift` |
 | printf-style varargs (`TextFormat`, `TraceLog`) | `std.fmt` comptime format | `rl.textFormat("{d} pts", .{score})` |
+| `PI` / `DEG2RAD` / `RAD2DEG` | `f32` constants | `rl.deg2rad * angle` |
+| `char *` struct field | `[*:0]u8` (NUL-terminated) | `std.mem.span(files.paths.?[0])` |
+| `material.maps[MATERIAL_MAP_X]` | `material.map(.x)` → `*MaterialMap` | `model.materials.?[0].map(.diffuse).texture = tex` |
 
 Enums that represent open sets (key codes, gamepad buttons, gestures,
 shader locations) are non-exhaustive (`_`), so any value raylib can return
@@ -79,7 +82,10 @@ low-level GL layer; examples that need it stay C-only for now.)
 raylib allocates with its own `MemAlloc`/`MemFree` (libc malloc); the API
 does not take a `std.mem.Allocator`, because the memory is owned by raylib and
 must be returned to raylib (`unloadFileData`, `unloadImageColors`, …) exactly
-as in C. Slices returned by the API point at raylib-owned memory; the matching
+as in C. The reverse direction — buffers you build and hand to raylib, which
+frees them itself (e.g. `Mesh.vertices` passed to `uploadMesh`, released by
+`unloadModel`) — goes through `rl.mem_allocator`, a `std.mem.Allocator` over
+`MemAlloc`/`MemRealloc`/`MemFree`. Slices returned by the API point at raylib-owned memory; the matching
 `unload*` takes the slice back. Functions documented upstream as returning a
 "static string" (e.g. `textFormat`, `getFileName`) return slices into raylib's
 internal buffers — valid until the next call, as in C.

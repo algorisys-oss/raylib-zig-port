@@ -15,6 +15,40 @@ const std = @import("std");
 /// substitutes the generated c_exdiff.zig determinism variant).
 pub const c = @import("raylib_c");
 
+// raylib.h math defines, typed f32 like the C macros (DEG2RAD is PI/180.0f).
+pub const pi: f32 = 3.14159265358979323846;
+pub const deg2rad: f32 = pi / 180.0;
+pub const rad2deg: f32 = 180.0 / pi;
+
+/// `std.mem.Allocator` over raylib's MemAlloc/MemRealloc/MemFree: use it for
+/// buffers raylib takes ownership of and frees itself (e.g. `Mesh.vertices`
+/// handed to `uploadMesh`, released by `unloadMesh`/`unloadModel`).
+pub const mem_allocator: std.mem.Allocator = .{ .ptr = undefined, .vtable = &mem_vtable };
+
+const mem_vtable: std.mem.Allocator.VTable = .{
+    .alloc = memAllocFn,
+    .resize = std.mem.Allocator.noResize,
+    .remap = memRemapFn,
+    .free = memFreeFn,
+};
+
+// MemAlloc is malloc-backed: aligned for any fundamental type, no more.
+const mem_max_align = @alignOf(std.c.max_align_t);
+
+fn memAllocFn(_: *anyopaque, len: usize, alignment: std.mem.Alignment, _: usize) ?[*]u8 {
+    if (alignment.toByteUnits() > mem_max_align) return null;
+    return @ptrCast(c.MemAlloc(std.math.cast(c_uint, len) orelse return null));
+}
+
+fn memRemapFn(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+    if (alignment.toByteUnits() > mem_max_align) return null;
+    return @ptrCast(c.MemRealloc(memory.ptr, std.math.cast(c_uint, new_len) orelse return null));
+}
+
+fn memFreeFn(_: *anyopaque, memory: []u8, _: std.mem.Alignment, _: usize) void {
+    c.MemFree(memory.ptr);
+}
+
 // --------------------------------------------------------------------------
 // Structures
 // --------------------------------------------------------------------------
@@ -193,6 +227,12 @@ pub const Material = extern struct {
     shader: Shader,
     maps: ?[*]MaterialMap,
     params: [4]f32,
+
+    /// Material map by index: `model.materials.?[0].map(.diffuse).texture = texture`
+    /// (C: `model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture`).
+    pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+        return &material.maps.?[@intCast(@backingInt(index))];
+    }
 };
 
 pub const Transform = extern struct {
@@ -302,7 +342,7 @@ pub const VrStereoConfig = extern struct {
 
 pub const FilePathList = extern struct {
     count: c_uint,
-    paths: ?[*]?[*]u8,
+    paths: ?[*][*:0]u8,
 };
 
 pub const AutomationEvent = extern struct {
@@ -1282,7 +1322,7 @@ pub fn setTraceLogLevel(logLevel: TraceLogLevel) void {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -1300,8 +1340,8 @@ pub fn memAlloc(size: u32) ?*anyopaque {
 }
 
 /// Internal memory reallocator
-pub fn memRealloc(ptr: []u8) ?*anyopaque {
-    return c.MemRealloc(@ptrCast(ptr.ptr), @intCast(ptr.len));
+pub fn memRealloc(ptr: *anyopaque, size: u32) ?*anyopaque {
+    return c.MemRealloc(ptr, size);
 }
 
 /// Internal memory free
@@ -2428,8 +2468,8 @@ pub fn imageAlphaPremultiply(image: *Image) void {
 }
 
 /// Apply Gaussian blur using a box blur approximation
-pub fn imageBlurGaussian(image: []Image) void {
-    c.ImageBlurGaussian(image.ptr, @intCast(image.len));
+pub fn imageBlurGaussian(image: *Image, blurSize: i32) void {
+    c.ImageBlurGaussian(image, blurSize);
 }
 
 /// Apply custom square convolution kernel to image
@@ -3129,7 +3169,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };

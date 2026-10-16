@@ -79,9 +79,12 @@ while read -r entry frames; do
   # Flags mirror upstream examples/Makefile: gnu99 (e.g. strnlen),
   # -DPLATFORM_DESKTOP (selects GLSL 330 shaders and desktop-only paths — without
   # it shader examples silently load their GLSL 100/ES variants), and
-  # -I src/external (glad.h for raylib_opengl_interop).
+  # -I src/external (glad.h for raylib_opengl_interop). -ffp-contract=off as for
+  # all C in this repo: zig cc targets the native CPU, so clang would otherwise
+  # fuse `a*b + c` into FMA, which Zig never does (the Zig-API translations of
+  # e.g. models_waving_cubes then differ in the last float bit).
   if ! zig cc -c "$src" -o "$TMP/$name.o" -include tools/exdiff/shim.h \
-        -I"$RAYLIB_SRC" -I"$RAYLIB_SRC/external" -DPLATFORM_DESKTOP -std=gnu99 \
+        -I"$RAYLIB_SRC" -I"$RAYLIB_SRC/external" -DPLATFORM_DESKTOP -std=gnu99 -ffp-contract=off \
         2> "$TMP/$name.cc.log"; then
     broken=$((broken+1)); failures+=("$name (compile)")
     printf "  CFAIL %s\n" "$name"; continue

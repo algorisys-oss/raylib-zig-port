@@ -99,6 +99,10 @@ RETURN_ENUMS = {
 # Pointer param followed by an int param with one of these names -> one slice.
 COUNT_NAMES = re.compile(r"(?:[cC]ount|[sS]ize|[lL]ength|^instances)$")
 
+# Pointer params followed by a *Size/*Count-named int that is NOT their element
+# count (a single in/out struct, or a byte size of an opaque block).
+NOT_SLICES = {("ImageBlurGaussian", "image"), ("MemRealloc", "ptr")}
+
 # Params whose C name would shadow a declaration in Zig (Zig forbids shadowing).
 PARAM_RENAMES = {
     ("FileRename", "fileRename"): "newFileName",
@@ -144,6 +148,18 @@ COLOR_NAMES = {
     "DARKBROWN": "dark_brown", "RAYWHITE": "ray_white",
 }
 
+# Methods appended to generated structs: accessors where a C idiom (an array
+# indexed by an enum) has no direct Zig spelling. ABI unaffected (decls only).
+STRUCT_METHODS = {
+    "Material": '''
+    /// Material map by index: `model.materials.?[0].map(.diffuse).texture = texture`
+    /// (C: `model.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture`).
+    pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+        return &material.maps.?[@intCast(@intFromEnum(index))];
+    }
+''',
+}
+
 # Hand-written wrappers: name -> Zig source (uses `c.` for the boundary).
 # Each exists because its C signature carries something the mechanical rules
 # deliberately don't guess at: out-params, owned buffers, varargs, callbacks.
@@ -154,7 +170,7 @@ OVERRIDES = {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -172,7 +188,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -787,7 +803,8 @@ class Gen:
                     sig.append(f"{pn}: [:0]const u8")
                     call.append(f"{pn}.ptr")
             elif (p.stars == 1 and nxt is not None and nxt.stars == 0 and nxt.base in ("int", "unsigned int")
-                  and COUNT_NAMES.search(nxt.name) and p.base != "char"):
+                  and COUNT_NAMES.search(nxt.name) and p.base != "char"
+                  and (fname, p.name) not in NOT_SLICES):
                 elem = "u8" if p.base == "void" else self.api_scalar(p.base)
                 if p.base == "char":
                     raise ValueError("char slice")
@@ -889,6 +906,12 @@ class Gen:
             for _ in range(stars - 1):
                 t = f"?[*]{t}"
             return t
+        if base == "char" and stars:
+            # `char *` fields are NUL-terminated strings (FilePathList.paths).
+            t = "[*:0]u8"
+            for _ in range(stars - 1):
+                t = f"[*]{t}"
+            return f"?{t}"
         z = self.api_scalar(base) if base in C_SCALARS else base
         if base in C_SCALARS:
             z = {"int": "c_int", "unsigned int": "c_uint"}.get(base, z)
@@ -907,6 +930,8 @@ class Gen:
             out.append(f"pub const {sname} = extern struct {{")
             for base, stars, fname, array in fields:
                 out.append(f"    {zig_ident(fname)}: {self.field_type(sname, base, stars, fname, array)},")
+            if sname in STRUCT_METHODS:
+                out.append(STRUCT_METHODS[sname].rstrip("\n"))
             if sname == "Color":
                 out.append("")
                 for cname, r, g, b, a, comment in parse_colors(self.src):
@@ -1071,6 +1096,40 @@ const std = @import("std");
 /// A named module: build.zig wires it to src/api/c.zig (the examples gate
 /// substitutes the generated c_exdiff.zig determinism variant).
 pub const c = @import("raylib_c");
+
+// raylib.h math defines, typed f32 like the C macros (DEG2RAD is PI/180.0f).
+pub const pi: f32 = 3.14159265358979323846;
+pub const deg2rad: f32 = pi / 180.0;
+pub const rad2deg: f32 = 180.0 / pi;
+
+/// `std.mem.Allocator` over raylib's MemAlloc/MemRealloc/MemFree: use it for
+/// buffers raylib takes ownership of and frees itself (e.g. `Mesh.vertices`
+/// handed to `uploadMesh`, released by `unloadMesh`/`unloadModel`).
+pub const mem_allocator: std.mem.Allocator = .{ .ptr = undefined, .vtable = &mem_vtable };
+
+const mem_vtable: std.mem.Allocator.VTable = .{
+    .alloc = memAllocFn,
+    .resize = std.mem.Allocator.noResize,
+    .remap = memRemapFn,
+    .free = memFreeFn,
+};
+
+// MemAlloc is malloc-backed: aligned for any fundamental type, no more.
+const mem_max_align = @alignOf(std.c.max_align_t);
+
+fn memAllocFn(_: *anyopaque, len: usize, alignment: std.mem.Alignment, _: usize) ?[*]u8 {
+    if (alignment.toByteUnits() > mem_max_align) return null;
+    return @ptrCast(c.MemAlloc(std.math.cast(c_uint, len) orelse return null));
+}
+
+fn memRemapFn(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, _: usize) ?[*]u8 {
+    if (alignment.toByteUnits() > mem_max_align) return null;
+    return @ptrCast(c.MemRealloc(memory.ptr, std.math.cast(c_uint, new_len) orelse return null));
+}
+
+fn memFreeFn(_: *anyopaque, memory: []u8, _: std.mem.Alignment, _: usize) void {
+    c.MemFree(memory.ptr);
+}
 '''
 
 
