@@ -72,6 +72,26 @@ const c_defines = [_][]const u8{
 /// gated by `zig build apiexamples` against the original C example.
 const api_examples = [_][]const u8{
     "core/core_basic_window",
+    "shaders/shaders_ascii_rendering",
+    "shaders/shaders_basic_pbr",
+    "shaders/shaders_custom_uniform",
+    "shaders/shaders_eratosthenes_sieve",
+    "shaders/shaders_julia_set",
+    "shaders/shaders_mandelbrot_set",
+    "shaders/shaders_model_shader",
+    "shaders/shaders_multi_sample2d",
+    "shaders/shaders_normalmap_rendering",
+    "shaders/shaders_palette_switch",
+    "shaders/shaders_postprocessing",
+    "shaders/shaders_raymarching_rendering",
+    "shaders/shaders_rounded_rectangle",
+    "shaders/shaders_shapes_textures",
+    "shaders/shaders_simple_mask",
+    "shaders/shaders_spotlight_rendering",
+    "shaders/shaders_texture_outline",
+    "shaders/shaders_texture_rendering",
+    "shaders/shaders_texture_tiling",
+    "shaders/shaders_texture_waves",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };

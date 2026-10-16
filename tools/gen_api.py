@@ -144,6 +144,25 @@ COLOR_NAMES = {
     "DARKBROWN": "dark_brown", "RAYWHITE": "ray_white",
 }
 
+# Typed accessors for raylib's enum-indexed arrays: C indexes `shader.locs[]`
+# and `material.maps[]` with int constants (SHADER_LOC_*, MATERIAL_MAP_*); the
+# API indexes them with the enum. They return pointers, so they read and write
+# like the C lvalue: `shader.loc(.vector_view).* = loc`.
+STRUCT_METHODS = {
+    "Shader": '''
+/// `shader.locs[index]`: the location bound to a standard shader slot.
+pub fn loc(shader: Shader, index: ShaderLocationIndex) *c_int {
+    return &shader.locs.?[@intCast(@backingInt(index))];
+}
+''',
+    "Material": '''
+/// `material.maps[index]`: one of the material's standard maps.
+pub fn map(material: Material, index: MaterialMapIndex) *MaterialMap {
+    return &material.maps.?[@intCast(@backingInt(index))];
+}
+''',
+}
+
 # Hand-written wrappers: name -> Zig source (uses `c.` for the boundary).
 # Each exists because its C signature carries something the mechanical rules
 # deliberately don't guess at: out-params, owned buffers, varargs, callbacks.
@@ -154,7 +173,7 @@ OVERRIDES = {
 /// Formats with std.fmt; messages longer than 1023 bytes are truncated.
 pub fn traceLog(logLevel: TraceLogLevel, comptime format: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
-    const text = std.fmt.bufPrintZ(&buffer, format, args) catch blk: {
+    const text = std.fmt.bufPrintSentinel(&buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -172,7 +191,7 @@ pub fn textFormat(comptime format: []const u8, args: anytype) [:0]const u8 {
     };
     const buffer = &S.buffers[S.index];
     S.index = (S.index + 1) % S.buffers.len;
-    return std.fmt.bufPrintZ(buffer, format, args) catch blk: {
+    return std.fmt.bufPrintSentinel(buffer, format, args, 0) catch blk: {
         buffer[buffer.len - 1] = 0;
         break :blk buffer[0 .. buffer.len - 1 :0];
     };
@@ -912,6 +931,8 @@ class Gen:
                 for cname, r, g, b, a, comment in parse_colors(self.src):
                     zname = COLOR_NAMES.get(cname, cname.lower())
                     out.append(f"    pub const {zname}: Color = .{{ .r = {r}, .g = {g}, .b = {b}, .a = {a} }}; // {comment.strip()}")
+            if sname in STRUCT_METHODS:
+                out.extend("    " + l if l else "" for l in STRUCT_METHODS[sname].splitlines())
             out.append("};\n")
         for target, alias in self.aliases:
             out.append(f"pub const {alias} = {target};")
