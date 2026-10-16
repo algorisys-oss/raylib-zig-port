@@ -69,10 +69,24 @@ const c_defines = [_][]const u8{
 };
 
 /// Translated but only compiled, not pixel-gated: the C original is
-/// self-nondeterministic under CPU load (see test/examples.list).
+/// self-nondeterministic (audio-thread timing, a wall-clock busy-wait) or
+/// interactive (see test/examples.list).
 const api_examples_build_only = [_][]const u8{
     "audio/audio_mixed_processor",
+    "audio/audio_module_playing",
+    "audio/audio_raw_stream",
+    "audio/audio_spectrum_visualizer",
+    "audio/audio_stream_callback",
     "audio/audio_stream_effects",
+    "core/core_custom_frame_control",
+    "core/core_input_gestures_testbed",
+    "core/core_window_should_close",
+};
+
+/// Zig-API examples that link a third-party single-file C library the upstream
+/// example bundles: each instantiates it in `examples/zig/<entry>_shim.c`.
+const api_example_c_shims = [_][]const u8{
+    "core/core_screen_recording",
 };
 
 /// Upstream examples translated to the idiomatic Zig API (examples/zig/),
@@ -87,6 +101,7 @@ const api_examples = [_][]const u8{
     "core/core_2d_camera_mouse_zoom",
     "core/core_2d_camera_platformer",
     "core/core_2d_camera_split_screen",
+    "core/core_3d_camera_first_person",
     "core/core_3d_camera_fps",
     "core/core_3d_camera_free",
     "core/core_3d_camera_mode",
@@ -117,6 +132,7 @@ const api_examples = [_][]const u8{
     "core/core_random_values",
     "core/core_render_texture",
     "core/core_scissor_test",
+    "core/core_screen_recording",
     "core/core_smooth_pixelperfect",
     "core/core_storage_values",
     "core/core_text_file_loading",
@@ -161,6 +177,7 @@ const api_examples = [_][]const u8{
     "models/models_yaw_pitch_roll",
     "others/embedded_files_loading",
     "others/gl_scissor_shapes",
+    "others/raylib_opengl_interop",
     "shaders/shaders_ascii_rendering",
     "shaders/shaders_basic_lighting",
     "shaders/shaders_basic_pbr",
@@ -492,6 +509,10 @@ fn apiExample(b: *std.Build, gate: ApiGate, entry: []const u8, name: []const u8)
     for (gate.helpers) |helper| mod.addImport(helper.name, helper.module);
     mod.addIncludePath(b.path("vendor/raylib/src"));
     mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &.{"-std=c99"} });
+    for (api_example_c_shims) |shim| {
+        if (!std.mem.eql(u8, shim, entry)) continue;
+        mod.addCSourceFile(.{ .file = b.path(b.fmt("examples/zig/{s}_shim.c", .{entry})), .flags = &.{ "-std=c99", "-ffp-contract=off" } });
+    }
     mod.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
     mod.linkLibrary(gate.lib);
     for (sys_libs) |l| mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
