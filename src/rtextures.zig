@@ -14,6 +14,7 @@
 //! and only `extern`-declared and called here.
 
 const std = @import("std");
+const encode = @import("rtextures_encode.zig");
 
 //----------------------------------------------------------------------------------
 // libc / libm functions, called directly so results are bit-identical to the C source.
@@ -359,33 +360,6 @@ inline fn ptrAdd(ptr: anytype, offset: c_int) @TypeOf(ptr) {
 //----------------------------------------------------------------------------------
 // Module Internal Functions Definition
 //----------------------------------------------------------------------------------
-// Convert half-float (stored as unsigned short) to float
-fn HalfToFloat(x: u16) f32 {
-    const e: c_uint = (@as(c_uint, x) & 0x7c00) >> 10; // Exponent
-    const m: c_uint = (@as(c_uint, x) & 0x03ff) << 13; // Mantissa
-    const fm: f32 = @floatFromInt(m);
-    const v: c_uint = @as(c_uint, @bitCast(fm)) >> 23; // log2 bit hack to count leading zeros
-    const sign: c_uint = (@as(c_uint, x) & 0x8000) << 16;
-    const norm: c_uint = @intFromBool(e != 0) * (((e + 112) << 23) | m);
-    const denorm: c_uint = (@intFromBool(e == 0) & @intFromBool(m != 0)) *
-        (((v - 37) << 23) | ((m << @intCast(150 - v)) & 0x007fe000));
-    const ui: c_uint = sign | norm | denorm;
-    return @bitCast(ui);
-}
-
-// Convert float to half-float (stored as unsigned short)
-fn FloatToHalf(x: f32) u16 {
-    const b: c_uint = @as(c_uint, @bitCast(x)) +% 0x00001000; // Round-to-nearest-even
-    const e: c_uint = (b & 0x7f800000) >> 23; // Exponent
-    const m: c_uint = b & 0x007fffff; // Mantissa
-    const sign: c_uint = (b & 0x80000000) >> 16;
-    const norm: c_uint = @intFromBool(e > 112) * ((((e - 112) << 10) & 0x7c00) | (m >> 13));
-    const denorm: c_uint = (@intFromBool(e < 113) & @intFromBool(e > 101)) *
-        ((((0x007ff000 + m) >> @intCast(125 - e)) + 1) >> 1);
-    const sat: c_uint = @as(c_uint, @intFromBool(e > 143)) * 0x7fff;
-    return @truncate(sign | norm | denorm | sat);
-}
-
 // Get pixel data from image as Vector4 array (float normalized)
 fn LoadImageDataNormalized(image: Image) [*c]Vector4 {
     const pixels: [*c]Vector4 = @ptrCast(@alignCast(RL_MALLOC(@intCast(image.width * image.height * @as(c_int, @sizeOf(Vector4))))));
@@ -472,24 +446,24 @@ fn LoadImageDataNormalized(image: Image) [*c]Vector4 {
                     k += 4;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    pixels[i].x = HalfToFloat(d16[k]);
+                    pixels[i].x = encode.halfToFloat(d16[k]);
                     pixels[i].y = 0.0;
                     pixels[i].z = 0.0;
                     pixels[i].w = 1.0;
                     k += 1;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    pixels[i].x = HalfToFloat(d16[k]);
-                    pixels[i].y = HalfToFloat(d16[k + 1]);
-                    pixels[i].z = HalfToFloat(d16[k + 2]);
+                    pixels[i].x = encode.halfToFloat(d16[k]);
+                    pixels[i].y = encode.halfToFloat(d16[k + 1]);
+                    pixels[i].z = encode.halfToFloat(d16[k + 2]);
                     pixels[i].w = 1.0;
                     k += 3;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    pixels[i].x = HalfToFloat(d16[k]);
-                    pixels[i].y = HalfToFloat(d16[k + 1]);
-                    pixels[i].z = HalfToFloat(d16[k + 2]);
-                    pixels[i].w = HalfToFloat(d16[k + 3]);
+                    pixels[i].x = encode.halfToFloat(d16[k]);
+                    pixels[i].y = encode.halfToFloat(d16[k + 1]);
+                    pixels[i].z = encode.halfToFloat(d16[k + 2]);
+                    pixels[i].w = encode.halfToFloat(d16[k + 3]);
                     k += 4;
                 },
                 else => {},
@@ -1363,15 +1337,15 @@ export fn ImageFromChannel(image: Image, selectedChannel_in: c_int) callconv(.c)
                     k += 4;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    pixelValue = HalfToFloat(d16[k]);
+                    pixelValue = encode.halfToFloat(d16[k]);
                     k += 1;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    pixelValue = HalfToFloat(d16[k + sc]);
+                    pixelValue = encode.halfToFloat(d16[k + sc]);
                     k += 3;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    pixelValue = HalfToFloat(d16[k + sc]);
+                    pixelValue = encode.halfToFloat(d16[k + sc]);
                     k += 4;
                 },
                 else => {},
@@ -1575,7 +1549,7 @@ export fn ImageFormat(image: [*c]Image, newFormat: c_int) callconv(.c) void {
                     const o: [*]u16 = @ptrCast(@alignCast(image.*.data));
                     var i: usize = 0;
                     while (i < total) : (i += 1) {
-                        o[i] = FloatToHalf(pixels[i].x * 0.299 + pixels[i].y * 0.587 + pixels[i].z * 0.114);
+                        o[i] = encode.floatToHalf(pixels[i].x * 0.299 + pixels[i].y * 0.587 + pixels[i].z * 0.114);
                     }
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
@@ -1587,9 +1561,9 @@ export fn ImageFormat(image: [*c]Image, newFormat: c_int) callconv(.c) void {
                         i += 3;
                         k += 1;
                     }) {
-                        o[i] = FloatToHalf(pixels[k].x);
-                        o[i + 1] = FloatToHalf(pixels[k].y);
-                        o[i + 2] = FloatToHalf(pixels[k].z);
+                        o[i] = encode.floatToHalf(pixels[k].x);
+                        o[i + 1] = encode.floatToHalf(pixels[k].y);
+                        o[i + 2] = encode.floatToHalf(pixels[k].z);
                     }
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
@@ -1601,10 +1575,10 @@ export fn ImageFormat(image: [*c]Image, newFormat: c_int) callconv(.c) void {
                         i += 4;
                         k += 1;
                     }) {
-                        o[i] = FloatToHalf(pixels[k].x);
-                        o[i + 1] = FloatToHalf(pixels[k].y);
-                        o[i + 2] = FloatToHalf(pixels[k].z);
-                        o[i + 3] = FloatToHalf(pixels[k].w);
+                        o[i] = encode.floatToHalf(pixels[k].x);
+                        o[i + 1] = encode.floatToHalf(pixels[k].y);
+                        o[i + 2] = encode.floatToHalf(pixels[k].z);
+                        o[i + 3] = encode.floatToHalf(pixels[k].w);
                     }
                 },
                 else => {},
@@ -1925,11 +1899,11 @@ export fn ImageAlphaClear(image: [*c]Image, color: Color, threshold: f32) callco
                 const d: [*]u16 = @ptrCast(@alignCast(image.*.data));
                 var i: usize = 3;
                 while (i < total * 4) : (i += 4) {
-                    if (HalfToFloat(d[i]) <= threshold) {
-                        d[i - 3] = FloatToHalf(@as(f32, @floatFromInt(color.r)) / 255.0);
-                        d[i - 2] = FloatToHalf(@as(f32, @floatFromInt(color.g)) / 255.0);
-                        d[i - 1] = FloatToHalf(@as(f32, @floatFromInt(color.b)) / 255.0);
-                        d[i] = FloatToHalf(@as(f32, @floatFromInt(color.a)) / 255.0);
+                    if (encode.halfToFloat(d[i]) <= threshold) {
+                        d[i - 3] = encode.floatToHalf(@as(f32, @floatFromInt(color.r)) / 255.0);
+                        d[i - 2] = encode.floatToHalf(@as(f32, @floatFromInt(color.g)) / 255.0);
+                        d[i - 1] = encode.floatToHalf(@as(f32, @floatFromInt(color.b)) / 255.0);
+                        d[i] = encode.floatToHalf(@as(f32, @floatFromInt(color.a)) / 255.0);
                     }
                 }
             },
@@ -2352,10 +2326,10 @@ export fn ImageDither(image: [*c]Image, rBpp: c_int, gBpp: c_int, bBpp: c_int, a
                 const oldPixel = pixels[@intCast(y * w + x)];
 
                 // NOTE: New pixel obtained by bits truncate
-                newPixel.r = oldPixel.r >> @intCast(8 - rBpp);
-                newPixel.g = oldPixel.g >> @intCast(8 - gBpp);
-                newPixel.b = oldPixel.b >> @intCast(8 - bBpp);
-                newPixel.a = oldPixel.a >> @intCast(8 - aBpp);
+                newPixel.r = iuc(@as(c_int, oldPixel.r) >> @intCast(8 - rBpp));
+                newPixel.g = iuc(@as(c_int, oldPixel.g) >> @intCast(8 - gBpp));
+                newPixel.b = iuc(@as(c_int, oldPixel.b) >> @intCast(8 - bBpp));
+                newPixel.a = iuc(@as(c_int, oldPixel.a) >> @intCast(8 - aBpp));
 
                 const rError: c_int = @as(c_int, oldPixel.r) - @as(c_int, @intCast(@as(c_int, newPixel.r) << @intCast(8 - rBpp)));
                 const gError: c_int = @as(c_int, oldPixel.g) - @as(c_int, @intCast(@as(c_int, newPixel.g) << @intCast(8 - gBpp)));
@@ -2818,24 +2792,24 @@ export fn LoadImageColors(image: Image) callconv(.c) [*c]Color {
                 },
                 PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
                     const pixel = d16[i];
-                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * (255.0 / 31.0));
-                    pixels[i].b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * (255.0 / 31.0));
+                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * @divTrunc(255, 31));
+                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * @divTrunc(255, 31));
+                    pixels[i].b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * @divTrunc(255, 31));
                     pixels[i].a = iuc((pixel & 0b0000000000000001) * 255);
                 },
                 PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
                     const pixel = d16[i];
-                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * (255.0 / 63.0));
-                    pixels[i].b = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000011111)) * (255.0 / 31.0));
+                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * @divTrunc(255, 31));
+                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * @divTrunc(255, 63));
+                    pixels[i].b = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000011111)) * @divTrunc(255, 31));
                     pixels[i].a = 255;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
                     const pixel = d16[i];
-                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * (255.0 / 15.0));
-                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * (255.0 / 15.0));
-                    pixels[i].b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * (255.0 / 15.0));
-                    pixels[i].a = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000001111)) * (255.0 / 15.0));
+                    pixels[i].r = tuc(@as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * @divTrunc(255, 15));
+                    pixels[i].g = tuc(@as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * @divTrunc(255, 15));
+                    pixels[i].b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * @divTrunc(255, 15));
+                    pixels[i].a = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000001111)) * @divTrunc(255, 15));
                 },
                 PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
                     pixels[i].r = d8[k];
@@ -2873,24 +2847,24 @@ export fn LoadImageColors(image: Image) callconv(.c) [*c]Color {
                     k += 4;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16 => {
-                    pixels[i].r = tuc(HalfToFloat(d16[k]) * 255.0);
+                    pixels[i].r = tuc(encode.halfToFloat(d16[k]) * 255.0);
                     pixels[i].g = 0;
                     pixels[i].b = 0;
                     pixels[i].a = 255;
                     k += 1;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                    pixels[i].r = tuc(HalfToFloat(d16[k]) * 255.0);
-                    pixels[i].g = tuc(HalfToFloat(d16[k + 1]) * 255.0);
-                    pixels[i].b = tuc(HalfToFloat(d16[k + 2]) * 255.0);
+                    pixels[i].r = tuc(encode.halfToFloat(d16[k]) * 255.0);
+                    pixels[i].g = tuc(encode.halfToFloat(d16[k + 1]) * 255.0);
+                    pixels[i].b = tuc(encode.halfToFloat(d16[k + 2]) * 255.0);
                     pixels[i].a = 255;
                     k += 3;
                 },
                 PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                    pixels[i].r = tuc(HalfToFloat(d16[k]) * 255.0);
-                    pixels[i].g = tuc(HalfToFloat(d16[k + 1]) * 255.0);
-                    pixels[i].b = tuc(HalfToFloat(d16[k + 2]) * 255.0);
-                    pixels[i].a = tuc(HalfToFloat(d16[k + 3]) * 255.0);
+                    pixels[i].r = tuc(encode.halfToFloat(d16[k]) * 255.0);
+                    pixels[i].g = tuc(encode.halfToFloat(d16[k + 1]) * 255.0);
+                    pixels[i].b = tuc(encode.halfToFloat(d16[k + 2]) * 255.0);
+                    pixels[i].a = tuc(encode.halfToFloat(d16[k + 3]) * 255.0);
                     k += 4;
                 },
                 else => {},
@@ -3019,24 +2993,24 @@ export fn GetImageColor(image: Image, x: c_int, y: c_int) callconv(.c) Color {
             },
             PIXELFORMAT_UNCOMPRESSED_R5G5B5A1 => {
                 const pixel = d16[idx];
-                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * (255.0 / 31.0));
-                color.b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * (255.0 / 31.0));
+                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * @divTrunc(255, 31));
+                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111000000) >> 6)) * @divTrunc(255, 31));
+                color.b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000000111110) >> 1)) * @divTrunc(255, 31));
                 color.a = iuc((pixel & 0b0000000000000001) * 255);
             },
             PIXELFORMAT_UNCOMPRESSED_R5G6B5 => {
                 const pixel = d16[idx];
-                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * (255.0 / 31.0));
-                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * (255.0 / 63.0));
-                color.b = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000011111)) * (255.0 / 31.0));
+                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111100000000000) >> 11)) * @divTrunc(255, 31));
+                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000011111100000) >> 5)) * @divTrunc(255, 63));
+                color.b = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000011111)) * @divTrunc(255, 31));
                 color.a = 255;
             },
             PIXELFORMAT_UNCOMPRESSED_R4G4B4A4 => {
                 const pixel = d16[idx];
-                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * (255.0 / 15.0));
-                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * (255.0 / 15.0));
-                color.b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * (255.0 / 15.0));
-                color.a = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000001111)) * (255.0 / 15.0));
+                color.r = tuc(@as(f32, @floatFromInt((pixel & 0b1111000000000000) >> 12)) * @divTrunc(255, 15));
+                color.g = tuc(@as(f32, @floatFromInt((pixel & 0b0000111100000000) >> 8)) * @divTrunc(255, 15));
+                color.b = tuc(@as(f32, @floatFromInt((pixel & 0b0000000011110000) >> 4)) * @divTrunc(255, 15));
+                color.a = tuc(@as(f32, @floatFromInt(pixel & 0b0000000000001111)) * @divTrunc(255, 15));
             },
             PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 => {
                 color.r = d8[idx * 4];
@@ -3069,22 +3043,22 @@ export fn GetImageColor(image: Image, x: c_int, y: c_int) callconv(.c) Color {
                 color.a = tuc(d32[idx * 4 + 3] * 255.0);
             },
             PIXELFORMAT_UNCOMPRESSED_R16 => {
-                color.r = tuc(HalfToFloat(d16[idx]) * 255.0);
+                color.r = tuc(encode.halfToFloat(d16[idx]) * 255.0);
                 color.g = 0;
                 color.b = 0;
                 color.a = 255;
             },
             PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-                color.r = tuc(HalfToFloat(d16[idx * 3]) * 255.0);
-                color.g = tuc(HalfToFloat(d16[idx * 3 + 1]) * 255.0);
-                color.b = tuc(HalfToFloat(d16[idx * 3 + 2]) * 255.0);
+                color.r = tuc(encode.halfToFloat(d16[idx * 3]) * 255.0);
+                color.g = tuc(encode.halfToFloat(d16[idx * 3 + 1]) * 255.0);
+                color.b = tuc(encode.halfToFloat(d16[idx * 3 + 2]) * 255.0);
                 color.a = 255;
             },
             PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-                color.r = tuc(HalfToFloat(d16[idx * 4]) * 255.0);
-                color.g = tuc(HalfToFloat(d16[idx * 4 + 1]) * 255.0);
-                color.b = tuc(HalfToFloat(d16[idx * 4 + 2]) * 255.0);
-                color.a = tuc(HalfToFloat(d16[idx * 4 + 3]) * 255.0);
+                color.r = tuc(encode.halfToFloat(d16[idx * 4]) * 255.0);
+                color.g = tuc(encode.halfToFloat(d16[idx * 4 + 1]) * 255.0);
+                color.b = tuc(encode.halfToFloat(d16[idx * 4 + 2]) * 255.0);
+                color.a = tuc(encode.halfToFloat(d16[idx * 4 + 3]) * 255.0);
             },
             else => TraceLog(LOG_WARNING, "Compressed image format does not support color reading"),
         }
@@ -3196,22 +3170,22 @@ export fn ImageDrawPixel(dst: [*c]Image, x: c_int, y: c_int, color: Color) callc
         PIXELFORMAT_UNCOMPRESSED_R16 => {
             const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
             const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx] = FloatToHalf(coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114);
+            d[idx] = encode.floatToHalf(coln.x * 0.299 + coln.y * 0.587 + coln.z * 0.114);
         },
         PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
             const coln = Vector3{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0 };
             const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx * 3] = FloatToHalf(coln.x);
-            d[idx * 3 + 1] = FloatToHalf(coln.y);
-            d[idx * 3 + 2] = FloatToHalf(coln.z);
+            d[idx * 3] = encode.floatToHalf(coln.x);
+            d[idx * 3 + 1] = encode.floatToHalf(coln.y);
+            d[idx * 3 + 2] = encode.floatToHalf(coln.z);
         },
         PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
             const coln = Vector4{ .x = @as(f32, @floatFromInt(color.r)) / 255.0, .y = @as(f32, @floatFromInt(color.g)) / 255.0, .z = @as(f32, @floatFromInt(color.b)) / 255.0, .w = @as(f32, @floatFromInt(color.a)) / 255.0 };
             const d: [*]u16 = @ptrCast(@alignCast(dst.*.data));
-            d[idx * 4] = FloatToHalf(coln.x);
-            d[idx * 4 + 1] = FloatToHalf(coln.y);
-            d[idx * 4 + 2] = FloatToHalf(coln.z);
-            d[idx * 4 + 3] = FloatToHalf(coln.w);
+            d[idx * 4] = encode.floatToHalf(coln.x);
+            d[idx * 4 + 1] = encode.floatToHalf(coln.y);
+            d[idx * 4 + 2] = encode.floatToHalf(coln.z);
+            d[idx * 4 + 3] = encode.floatToHalf(coln.w);
         },
         else => {},
     }
@@ -4963,22 +4937,22 @@ export fn GetPixelColor(srcPtr: ?*const anyopaque, format: c_int) callconv(.c) C
             color.a = tuc(s32(srcPtr)[3] * 255.0);
         },
         PIXELFORMAT_UNCOMPRESSED_R16 => {
-            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.b = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.r = tuc(encode.halfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.g = tuc(encode.halfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.b = tuc(encode.halfToFloat(s16(srcPtr)[0]) * 255.0);
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R16G16B16 => {
-            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16(srcPtr)[1]) * 255.0);
-            color.b = tuc(HalfToFloat(s16(srcPtr)[2]) * 255.0);
+            color.r = tuc(encode.halfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.g = tuc(encode.halfToFloat(s16(srcPtr)[1]) * 255.0);
+            color.b = tuc(encode.halfToFloat(s16(srcPtr)[2]) * 255.0);
             color.a = 255;
         },
         PIXELFORMAT_UNCOMPRESSED_R16G16B16A16 => {
-            color.r = tuc(HalfToFloat(s16(srcPtr)[0]) * 255.0);
-            color.g = tuc(HalfToFloat(s16(srcPtr)[1]) * 255.0);
-            color.b = tuc(HalfToFloat(s16(srcPtr)[2]) * 255.0);
-            color.a = tuc(HalfToFloat(s16(srcPtr)[3]) * 255.0);
+            color.r = tuc(encode.halfToFloat(s16(srcPtr)[0]) * 255.0);
+            color.g = tuc(encode.halfToFloat(s16(srcPtr)[1]) * 255.0);
+            color.b = tuc(encode.halfToFloat(s16(srcPtr)[2]) * 255.0);
+            color.a = tuc(encode.halfToFloat(s16(srcPtr)[3]) * 255.0);
         },
         else => {},
     }
