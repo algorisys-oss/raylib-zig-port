@@ -67,9 +67,11 @@ pub fn main() !void {
 }
 ```
 
-raymath is `rl.math`, rlgl is `rl.gl`, raygui is `@import("raygui")`. 214 upstream examples are translated
-in [examples/zig/](examples/zig/), each gated to render byte-identical to the
-original C example (`zig build apiexamples`).
+raymath is `rl.math`, rlgl is `rl.gl`, raygui is `@import("raygui")`.
+226 of raylib's 227 upstream examples are translated in
+[examples/zig/](examples/zig/): 217 are gated to render byte-identical to the
+original C example (`zig build apiexamples`); the rest are build-only because
+their C originals are nondeterministic or interactive.
 
 ## Goal
 

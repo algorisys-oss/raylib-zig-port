@@ -141,7 +141,7 @@
 13	2026-10-16	06:52:59	06:53:15	12	1868	2420031	1606	2423517	208693473	main gate 219/219 after harness change; push
 14	2026-10-16	08:50:03	08:50:33	32	494910	6826935	5705	7327582	216021055	merged shapes
 15	2026-10-16	08:55:29	08:55:38	4	178	979152	1536	980870	217001925	"Anything needed from me?"
-16	2026-10-16	09:08:21	09:10:00+	14	3383	2944160	2462	2950019	219951944	(in progress at record) apiexamples 181/181; push; handoff/tokens
+16	2026-10-16	09:08:21	09:09:08	14	3383	2944160	2462	2950019	219951944	apiexamples 181/181; push; handoff/tokens
 # Background agents (subagent_tokens as reported by the Agent tool):
 #   6.2 rebase: rshapes 248.3k · rmodels 204.3k · rtextures 163.0k · rcore 141.9k · rtext 128.4k = ~885.9k
 #   Phase 6 translations: rlgl 401.9k · core 377.6k · textures 285.6k · text+audio 270.5k ·
@@ -152,3 +152,22 @@
 # raylib-6.2-parity); GPU spot check 219/219; cdiff gate; ReleaseFast fixed;
 # Phase 6 Zig API (generated, rl/rl.math/rl.gl) with apitest + apiexamples
 # 181/181 byte-identical.
+
+# --- refresh 13:38 (same session): "continue" — coverage run (helpers, raygui, rcamera, last 10)
+17	2026-10-16	09:53:10	10:06:36	82	81272	21063545	57921	21202820	248120569	raygui vendored+binding (gen_raygui.py); launched helpers agent
+18	2026-10-16	10:33:40	10:56:03	84	48857	21956039	29973	22034953	270155522	first raygui example PASS; -Dapi-filter; build-only list; apiExample() refactor; 2 audio excluded (C-vs-C); launched 2 raygui agents
+19	2026-10-16	11:13:22	11:13:34	12	2053	2733632	1424	2737121	272892643	helpers merge quick check
+20	2026-10-16	11:29:05	11:29:23	8	1300	1644130	771	1646209	274538852	merged helpers (rlights/reasings) 192/192; push
+21	2026-10-16	11:32:24	11:32:26	2	114	548981	52	549149	275088001	"ok"
+22	2026-10-16	11:35:30	11:36:07	34	13009	7726328	7164	7746535	282834536	untracked .pyc; merged raygui B; setStyle value enum
+23	2026-10-16	11:48:49	11:48:52	4	542	555029	27	555602	283390138	raygui A interim
+24	2026-10-16	11:52:45	11:52:48	8	3550	1111142	262	1114962	284505100	raygui A report
+25	2026-10-16	11:54:58	11:56:10	48	23340	12890724	15463	12929575	297434675	203/203; merged raygui A; launched final gate
+26	2026-10-16	12:09:22	12:09:49	12	2858	2835270	2210	2840350	300275025	214/214; rcamera in rl; push; launched last-10 agent
+27	2026-10-16	13:03:54	13:03:58	4	596	569068	24	569692	300844717	last-10 interim
+28	2026-10-16	13:09:43	13:10:20	38	14326	9153848	7215	9175427	310020144	merged last 10 (ff); msf_gif provenance; docs
+29	2026-10-16	13:37:10	13:38:00+	10	1095	2302369	1078	2304552	312324696	(in progress at record) 217/217 confirmed; push; handoff
+# Agents this stretch: helpers 207.6k · raygui B 233.2k · raygui A 225.1k · last-10 208.5k = ~874.4k
+# Session total ~312.3M main-loop (incl. cache reads) + ~3.87M agents.
+# Landed: Zig-API coverage 226/227 upstream examples (217 gated byte-identical,
+# 9 build-only); raygui binding; rlights/reasings Zig modules; rcamera in rl.
