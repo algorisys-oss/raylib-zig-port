@@ -13,6 +13,8 @@
 //! rlgl, raymath, rtextures and rcore are reached through extern declarations too.
 
 const std = @import("std");
+const Io = std.Io;
+const cmem = @import("cmem.zig");
 
 //----------------------------------------------------------------------------------
 // libc / libm functions, called directly so results are bit-identical to the C source.
@@ -56,13 +58,13 @@ const EPSILON: f32 = 0.000001;
 //----------------------------------------------------------------------------------
 // Defines and Macros
 //----------------------------------------------------------------------------------
-const MAX_MATERIAL_MAPS: c_int = 12;
+const MAX_MATERIAL_MAPS = 12;
 /// Mirrors config.h `SUPPORT_GPU_SKINNING` (on by default since raylib 6.2): bone
 /// indices/weights get their own VBOs and are bound to the shader on draw.
 const SUPPORT_GPU_SKINNING = true;
 
 // NOTE: GPU skinning needs two additional vertex buffers (bone indices and weights)
-const MAX_MESH_VERTEX_BUFFERS: c_int = if (SUPPORT_GPU_SKINNING) 9 else 7;
+const MAX_MESH_VERTEX_BUFFERS = if (SUPPORT_GPU_SKINNING) 9 else 7;
 const MAX_FILEPATH_LENGTH: usize = 4096;
 
 // Default shader vertex attribute locations (from rlgl.h)
@@ -448,6 +450,72 @@ extern fn QuaternionCubicHermiteSpline(q1: Quaternion, outTangent1: Quaternion, 
 
 extern fn Clamp(value: f32, min: f32, max: f32) f32;
 extern fn FloatEquals(x: f32, y: f32) c_int;
+
+//----------------------------------------------------------------------------------
+// Internal helpers
+//----------------------------------------------------------------------------------
+const empty_model = std.mem.zeroes(Model);
+const empty_mesh = std.mem.zeroes(Mesh);
+
+/// A C count as a length; negative counts are empty, as C's `i < n` loops treat them
+fn count(n: anytype) usize {
+    return @intCast(@max(n, 0));
+}
+
+fn modelMeshes(model: Model) []Mesh {
+    return if (model.meshes == null) &.{} else model.meshes[0..count(model.meshCount)];
+}
+
+fn modelMaterials(model: Model) []Material {
+    return if (model.materials == null) &.{} else model.materials[0..count(model.materialCount)];
+}
+
+/// A float array viewed as the XYZ vectors it holds
+fn vector3s(values: []f32) []Vector3 {
+    return std.mem.bytesAsSlice(Vector3, std.mem.sliceAsBytes(values));
+}
+
+/// A float array viewed as the XY vectors it holds
+fn vector2s(values: []f32) []Vector2 {
+    return std.mem.bytesAsSlice(Vector2, std.mem.sliceAsBytes(values));
+}
+
+/// C's `(int)` cast as x86-64 performs it: NaN and out-of-range values give
+/// INT_MIN where Zig's @intFromFloat would trap (an axis-aligned ray makes
+/// GetRayCollisionBox divide by zero, and its normal goes infinite)
+fn cInt(v: f32) c_int {
+    if (!(v >= -2147483648.0 and v < 2147483648.0)) return std.math.minInt(c_int);
+    return @intFromFloat(v);
+}
+
+/// C's `(unsigned char)` cast of a float: the int conversion, truncated
+fn cByte(v: f32) u8 {
+    return @truncate(@as(c_uint, @bitCast(cInt(v))));
+}
+
+/// Releases a model's meshes' vertex data and its own arrays (CPU side only)
+fn freeModelData(model: Model) void {
+    for (modelMeshes(model)) |mesh| freeMeshArrays(mesh);
+    freeModelArrays(model);
+}
+
+/// Copies a C string into `buffer`, truncated to fit as snprintf("%s") does
+fn copyCString(buffer: []u8, source: [*c]const u8) [:0]const u8 {
+    const text = std.mem.span(source);
+    const len = @min(text.len, buffer.len - 1);
+    @memcpy(buffer[0..len], text[0..len]);
+    buffer[len] = 0;
+    return buffer[0..len :0];
+}
+
+/// std's process-wide Io: raylib's C API has no parameter to carry one
+fn io() Io {
+    return Io.Threaded.global_single_threaded.io();
+}
+
+fn changeDirectory(path: [*c]const u8) !void {
+    try std.process.setCurrentPath(io(), std.mem.span(path));
+}
 
 //----------------------------------------------------------------------------------
 // Module Functions Definition - 3D Shapes drawing
@@ -1312,28 +1380,27 @@ export fn DrawGrid(slices: c_int, spacing: f32) callconv(.c) void {
 
 // ---- par_shapes ----
 const par_shapes_mesh = extern struct {
-    points: [*c]f32,
+    points: ?[*]f32,
     npoints: c_int,
-    triangles: [*c]c_ushort,
+    triangles: ?[*]c_ushort,
     ntriangles: c_int,
-    normals: [*c]f32,
-    tcoords: [*c]f32,
+    normals: ?[*]f32,
+    tcoords: ?[*]f32,
 };
-extern fn par_shapes_free_mesh(mesh: ?*par_shapes_mesh) void;
-extern fn par_shapes_create_cylinder(slices: c_int, stacks: c_int) ?*par_shapes_mesh;
-extern fn par_shapes_create_cone(slices: c_int, stacks: c_int) ?*par_shapes_mesh;
-extern fn par_shapes_create_torus(slices: c_int, stacks: c_int, radius: f32) ?*par_shapes_mesh;
-extern fn par_shapes_create_parametric_sphere(slices: c_int, stacks: c_int) ?*par_shapes_mesh;
-extern fn par_shapes_create_trefoil_knot(slices: c_int, stacks: c_int, radius: f32) ?*par_shapes_mesh;
-extern fn par_shapes_create_hemisphere(slices: c_int, stacks: c_int) ?*par_shapes_mesh;
-extern fn par_shapes_create_plane(slices: c_int, stacks: c_int) ?*par_shapes_mesh;
-extern fn par_shapes_create_disk(radius: f32, slices: c_int, center: [*c]const f32, normal: [*c]const f32) ?*par_shapes_mesh;
+// NOTE: par_shapes never returns null: it does not check its own allocations
+extern fn par_shapes_free_mesh(mesh: *par_shapes_mesh) void;
+extern fn par_shapes_create_cylinder(slices: c_int, stacks: c_int) *par_shapes_mesh;
+extern fn par_shapes_create_cone(slices: c_int, stacks: c_int) *par_shapes_mesh;
+extern fn par_shapes_create_torus(slices: c_int, stacks: c_int, radius: f32) *par_shapes_mesh;
+extern fn par_shapes_create_parametric_sphere(slices: c_int, stacks: c_int) *par_shapes_mesh;
+extern fn par_shapes_create_trefoil_knot(slices: c_int, stacks: c_int, radius: f32) *par_shapes_mesh;
+extern fn par_shapes_create_hemisphere(slices: c_int, stacks: c_int) *par_shapes_mesh;
+extern fn par_shapes_create_disk(radius: f32, slices: c_int, center: *const [3]f32, normal: *const [3]f32) *par_shapes_mesh;
 extern fn par_shapes_set_epsilon_degenerate_sphere(epsilon: f64) void;
-extern fn par_shapes_translate(mesh: ?*par_shapes_mesh, x: f32, y: f32, z: f32) void;
-extern fn par_shapes_rotate(mesh: ?*par_shapes_mesh, radians: f32, axis: [*c]const f32) void;
-extern fn par_shapes_scale(mesh: ?*par_shapes_mesh, x: f32, y: f32, z: f32) void;
-extern fn par_shapes_merge_and_free(dst: ?*par_shapes_mesh, src: ?*par_shapes_mesh) void;
-extern fn par_shapes_compute_normals(m: ?*par_shapes_mesh) void;
+extern fn par_shapes_translate(mesh: *par_shapes_mesh, x: f32, y: f32, z: f32) void;
+extern fn par_shapes_rotate(mesh: *par_shapes_mesh, radians: f32, axis: *const [3]f32) void;
+extern fn par_shapes_scale(mesh: *par_shapes_mesh, x: f32, y: f32, z: f32) void;
+extern fn par_shapes_merge_and_free(dst: *par_shapes_mesh, src: *par_shapes_mesh) void;
 
 // ---- tinyobj ----
 const tinyobj_vertex_index_t = extern struct { v_idx: c_int, vt_idx: c_int, vn_idx: c_int };
@@ -1344,20 +1411,20 @@ const tinyobj_attrib_t = extern struct {
     num_faces: c_uint,
     num_face_num_verts: c_uint,
     pad0: c_int,
-    vertices: [*c]f32,
-    normals: [*c]f32,
-    texcoords: [*c]f32,
-    faces: [*c]tinyobj_vertex_index_t,
-    face_num_verts: [*c]c_int,
-    material_ids: [*c]c_int,
+    vertices: ?[*]f32,
+    normals: ?[*]f32,
+    texcoords: ?[*]f32,
+    faces: ?[*]tinyobj_vertex_index_t,
+    face_num_verts: ?[*]c_int,
+    material_ids: ?[*]c_int,
 };
 const tinyobj_shape_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     face_offset: c_uint,
     length: c_uint,
 };
 const tinyobj_material_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     ambient: [3]f32,
     diffuse: [3]f32,
     specular: [3]f32,
@@ -1368,22 +1435,21 @@ const tinyobj_material_t = extern struct {
     dissolve: f32,
     illum: c_int,
     pad0: c_int,
-    ambient_texname: [*c]u8,
-    diffuse_texname: [*c]u8,
-    specular_texname: [*c]u8,
-    specular_highlight_texname: [*c]u8,
-    bump_texname: [*c]u8,
-    displacement_texname: [*c]u8,
-    alpha_texname: [*c]u8,
+    ambient_texname: ?[*:0]u8,
+    diffuse_texname: ?[*:0]u8,
+    specular_texname: ?[*:0]u8,
+    specular_highlight_texname: ?[*:0]u8,
+    bump_texname: ?[*:0]u8,
+    displacement_texname: ?[*:0]u8,
+    alpha_texname: ?[*:0]u8,
 };
 const TINYOBJ_FLAG_TRIANGULATE: c_uint = 1 << 0;
-const TINYOBJ_INVALID_INDEX: c_int = @bitCast(@as(c_uint, 0x80000000));
 const TINYOBJ_SUCCESS: c_int = 0;
-extern fn tinyobj_parse_obj(attrib: [*c]tinyobj_attrib_t, shapes: [*c][*c]tinyobj_shape_t, num_shapes: [*c]c_uint, materials: [*c][*c]tinyobj_material_t, num_materials: [*c]c_uint, buf: [*c]const u8, len: c_uint, flags: c_uint) c_int;
-extern fn tinyobj_parse_mtl_file(materials_out: [*c][*c]tinyobj_material_t, num_materials_out: [*c]c_uint, filename: [*c]const u8) c_int;
-extern fn tinyobj_attrib_free(attrib: [*c]tinyobj_attrib_t) void;
-extern fn tinyobj_shapes_free(shapes: [*c]tinyobj_shape_t, num_shapes: c_uint) void;
-extern fn tinyobj_materials_free(materials: [*c]tinyobj_material_t, num_materials: c_uint) void;
+extern fn tinyobj_parse_obj(attrib: *tinyobj_attrib_t, shapes: *?[*]tinyobj_shape_t, num_shapes: *c_uint, materials: *?[*]tinyobj_material_t, num_materials: *c_uint, buf: [*]const u8, len: c_uint, flags: c_uint) c_int;
+extern fn tinyobj_parse_mtl_file(materials_out: *?[*]tinyobj_material_t, num_materials_out: *c_uint, filename: [*c]const u8) c_int;
+extern fn tinyobj_attrib_free(attrib: *tinyobj_attrib_t) void;
+extern fn tinyobj_shapes_free(shapes: ?[*]tinyobj_shape_t, num_shapes: c_uint) void;
+extern fn tinyobj_materials_free(materials: ?[*]tinyobj_material_t, num_materials: c_uint) void;
 
 // ---- cgltf ----
 const cgltf_size = usize;
@@ -2099,130 +2165,126 @@ const m3dp_map_Pm: u8 = 193;
 
 // Load model from files (mesh and material)
 export fn LoadModel(fileName: [*c]const u8) callconv(.c) Model {
-    var model = std.mem.zeroes(Model);
-
-    if (IsFileExtension(fileName, ".obj")) model = LoadOBJ(fileName);
-    if (IsFileExtension(fileName, ".iqm")) model = LoadIQM(fileName);
-    if (IsFileExtension(fileName, ".gltf") or IsFileExtension(fileName, ".glb")) model = LoadGLTF(fileName);
-    if (IsFileExtension(fileName, ".vox")) model = LoadVOX(fileName);
-    if (IsFileExtension(fileName, ".m3d")) model = LoadM3D(fileName);
+    var model = if (IsFileExtension(fileName, ".obj"))
+        loadObj(fileName)
+    else if (IsFileExtension(fileName, ".iqm"))
+        LoadIQM(fileName)
+    else if (IsFileExtension(fileName, ".gltf") or IsFileExtension(fileName, ".glb"))
+        LoadGLTF(fileName)
+    else if (IsFileExtension(fileName, ".vox"))
+        LoadVOX(fileName)
+    else if (IsFileExtension(fileName, ".m3d"))
+        LoadM3D(fileName)
+    else
+        empty_model;
 
     // Make sure model transform is set to identity matrix!
     model.transform = MatrixIdentity();
 
     if ((model.meshCount != 0) and (model.meshes != null)) {
         // Upload vertex data to GPU (static meshes)
-        var i: c_int = 0;
-        while (i < model.meshCount) : (i += 1) UploadMesh(&model.meshes[@intCast(i)], false);
+        for (modelMeshes(model)) |*mesh| UploadMesh(mesh, false);
     } else TraceLog(LOG_WARNING, "MESH: [%s] Failed to load model mesh(es) data", fileName);
 
     if (model.materialCount == 0) {
         TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to load model material data, default to white material", fileName);
-
-        model.materialCount = 1;
-        model.materials = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.materialCount), @sizeOf(Material))));
-        model.materials[0] = LoadMaterialDefault();
-
-        if (model.meshMaterial == null) model.meshMaterial = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
+        addDefaultMaterial(&model) catch TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to allocate memory for default material", fileName);
     }
 
     return model;
 }
 
+fn addDefaultMaterial(model: *Model) error{OutOfMemory}!void {
+    const materials = try cmem.alloc(Material, 1);
+    errdefer cmem.free(materials.ptr);
+    if (model.meshMaterial == null) model.meshMaterial = (try cmem.alloc(c_int, count(model.meshCount))).ptr;
+
+    materials[0] = LoadMaterialDefault();
+    model.materialCount = 1;
+    model.materials = materials.ptr;
+}
+
 // Load model from generated mesh
 export fn LoadModelFromMesh(mesh: Mesh) callconv(.c) Model {
-    var model = std.mem.zeroes(Model);
+    return modelFromMesh(mesh) catch {
+        TraceLog(LOG_WARNING, "MODEL: Failed to allocate memory for model");
+        return empty_model;
+    };
+}
+
+fn modelFromMesh(mesh: Mesh) error{OutOfMemory}!Model {
+    var model = empty_model;
+    errdefer freeModelArrays(model);
 
     model.transform = MatrixIdentity();
 
     model.meshCount = 1;
-    model.meshes = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
+    model.meshes = (try cmem.alloc(Mesh, 1)).ptr;
     model.meshes[0] = mesh;
 
     model.materialCount = 1;
-    model.materials = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.materialCount), @sizeOf(Material))));
+    model.materials = (try cmem.alloc(Material, 1)).ptr;
+    model.meshMaterial = (try cmem.alloc(c_int, 1)).ptr; // First material index: 0
     model.materials[0] = LoadMaterialDefault();
-
-    model.meshMaterial = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
-    model.meshMaterial[0] = 0; // First material index
 
     return model;
 }
 
 // Check if model is valid (loaded in GPU, VAO/VBOs)
 export fn IsModelValid(model: Model) callconv(.c) bool {
-    var result = false;
-
-    if ((model.meshes != null) and
+    const hasData = (model.meshes != null) and
         (model.materials != null) and
         (model.meshMaterial != null) and
         (model.meshCount > 0) and
-        (model.materialCount > 0)) result = true;
+        (model.materialCount > 0);
 
-    var i: c_int = 0;
-    while (i < model.meshCount) : (i += 1) {
-        const m = &model.meshes[@intCast(i)];
-        if ((m.vertices != null) and (m.vboId[0] == 0)) {
-            result = false;
-            break;
-        }
-        if ((m.texcoords != null) and (m.vboId[1] == 0)) {
-            result = false;
-            break;
-        }
-        if ((m.normals != null) and (m.vboId[2] == 0)) {
-            result = false;
-            break;
-        }
-        if ((m.colors != null) and (m.vboId[3] == 0)) {
-            result = false;
-            break;
-        }
-        if ((m.tangents != null) and (m.vboId[4] == 0)) {
-            result = false;
-            break;
-        }
-        if ((m.texcoords2 != null) and (m.vboId[5] == 0)) {
-            result = false;
-            break;
-        }
-        if ((m.indices != null) and (m.vboId[6] == 0)) {
-            result = false;
-            break;
-        }
-        if (SUPPORT_GPU_SKINNING) {
-            if ((m.boneIndices != null) and (m.vboId[7] == 0)) {
-                result = false;
-                break;
-            }
-            if ((m.boneWeights != null) and (m.vboId[8] == 0)) {
-                result = false;
-                break;
-            }
-        }
+    // Every vertex attribute present on the CPU must have its buffer on the GPU
+    for (modelMeshes(model)) |mesh| {
+        if (!isUploaded(mesh)) return false;
     }
 
-    return result;
+    return hasData;
+}
+
+fn isUploaded(mesh: Mesh) bool {
+    const Location = struct { present: bool, index: c_uint };
+    const locations = [_]Location{
+        .{ .present = mesh.vertices != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION },
+        .{ .present = mesh.texcoords != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD },
+        .{ .present = mesh.normals != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL },
+        .{ .present = mesh.colors != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR },
+        .{ .present = mesh.tangents != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT },
+        .{ .present = mesh.texcoords2 != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2 },
+        .{ .present = mesh.indices != null, .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES },
+        .{ .present = SUPPORT_GPU_SKINNING and (mesh.boneIndices != null), .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES },
+        .{ .present = SUPPORT_GPU_SKINNING and (mesh.boneWeights != null), .index = RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS },
+    };
+    for (locations) |location| {
+        if (location.present and (mesh.vboId[location.index] == 0)) return false;
+    }
+    return true;
 }
 
 // Unload model (meshes/materials) from memory (RAM and/or VRAM)
 export fn UnloadModel(model: Model) callconv(.c) void {
-    var i: c_int = 0;
-    while (i < model.meshCount) : (i += 1) UnloadMesh(model.meshes[@intCast(i)]);
-
-    i = 0;
-    while (i < model.materialCount) : (i += 1) RL_FREE(model.materials[@intCast(i)].maps);
-
-    RL_FREE(model.meshes);
-    RL_FREE(model.materials);
-    RL_FREE(model.meshMaterial);
-
-    RL_FREE(model.skeleton.bones);
-    RL_FREE(model.skeleton.bindPose);
-    RL_FREE(model.currentPose);
-    RL_FREE(model.boneMatrices);
+    for (modelMeshes(model)) |mesh| UnloadMesh(mesh);
+    freeModelArrays(model);
 
     TraceLog(LOG_INFO, "MODEL: Unloaded model (and meshes) from RAM and VRAM");
+}
+
+/// Releases a model's C-heap arrays, but not its meshes' vertex data
+fn freeModelArrays(model: Model) void {
+    for (modelMaterials(model)) |material| cmem.free(material.maps);
+
+    cmem.free(model.meshes);
+    cmem.free(model.materials);
+    cmem.free(model.meshMaterial);
+
+    cmem.free(model.skeleton.bones);
+    cmem.free(model.skeleton.bindPose);
+    cmem.free(model.currentPose);
+    cmem.free(model.boneMatrices);
 }
 
 // Compute model bounding box limits (considers all meshes)
@@ -2230,25 +2292,28 @@ export fn GetModelBoundingBox(model: Model) callconv(.c) BoundingBox {
     var bounds = std.mem.zeroes(BoundingBox);
 
     if (model.meshCount > 0) {
-        var temp = std.mem.zeroes(Vector3);
-        bounds = GetMeshBoundingBox(model.meshes[0]);
+        const all = modelMeshes(model);
+        bounds = GetMeshBoundingBox(all[0]);
 
-        var i: c_int = 1;
-        while (i < model.meshCount) : (i += 1) {
-            const tempBounds = GetMeshBoundingBox(model.meshes[@intCast(i)]);
+        for (all[1..]) |mesh| {
+            const meshBounds = GetMeshBoundingBox(mesh);
 
-            temp.x = if (bounds.min.x < tempBounds.min.x) bounds.min.x else tempBounds.min.x;
-            temp.y = if (bounds.min.y < tempBounds.min.y) bounds.min.y else tempBounds.min.y;
-            temp.z = if (bounds.min.z < tempBounds.min.z) bounds.min.z else tempBounds.min.z;
-            bounds.min = temp;
-
-            temp.x = if (bounds.max.x > tempBounds.max.x) bounds.max.x else tempBounds.max.x;
-            temp.y = if (bounds.max.y > tempBounds.max.y) bounds.max.y else tempBounds.max.y;
-            temp.z = if (bounds.max.z > tempBounds.max.z) bounds.max.z else tempBounds.max.z;
-            bounds.max = temp;
+            // Deliberately not @min/@max: C compares with `<`, keeping the
+            // second value on ties and NaNs
+            bounds.min = .{
+                .x = if (bounds.min.x < meshBounds.min.x) bounds.min.x else meshBounds.min.x,
+                .y = if (bounds.min.y < meshBounds.min.y) bounds.min.y else meshBounds.min.y,
+                .z = if (bounds.min.z < meshBounds.min.z) bounds.min.z else meshBounds.min.z,
+            };
+            bounds.max = .{
+                .x = if (bounds.max.x > meshBounds.max.x) bounds.max.x else meshBounds.max.x,
+                .y = if (bounds.max.y > meshBounds.max.y) bounds.max.y else meshBounds.max.y,
+                .z = if (bounds.max.z > meshBounds.max.z) bounds.max.z else meshBounds.max.z,
+            };
         }
     }
 
+    // NOTE: BoundingBox does not support rotation: a rotated model's box is up to the user
     bounds.min = Vector3Transform(bounds.min, model.transform);
     bounds.max = Vector3Transform(bounds.max, model.transform);
 
@@ -2262,111 +2327,68 @@ export fn UploadMesh(mesh: [*c]Mesh, dynamic: bool) callconv(.c) void {
         return;
     }
 
-    mesh.*.vboId = @ptrCast(@alignCast(RL_CALLOC(@intCast(MAX_MESH_VERTEX_BUFFERS), @sizeOf(c_uint))));
+    const vboId = cmem.alloc(c_uint, MAX_MESH_VERTEX_BUFFERS) catch {
+        TraceLog(LOG_WARNING, "MESH: Failed to allocate memory for vertex buffer ids");
+        return;
+    };
+    mesh.*.vboId = vboId.ptr;
+    uploadMeshBuffers(mesh, vboId, dynamic);
+}
 
-    mesh.*.vaoId = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION] = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD] = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL] = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR] = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT] = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2] = 0;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES] = 0;
-    if (SUPPORT_GPU_SKINNING) {
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES] = 0;
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS] = 0;
-    }
+fn uploadMeshBuffers(mesh: *Mesh, vboId: []c_uint, dynamic: bool) void {
+    const vertexCount = mesh.vertexCount;
 
-    mesh.*.vaoId = rlLoadVertexArray();
+    mesh.vaoId = rlLoadVertexArray();
+    _ = rlEnableVertexArray(mesh.vaoId);
 
-    _ = rlEnableVertexArray(mesh.*.vaoId);
-
-    // Enable vertex attributes: position (shader-location = 0)
-    const vertices: ?*const anyopaque = if (mesh.*.animVertices != null) mesh.*.animVertices else mesh.*.vertices;
-    mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION] = rlLoadVertexBuffer(vertices, mesh.*.vertexCount * 3 * @sizeOf(f32), dynamic);
+    // Vertex positions (shader-location = 0)
+    const vertices: ?*const anyopaque = if (mesh.animVertices != null) mesh.animVertices else mesh.vertices;
+    vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION] = rlLoadVertexBuffer(vertices, vertexCount * 3 * @sizeOf(f32), dynamic);
     rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION, 3, RL_FLOAT, false, 0, 0);
     rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION);
 
-    // Enable vertex attributes: texcoords (shader-location = 1)
-    if (mesh.*.texcoords != null) {
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD] = rlLoadVertexBuffer(mesh.*.texcoords, mesh.*.vertexCount * 2 * @sizeOf(f32), dynamic);
-        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD, 2, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD);
-    } else {
-        const value = [2]f32{ 0.0, 0.0 };
-        rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD), &value, SHADER_ATTRIB_VEC2, 2);
-        rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD);
-    }
+    const normals: ?*const anyopaque = if (mesh.animNormals != null) mesh.animNormals else mesh.normals;
+    const Attribute = struct {
+        location: c_uint,
+        data: ?*const anyopaque,
+        components: c_int,
+        size: c_int,
+        type: c_int = RL_FLOAT,
+        normalized: bool = false,
+        /// Value the shader reads when the mesh lacks the attribute
+        default: [4]f32,
+        defaultType: c_int,
+        defaultCount: c_int,
+    };
+    // NOTE: Order and defaults match upstream rmodels.c exactly, including the
+    // bone weights default set with a component count of 2
+    const attributes = [_]Attribute{
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD, .data = mesh.texcoords, .components = 2, .size = @sizeOf(f32), .default = .{ 0, 0, 0, 0 }, .defaultType = SHADER_ATTRIB_VEC2, .defaultCount = 2 },
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL, .data = if (mesh.normals != null) normals else null, .components = 3, .size = @sizeOf(f32), .default = .{ 0, 0, 1, 0 }, .defaultType = SHADER_ATTRIB_VEC3, .defaultCount = 3 },
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR, .data = mesh.colors, .components = 4, .size = @sizeOf(u8), .type = RL_UNSIGNED_BYTE, .normalized = true, .default = .{ 1, 1, 1, 1 }, .defaultType = SHADER_ATTRIB_VEC4, .defaultCount = 4 },
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT, .data = mesh.tangents, .components = 4, .size = @sizeOf(f32), .default = .{ 1, 0, 0, 1 }, .defaultType = SHADER_ATTRIB_VEC4, .defaultCount = 4 },
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2, .data = mesh.texcoords2, .components = 2, .size = @sizeOf(f32), .default = .{ 0, 0, 0, 0 }, .defaultType = SHADER_ATTRIB_VEC2, .defaultCount = 2 },
+        // GPU skinning: bone indices and weights
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES, .data = mesh.boneIndices, .components = 4, .size = @sizeOf(u8), .type = RL_UNSIGNED_BYTE, .default = .{ 0, 0, 0, 0 }, .defaultType = SHADER_ATTRIB_VEC4, .defaultCount = 4 },
+        .{ .location = RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS, .data = mesh.boneWeights, .components = 4, .size = @sizeOf(f32), .default = .{ 0, 0, 0, 0 }, .defaultType = SHADER_ATTRIB_VEC4, .defaultCount = 2 },
+    };
 
-    if (mesh.*.normals != null) {
-        const normals: ?*const anyopaque = if (mesh.*.animNormals != null) mesh.*.animNormals else mesh.*.normals;
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL] = rlLoadVertexBuffer(normals, mesh.*.vertexCount * 3 * @sizeOf(f32), dynamic);
-        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL, 3, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL);
-    } else {
-        const value = [3]f32{ 0.0, 0.0, 1.0 };
-        rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL), &value, SHADER_ATTRIB_VEC3, 3);
-        rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL);
-    }
-
-    if (mesh.*.colors != null) {
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR] = rlLoadVertexBuffer(mesh.*.colors, mesh.*.vertexCount * 4 * @sizeOf(u8), dynamic);
-        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR, 4, RL_UNSIGNED_BYTE, true, 0, 0);
-        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR);
-    } else {
-        const value = [4]f32{ 1.0, 1.0, 1.0, 1.0 };
-        rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR), &value, SHADER_ATTRIB_VEC4, 4);
-        rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR);
-    }
-
-    if (mesh.*.tangents != null) {
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT] = rlLoadVertexBuffer(mesh.*.tangents, mesh.*.vertexCount * 4 * @sizeOf(f32), dynamic);
-        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT, 4, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT);
-    } else {
-        const value = [4]f32{ 1.0, 0.0, 0.0, 1.0 };
-        rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT), &value, SHADER_ATTRIB_VEC4, 4);
-        rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT);
-    }
-
-    if (mesh.*.texcoords2 != null) {
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2] = rlLoadVertexBuffer(mesh.*.texcoords2, mesh.*.vertexCount * 2 * @sizeOf(f32), dynamic);
-        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2, 2, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2);
-    } else {
-        const value = [2]f32{ 0.0, 0.0 };
-        rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2), &value, SHADER_ATTRIB_VEC2, 2);
-        rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2);
-    }
-
-    if (SUPPORT_GPU_SKINNING) {
-        if (mesh.*.boneIndices != null) {
-            mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES] = rlLoadVertexBuffer(mesh.*.boneIndices, mesh.*.vertexCount * 4 * @sizeOf(u8), dynamic);
-            rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES, 4, RL_UNSIGNED_BYTE, false, 0, 0);
-            rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES);
+    for (attributes[0..if (SUPPORT_GPU_SKINNING) attributes.len else attributes.len - 2]) |*attribute| {
+        if (attribute.data != null) {
+            vboId[attribute.location] = rlLoadVertexBuffer(attribute.data, vertexCount * attribute.components * attribute.size, dynamic);
+            rlSetVertexAttribute(attribute.location, attribute.components, attribute.type, attribute.normalized, 0, 0);
+            rlEnableVertexAttribute(attribute.location);
         } else {
-            const value = [4]f32{ 0.0, 0.0, 0.0, 0.0 };
-            rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES), &value, SHADER_ATTRIB_VEC4, 4);
-            rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES);
-        }
-
-        if (mesh.*.boneWeights != null) {
-            mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS] = rlLoadVertexBuffer(mesh.*.boneWeights, mesh.*.vertexCount * 4 * @sizeOf(f32), dynamic);
-            rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS, 4, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS);
-        } else {
-            // NOTE: Component count 2 (not 4) matches upstream rmodels.c exactly
-            const value = [4]f32{ 0.0, 0.0, 0.0, 0.0 };
-            rlSetVertexAttributeDefault(@intCast(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS), &value, SHADER_ATTRIB_VEC4, 2);
-            rlDisableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS);
+            rlSetVertexAttributeDefault(@intCast(attribute.location), &attribute.default, attribute.defaultType, attribute.defaultCount);
+            rlDisableVertexAttribute(attribute.location);
         }
     }
 
-    if (mesh.*.indices != null) {
-        mesh.*.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES] = rlLoadVertexBufferElement(mesh.*.indices, mesh.*.triangleCount * 3 * @sizeOf(c_ushort), dynamic);
+    if (mesh.indices != null) {
+        vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES] = rlLoadVertexBufferElement(mesh.indices, mesh.triangleCount * 3 * @sizeOf(c_ushort), dynamic);
     }
 
-    if (mesh.*.vaoId > 0) TraceLog(LOG_INFO, "VAO: [ID %i] Mesh uploaded successfully to VRAM (GPU)", mesh.*.vaoId) else TraceLog(LOG_INFO, "VBO: Mesh uploaded successfully to VRAM (GPU)");
+    if (mesh.vaoId > 0) TraceLog(LOG_INFO, "VAO: [ID %i] Mesh uploaded successfully to VRAM (GPU)", mesh.vaoId) else TraceLog(LOG_INFO, "VBO: Mesh uploaded successfully to VRAM (GPU)");
 
     rlDisableVertexArray();
 }
@@ -2381,38 +2403,155 @@ export fn UnloadMesh(mesh: Mesh) callconv(.c) void {
     rlUnloadVertexArray(mesh.vaoId);
 
     if (mesh.vboId != null) {
-        var i: c_int = 0;
-        while (i < MAX_MESH_VERTEX_BUFFERS) : (i += 1) rlUnloadVertexBuffer(mesh.vboId[@intCast(i)]);
+        for (mesh.vboId[0..MAX_MESH_VERTEX_BUFFERS]) |vbo| rlUnloadVertexBuffer(vbo);
     }
-    RL_FREE(mesh.vboId);
+    cmem.free(mesh.vboId);
 
-    RL_FREE(mesh.vertices);
-    RL_FREE(mesh.texcoords);
-    RL_FREE(mesh.normals);
-    RL_FREE(mesh.colors);
-    RL_FREE(mesh.tangents);
-    RL_FREE(mesh.texcoords2);
-    RL_FREE(mesh.indices);
-
-    RL_FREE(mesh.boneWeights);
-    RL_FREE(mesh.boneIndices);
-
-    RL_FREE(mesh.animVertices);
-    RL_FREE(mesh.animNormals);
+    freeMeshArrays(mesh);
 }
 
-// Bind mesh bone ids and bone weights VBOs to the shader attributes, if the shader uses them
-fn bindBoneVertexBuffers(mesh: Mesh, shader: Shader) void {
-    if (shader.locs[SHADER_LOC_VERTEX_BONEIDS] != -1) {
-        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES]);
-        rlSetVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEIDS]), 4, RL_UNSIGNED_BYTE, false, 0, 0);
-        rlEnableVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEIDS]));
+/// Releases a mesh's vertex data (CPU side)
+fn freeMeshArrays(mesh: Mesh) void {
+    cmem.free(mesh.vertices);
+    cmem.free(mesh.texcoords);
+    cmem.free(mesh.normals);
+    cmem.free(mesh.colors);
+    cmem.free(mesh.tangents);
+    cmem.free(mesh.texcoords2);
+    cmem.free(mesh.indices);
+
+    cmem.free(mesh.boneWeights);
+    cmem.free(mesh.boneIndices);
+
+    cmem.free(mesh.animVertices);
+    cmem.free(mesh.animNormals);
+}
+
+/// Upload material.colDiffuse and material.colSpecular (if locations available)
+fn setMaterialColors(material: Material) void {
+    const Uniform = struct { location: usize, map: usize };
+    for ([_]Uniform{
+        .{ .location = SHADER_LOC_COLOR_DIFFUSE, .map = MATERIAL_MAP_DIFFUSE },
+        .{ .location = SHADER_LOC_COLOR_SPECULAR, .map = MATERIAL_MAP_SPECULAR },
+    }) |uniform| {
+        const loc = material.shader.locs[uniform.location];
+        if (loc == -1) continue;
+        const color = material.maps[uniform.map].color;
+        const values = [4]f32{
+            @as(f32, @floatFromInt(color.r)) / 255.0,
+            @as(f32, @floatFromInt(color.g)) / 255.0,
+            @as(f32, @floatFromInt(color.b)) / 255.0,
+            @as(f32, @floatFromInt(color.a)) / 255.0,
+        };
+        rlSetUniform(loc, &values, SHADER_UNIFORM_VEC4, 1);
+    }
+}
+
+fn isCubemap(map: usize) bool {
+    return (map == MATERIAL_MAP_IRRADIANCE) or (map == MATERIAL_MAP_PREFILTER) or (map == MATERIAL_MAP_CUBEMAP);
+}
+
+/// Bind active texture maps (if available)
+fn bindMaterialTextures(material: Material) void {
+    for (material.maps[0..MAX_MATERIAL_MAPS], 0..) |map, i| {
+        if (map.texture.id == 0) continue;
+        var slot: c_int = @intCast(i);
+        rlActiveTextureSlot(slot);
+        if (isCubemap(i)) rlEnableTextureCubemap(map.texture.id) else rlEnableTexture(map.texture.id);
+        rlSetUniform(material.shader.locs[SHADER_LOC_MAP_DIFFUSE + i], &slot, SHADER_UNIFORM_INT, 1);
+    }
+}
+
+/// Unbind all bound texture maps
+fn unbindMaterialTextures(material: Material) void {
+    for (material.maps[0..MAX_MATERIAL_MAPS], 0..) |map, i| {
+        if (map.texture.id == 0) continue;
+        rlActiveTextureSlot(@intCast(i));
+        if (isCubemap(i)) rlDisableTextureCubemap() else rlDisableTexture();
+    }
+}
+
+/// Bind mesh VBOs to the shader attributes, for when VAOs are not available
+fn bindMeshBuffers(mesh: Mesh, shader: Shader) void {
+    const locs = shader.locs;
+
+    rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION]);
+    rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_POSITION]), 3, RL_FLOAT, false, 0, 0);
+    rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_POSITION]));
+
+    rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD]);
+    rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_TEXCOORD01]), 2, RL_FLOAT, false, 0, 0);
+    rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_TEXCOORD01]));
+
+    if (locs[SHADER_LOC_VERTEX_NORMAL] != -1) {
+        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL]);
+        rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_NORMAL]), 3, RL_FLOAT, false, 0, 0);
+        rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_NORMAL]));
     }
 
-    if (shader.locs[SHADER_LOC_VERTEX_BONEWEIGHTS] != -1) {
-        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS]);
-        rlSetVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEWEIGHTS]), 4, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(@intCast(shader.locs[SHADER_LOC_VERTEX_BONEWEIGHTS]));
+    if (locs[SHADER_LOC_VERTEX_COLOR] != -1) {
+        if (mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR] != 0) {
+            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR]);
+            rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_COLOR]), 4, RL_UNSIGNED_BYTE, true, 0, 0);
+            rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_COLOR]));
+        } else {
+            // Default value for the unused attribute, needed without VAO support
+            const value = [4]f32{ 1.0, 1.0, 1.0, 1.0 };
+            rlSetVertexAttributeDefault(locs[SHADER_LOC_VERTEX_COLOR], &value, SHADER_ATTRIB_VEC4, 4);
+            rlDisableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_COLOR]));
+        }
+    }
+
+    if (locs[SHADER_LOC_VERTEX_TANGENT] != -1) {
+        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT]);
+        rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_TANGENT]), 4, RL_FLOAT, false, 0, 0);
+        rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_TANGENT]));
+    }
+
+    if (locs[SHADER_LOC_VERTEX_TEXCOORD02] != -1) {
+        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2]);
+        rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_TEXCOORD02]), 2, RL_FLOAT, false, 0, 0);
+        rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_TEXCOORD02]));
+    }
+
+    if (SUPPORT_GPU_SKINNING) {
+        if (locs[SHADER_LOC_VERTEX_BONEIDS] != -1) {
+            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEINDICES]);
+            rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_BONEIDS]), 4, RL_UNSIGNED_BYTE, false, 0, 0);
+            rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_BONEIDS]));
+        }
+
+        if (locs[SHADER_LOC_VERTEX_BONEWEIGHTS] != -1) {
+            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_BONEWEIGHTS]);
+            rlSetVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_BONEWEIGHTS]), 4, RL_FLOAT, false, 0, 0);
+            rlEnableVertexAttribute(@intCast(locs[SHADER_LOC_VERTEX_BONEWEIGHTS]));
+        }
+    }
+
+    if (mesh.indices != null) rlEnableVertexBufferElement(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES]);
+}
+
+/// Upload the model-view-projection matrix and draw, once per eye (twice
+/// with stereo rendering, each eye on its half of the framebuffer)
+fn drawPerEye(mesh: Mesh, shader: Shader, matModelView: Matrix, matProjection: Matrix, instances: ?c_int) void {
+    const eyeCount: c_int = if (rlIsStereoRenderEnabled()) 2 else 1;
+
+    var eye: c_int = 0;
+    while (eye < eyeCount) : (eye += 1) {
+        const matModelViewProjection = if (eyeCount == 1)
+            MatrixMultiply(matModelView, matProjection)
+        else blk: {
+            rlViewport(@divTrunc(eye * rlGetFramebufferWidth(), 2), 0, @divTrunc(rlGetFramebufferWidth(), 2), rlGetFramebufferHeight());
+            break :blk MatrixMultiply(MatrixMultiply(matModelView, rlGetMatrixViewOffsetStereo(eye)), rlGetMatrixProjectionStereo(eye));
+        };
+
+        rlSetUniformMatrix(shader.locs[SHADER_LOC_MATRIX_MVP], matModelViewProjection);
+
+        if (instances) |n| {
+            if (mesh.indices != null) rlDrawVertexArrayElementsInstanced(0, mesh.triangleCount * 3, null, n) else rlDrawVertexArrayInstanced(0, mesh.vertexCount, n);
+        } else {
+            if (mesh.indices != null) rlDrawVertexArrayElements(0, mesh.triangleCount * 3, null) else rlDrawVertexArray(0, mesh.vertexCount);
+        }
     }
 }
 
@@ -2422,571 +2561,388 @@ export fn DrawMesh(mesh: Mesh, material: Material, transform: Matrix) callconv(.
     rlEnableShader(material.shader.id);
 
     if (material.shader.locs == null) return;
+    const locs = material.shader.locs;
 
-    // Upload to shader material.colDiffuse
-    if (material.shader.locs[SHADER_LOC_COLOR_DIFFUSE] != -1) {
-        const values = [4]f32{
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.r)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.g)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.b)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.a)) / 255.0,
-        };
-        rlSetUniform(material.shader.locs[SHADER_LOC_COLOR_DIFFUSE], &values, SHADER_UNIFORM_VEC4, 1);
-    }
+    setMaterialColors(material);
 
-    // Upload to shader material.colSpecular (if location available)
-    if (material.shader.locs[SHADER_LOC_COLOR_SPECULAR] != -1) {
-        const values = [4]f32{
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.r)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.g)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.b)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.a)) / 255.0,
-        };
-        rlSetUniform(material.shader.locs[SHADER_LOC_COLOR_SPECULAR], &values, SHADER_UNIFORM_VEC4, 1);
-    }
-
-    var matModel = MatrixIdentity();
+    // Get a copy of current matrices to work with,
+    // just in case stereo render is required, and we need to modify them
     const matView = rlGetMatrixModelview();
-    var matModelView = MatrixIdentity();
     const matProjection = rlGetMatrixProjection();
 
-    if (material.shader.locs[SHADER_LOC_MATRIX_VIEW] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_VIEW], matView);
-    if (material.shader.locs[SHADER_LOC_MATRIX_PROJECTION] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_PROJECTION], matProjection);
+    if (locs[SHADER_LOC_MATRIX_VIEW] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_VIEW], matView);
+    if (locs[SHADER_LOC_MATRIX_PROJECTION] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_PROJECTION], matProjection);
 
-    matModel = MatrixMultiply(transform, rlGetMatrixTransform());
+    // Model transformation matrix, accumulated with the internal (push/pop) transform
+    const matModel = MatrixMultiply(transform, rlGetMatrixTransform());
 
-    if (material.shader.locs[SHADER_LOC_MATRIX_MODEL] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_MODEL], matModel);
+    if (locs[SHADER_LOC_MATRIX_MODEL] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_MODEL], matModel);
 
-    matModelView = MatrixMultiply(matModel, matView);
+    const matModelView = MatrixMultiply(matModel, matView);
 
-    if (material.shader.locs[SHADER_LOC_MATRIX_NORMAL] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_NORMAL], MatrixTranspose(MatrixInvert(matModel)));
+    if (locs[SHADER_LOC_MATRIX_NORMAL] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_NORMAL], MatrixTranspose(MatrixInvert(matModel)));
 
-    // Bind active texture maps (if available)
-    var i: c_int = 0;
-    while (i < MAX_MATERIAL_MAPS) : (i += 1) {
-        const ui: usize = @intCast(i);
-        if (material.maps[ui].texture.id > 0) {
-            rlActiveTextureSlot(i);
+    bindMaterialTextures(material);
 
-            if ((ui == MATERIAL_MAP_IRRADIANCE) or (ui == MATERIAL_MAP_PREFILTER) or (ui == MATERIAL_MAP_CUBEMAP)) rlEnableTextureCubemap(material.maps[ui].texture.id) else rlEnableTexture(material.maps[ui].texture.id);
+    // Try binding vertex array objects (VAO) or use VBOs if not possible
+    if (!rlEnableVertexArray(mesh.vaoId)) bindMeshBuffers(mesh, material.shader);
 
-            rlSetUniform(material.shader.locs[SHADER_LOC_MAP_DIFFUSE + ui], &i, SHADER_UNIFORM_INT, 1);
-        }
-    }
+    drawPerEye(mesh, material.shader, matModelView, matProjection, null);
 
-    if (!rlEnableVertexArray(mesh.vaoId)) {
-        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION]);
-        rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_POSITION]), 3, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_POSITION]));
+    unbindMaterialTextures(material);
 
-        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD]);
-        rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD01]), 2, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD01]));
-
-        if (material.shader.locs[SHADER_LOC_VERTEX_NORMAL] != -1) {
-            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL]);
-            rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_NORMAL]), 3, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_NORMAL]));
-        }
-
-        if (material.shader.locs[SHADER_LOC_VERTEX_COLOR] != -1) {
-            if (mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR] != 0) {
-                rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR]);
-                rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_COLOR]), 4, RL_UNSIGNED_BYTE, true, 0, 0);
-                rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_COLOR]));
-            } else {
-                const value = [4]f32{ 1.0, 1.0, 1.0, 1.0 };
-                rlSetVertexAttributeDefault(material.shader.locs[SHADER_LOC_VERTEX_COLOR], &value, SHADER_ATTRIB_VEC4, 4);
-                rlDisableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_COLOR]));
-            }
-        }
-
-        if (material.shader.locs[SHADER_LOC_VERTEX_TANGENT] != -1) {
-            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT]);
-            rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TANGENT]), 4, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TANGENT]));
-        }
-
-        if (material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02] != -1) {
-            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2]);
-            rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]), 2, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]));
-        }
-
-        if (SUPPORT_GPU_SKINNING) bindBoneVertexBuffers(mesh, material.shader);
-
-        if (mesh.indices != null) rlEnableVertexBufferElement(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES]);
-    }
-
-    var eyeCount: c_int = 1;
-    if (rlIsStereoRenderEnabled()) eyeCount = 2;
-
-    var eye: c_int = 0;
-    while (eye < eyeCount) : (eye += 1) {
-        var matModelViewProjection = MatrixIdentity();
-        if (eyeCount == 1) {
-            matModelViewProjection = MatrixMultiply(matModelView, matProjection);
-        } else {
-            rlViewport(@divTrunc(eye * rlGetFramebufferWidth(), 2), 0, @divTrunc(rlGetFramebufferWidth(), 2), rlGetFramebufferHeight());
-            matModelViewProjection = MatrixMultiply(MatrixMultiply(matModelView, rlGetMatrixViewOffsetStereo(eye)), rlGetMatrixProjectionStereo(eye));
-        }
-
-        rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_MVP], matModelViewProjection);
-
-        if (mesh.indices != null) rlDrawVertexArrayElements(0, mesh.triangleCount * 3, null) else rlDrawVertexArray(0, mesh.vertexCount);
-    }
-
-    // Unbind all bound texture maps
-    i = 0;
-    while (i < MAX_MATERIAL_MAPS) : (i += 1) {
-        const ui: usize = @intCast(i);
-        if (material.maps[ui].texture.id > 0) {
-            rlActiveTextureSlot(i);
-            if ((ui == MATERIAL_MAP_IRRADIANCE) or (ui == MATERIAL_MAP_PREFILTER) or (ui == MATERIAL_MAP_CUBEMAP)) rlDisableTextureCubemap() else rlDisableTexture();
-        }
-    }
-
+    // Disable all possible vertex array objects (or VBOs)
     rlDisableVertexArray();
     rlDisableVertexBuffer();
     rlDisableVertexBufferElement();
 
+    // Disable shader program
     rlDisableShader();
 
+    // Restore rlgl internal modelview and projection matrices
     rlSetMatrixModelview(matView);
     rlSetMatrixProjection(matProjection);
 }
 
 // Draw multiple mesh instances with material and different transforms
 export fn DrawMeshInstanced(mesh: Mesh, material: Material, transforms: [*c]const Matrix, instances: c_int) callconv(.c) void {
-    var instanceTransform: [*c]float16 = null;
-    var instancesVboId: c_uint = 0;
+    // Instance transforms as float16 arrays, for the instances buffer
+    const instanceTransforms = std.heap.c_allocator.alloc(float16, count(instances)) catch {
+        TraceLog(LOG_WARNING, "MESH: Failed to allocate memory for instance transforms");
+        return;
+    };
+    defer std.heap.c_allocator.free(instanceTransforms);
+    for (instanceTransforms, transforms[0..instanceTransforms.len]) |*instance, transform| instance.* = MatrixToFloatV(transform);
 
+    // Bind shader program
     rlEnableShader(material.shader.id);
+    const locs = material.shader.locs;
 
-    if (material.shader.locs[SHADER_LOC_COLOR_DIFFUSE] != -1) {
-        const values = [4]f32{
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.r)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.g)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.b)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_DIFFUSE].color.a)) / 255.0,
-        };
-        rlSetUniform(material.shader.locs[SHADER_LOC_COLOR_DIFFUSE], &values, SHADER_UNIFORM_VEC4, 1);
-    }
-
-    if (material.shader.locs[SHADER_LOC_COLOR_SPECULAR] != -1) {
-        const values = [4]f32{
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.r)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.g)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.b)) / 255.0,
-            @as(f32, @floatFromInt(material.maps[MATERIAL_MAP_SPECULAR].color.a)) / 255.0,
-        };
-        rlSetUniform(material.shader.locs[SHADER_LOC_COLOR_SPECULAR], &values, SHADER_UNIFORM_VEC4, 1);
-    }
+    setMaterialColors(material);
 
     const matModel = MatrixIdentity();
     const matView = rlGetMatrixModelview();
-    var matModelView = MatrixIdentity();
     const matProjection = rlGetMatrixProjection();
 
-    if (material.shader.locs[SHADER_LOC_MATRIX_VIEW] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_VIEW], matView);
-    if (material.shader.locs[SHADER_LOC_MATRIX_PROJECTION] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_PROJECTION], matProjection);
+    if (locs[SHADER_LOC_MATRIX_VIEW] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_VIEW], matView);
+    if (locs[SHADER_LOC_MATRIX_PROJECTION] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_PROJECTION], matProjection);
 
-    instanceTransform = @ptrCast(@alignCast(RL_CALLOC(@intCast(instances), @sizeOf(float16))));
-
-    var i: c_int = 0;
-    while (i < instances) : (i += 1) instanceTransform[@intCast(i)] = MatrixToFloatV(transforms[@intCast(i)]);
-
+    // Enable mesh VAO to attach the instances buffer
     _ = rlEnableVertexArray(mesh.vaoId);
 
-    instancesVboId = rlLoadVertexBuffer(instanceTransform, instances * @sizeOf(float16), false);
+    const instancesVboId = rlLoadVertexBuffer(instanceTransforms.ptr, instances * @sizeOf(float16), false);
 
-    if (material.shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] != -1) {
-        var k: c_uint = 0;
-        while (k < 4) : (k += 1) {
-            const loc: c_uint = @intCast(material.shader.locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM]);
-            rlEnableVertexAttribute(loc + k);
-            rlSetVertexAttribute(loc + k, 4, RL_FLOAT, false, @sizeOf(Matrix), @intCast(k * @sizeOf(Vector4)));
-            rlSetVertexAttributeDivisor(loc + k, 1);
+    // Instance transformation matrices go to shader attribute location SHADER_LOC_VERTEX_INSTANCETRANSFORM
+    if (locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM] != -1) {
+        const loc: c_uint = @intCast(locs[SHADER_LOC_VERTEX_INSTANCETRANSFORM]);
+        for (0..4) |column| {
+            const attribute = loc + @as(c_uint, @intCast(column));
+            rlEnableVertexAttribute(attribute);
+            rlSetVertexAttribute(attribute, 4, RL_FLOAT, false, @sizeOf(Matrix), @intCast(column * @sizeOf(Vector4)));
+            rlSetVertexAttributeDivisor(attribute, 1);
         }
     }
 
     rlDisableVertexBuffer();
     rlDisableVertexArray();
 
-    matModelView = MatrixMultiply(rlGetMatrixTransform(), matView);
+    // NOTE: The instance transformation is computed in the shader
+    const matModelView = MatrixMultiply(rlGetMatrixTransform(), matView);
 
-    if (material.shader.locs[SHADER_LOC_MATRIX_NORMAL] != -1) rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_NORMAL], MatrixTranspose(MatrixInvert(matModel)));
+    if (locs[SHADER_LOC_MATRIX_NORMAL] != -1) rlSetUniformMatrix(locs[SHADER_LOC_MATRIX_NORMAL], MatrixTranspose(MatrixInvert(matModel)));
 
-    i = 0;
-    while (i < MAX_MATERIAL_MAPS) : (i += 1) {
-        const ui: usize = @intCast(i);
-        if (material.maps[ui].texture.id > 0) {
-            rlActiveTextureSlot(i);
-            if ((ui == MATERIAL_MAP_IRRADIANCE) or (ui == MATERIAL_MAP_PREFILTER) or (ui == MATERIAL_MAP_CUBEMAP)) rlEnableTextureCubemap(material.maps[ui].texture.id) else rlEnableTexture(material.maps[ui].texture.id);
-            rlSetUniform(material.shader.locs[SHADER_LOC_MAP_DIFFUSE + ui], &i, SHADER_UNIFORM_INT, 1);
-        }
-    }
+    bindMaterialTextures(material);
 
-    if (!rlEnableVertexArray(mesh.vaoId)) {
-        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION]);
-        rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_POSITION]), 3, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_POSITION]));
+    // Try binding vertex array objects (VAO) or use VBOs if not possible
+    if (!rlEnableVertexArray(mesh.vaoId)) bindMeshBuffers(mesh, material.shader);
 
-        rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD]);
-        rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD01]), 2, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD01]));
+    drawPerEye(mesh, material.shader, matModelView, matProjection, instances);
 
-        if (material.shader.locs[SHADER_LOC_VERTEX_NORMAL] != -1) {
-            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL]);
-            rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_NORMAL]), 3, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_NORMAL]));
-        }
+    unbindMaterialTextures(material);
 
-        if (material.shader.locs[SHADER_LOC_VERTEX_COLOR] != -1) {
-            if (mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR] != 0) {
-                rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_COLOR]);
-                rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_COLOR]), 4, RL_UNSIGNED_BYTE, true, 0, 0);
-                rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_COLOR]));
-            } else {
-                const value = [4]f32{ 1.0, 1.0, 1.0, 1.0 };
-                rlSetVertexAttributeDefault(material.shader.locs[SHADER_LOC_VERTEX_COLOR], &value, SHADER_ATTRIB_VEC4, 4);
-                rlDisableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_COLOR]));
-            }
-        }
-
-        if (material.shader.locs[SHADER_LOC_VERTEX_TANGENT] != -1) {
-            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT]);
-            rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TANGENT]), 4, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TANGENT]));
-        }
-
-        if (material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02] != -1) {
-            rlEnableVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2]);
-            rlSetVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]), 2, RL_FLOAT, false, 0, 0);
-            rlEnableVertexAttribute(@intCast(material.shader.locs[SHADER_LOC_VERTEX_TEXCOORD02]));
-        }
-
-        if (SUPPORT_GPU_SKINNING) bindBoneVertexBuffers(mesh, material.shader);
-
-        if (mesh.indices != null) rlEnableVertexBufferElement(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_INDICES]);
-    }
-
-    var eyeCount: c_int = 1;
-    if (rlIsStereoRenderEnabled()) eyeCount = 2;
-
-    var eye: c_int = 0;
-    while (eye < eyeCount) : (eye += 1) {
-        var matModelViewProjection = MatrixIdentity();
-        if (eyeCount == 1) {
-            matModelViewProjection = MatrixMultiply(matModelView, matProjection);
-        } else {
-            rlViewport(@divTrunc(eye * rlGetFramebufferWidth(), 2), 0, @divTrunc(rlGetFramebufferWidth(), 2), rlGetFramebufferHeight());
-            matModelViewProjection = MatrixMultiply(MatrixMultiply(matModelView, rlGetMatrixViewOffsetStereo(eye)), rlGetMatrixProjectionStereo(eye));
-        }
-
-        rlSetUniformMatrix(material.shader.locs[SHADER_LOC_MATRIX_MVP], matModelViewProjection);
-
-        if (mesh.indices != null) rlDrawVertexArrayElementsInstanced(0, mesh.triangleCount * 3, null, instances) else rlDrawVertexArrayInstanced(0, mesh.vertexCount, instances);
-    }
-
-    i = 0;
-    while (i < MAX_MATERIAL_MAPS) : (i += 1) {
-        const ui: usize = @intCast(i);
-        if (material.maps[ui].texture.id > 0) {
-            rlActiveTextureSlot(i);
-            if ((ui == MATERIAL_MAP_IRRADIANCE) or (ui == MATERIAL_MAP_PREFILTER) or (ui == MATERIAL_MAP_CUBEMAP)) rlDisableTextureCubemap() else rlDisableTexture();
-        }
-    }
-
+    // Disable all possible vertex array objects (or VBOs)
     rlDisableVertexArray();
     rlDisableVertexBuffer();
     rlDisableVertexBufferElement();
 
+    // Disable shader program
     rlDisableShader();
 
+    // Remove instance transforms buffer
     rlUnloadVertexBuffer(instancesVboId);
-    RL_FREE(instanceTransform);
 }
 
-// Export mesh data to file
+// Export mesh data to file, returns true on success
 export fn ExportMesh(mesh: Mesh, fileName: [*c]const u8) callconv(.c) bool {
-    var result = false;
+    // NOTE: .gltf/.glb and .raw are recognized upstream but not implemented: they return false
+    if (!IsFileExtension(fileName, ".obj")) return false;
 
-    if (IsFileExtension(fileName, ".obj")) {
-        const vc = mesh.vertexCount;
-        const dataSize: c_int = vc * @as(c_int, @intCast(strlen("v -0000.000000f -0000.000000f -0000.000000f\n"))) +
-            vc * @as(c_int, @intCast(strlen("vt -0.000000f -0.000000f\n"))) +
-            vc * @as(c_int, @intCast(strlen("vn -0.0000f -0.0000f -0.0000f\n"))) +
-            mesh.triangleCount * snprintf(null, 0, "f %i/%i/%i %i/%i/%i %i/%i/%i\n", vc, vc, vc, vc, vc, vc, vc, vc, vc);
-
-        const txtData: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(@intCast(dataSize + 1000), @sizeOf(u8))));
-
-        var byteCount: c_int = 0;
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# //////////////////////////////////////////////////////////////////////////////////\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# //                                                                              //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# // rMeshOBJ exporter v1.0 - Mesh exported as triangle faces and not optimized   //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# //                                                                              //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# // more info and bugs-report:  github.com/raysan5/raylib                        //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# // feedback and support:       ray[at]raylib.com                                //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# //                                                                              //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# // Copyright (c) 2018-2026 Ramon Santamaria (@raysan5)                          //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# //                                                                              //\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# //////////////////////////////////////////////////////////////////////////////////\n\n");
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# Vertex Count:     %i\n", mesh.vertexCount);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "# Triangle Count:   %i\n\n", mesh.triangleCount);
-
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "g mesh\n");
-
-        {
-            var i: c_int = 0;
-            var v: c_int = 0;
-            while (i < mesh.vertexCount) : ({
-                i += 1;
-                v += 3;
-            }) {
-                const u: usize = @intCast(v);
-                byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "v %.6f %.6f %.6f\n", mesh.vertices[u], mesh.vertices[u + 1], mesh.vertices[u + 2]);
-            }
-        }
-        {
-            var i: c_int = 0;
-            var v: c_int = 0;
-            while (i < mesh.vertexCount) : ({
-                i += 1;
-                v += 2;
-            }) {
-                const u: usize = @intCast(v);
-                byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "vt %.6f %.6f\n", mesh.texcoords[u], mesh.texcoords[u + 1]);
-            }
-        }
-        {
-            var i: c_int = 0;
-            var v: c_int = 0;
-            while (i < mesh.vertexCount) : ({
-                i += 1;
-                v += 3;
-            }) {
-                const u: usize = @intCast(v);
-                byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "vn %.4f %.4f %.4f\n", mesh.normals[u], mesh.normals[u + 1], mesh.normals[u + 2]);
-            }
-        }
-
-        if (mesh.indices != null) {
-            var i: c_int = 0;
-            var v: c_int = 0;
-            while (i < mesh.triangleCount) : ({
-                i += 1;
-                v += 3;
-            }) {
-                const u: usize = @intCast(v);
-                byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "f %i/%i/%i %i/%i/%i %i/%i/%i\n", mesh.indices[u] + 1, mesh.indices[u] + 1, mesh.indices[u] + 1, mesh.indices[u + 1] + 1, mesh.indices[u + 1] + 1, mesh.indices[u + 1] + 1, mesh.indices[u + 2] + 1, mesh.indices[u + 2] + 1, mesh.indices[u + 2] + 1);
-            }
-        } else {
-            var i: c_int = 0;
-            var v: c_int = 1;
-            while (i < mesh.triangleCount) : ({
-                i += 1;
-                v += 3;
-            }) {
-                byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "f %i/%i/%i %i/%i/%i %i/%i/%i\n", v, v, v, v + 1, v + 1, v + 1, v + 2, v + 2, v + 2);
-            }
-        }
-
-        result = SaveFileText(fileName, txtData);
-
-        RL_FREE(txtData);
-    }
-
-    return result;
+    var text: Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer text.deinit();
+    writeMeshObj(&text.writer, mesh) catch {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to allocate memory for mesh export", fileName);
+        return false;
+    };
+    return saveText(fileName, &text);
 }
 
 // Export mesh as code file (.h) defining multiple arrays of vertex attributes
 export fn ExportMeshAsCode(mesh: Mesh, fileName: [*c]const u8) callconv(.c) bool {
-    var result = false;
+    // Variable names are the file name, uppercased (truncated to 255 bytes, as raylib does)
+    const baseName = std.mem.span(GetFileNameWithoutExt(fileName));
+    var nameBuffer: [255]u8 = undefined;
+    const name = std.ascii.upperString(&nameBuffer, baseName[0..@min(baseName.len, nameBuffer.len)]);
 
-    const TEXT_BYTES_PER_LINE: c_int = 20;
+    var text: Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer text.deinit();
+    writeMeshCode(&text.writer, mesh, name) catch {
+        TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to allocate memory for mesh export", fileName);
+        return false;
+    };
+    return saveText(fileName, &text);
+}
 
-    const txtData: [*c]u8 = @ptrCast(@alignCast(RL_CALLOC(64 * 1024 * 1024, @sizeOf(u8))));
+/// Saves the text through raylib's SaveFileText (which honours user callbacks)
+fn saveText(fileName: [*c]const u8, text: *Io.Writer.Allocating) bool {
+    text.writer.writeByte(0) catch return false;
+    return SaveFileText(fileName, text.written().ptr);
+}
 
-    var byteCount: c_int = 0;
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "////////////////////////////////////////////////////////////////////////////////////////\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// MeshAsCode exporter v1.0 - Mesh vertex data exported as arrays                     //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// more info and bugs-report:  github.com/raysan5/raylib                              //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// feedback and support:       ray[at]raylib.com                                      //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// Copyright (c) 2023 Ramon Santamaria (@raysan5)                                     //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "//                                                                                    //\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "////////////////////////////////////////////////////////////////////////////////////////\n\n");
+/// Writes `value` as C's printf would with `format`. std.fmt rounds ties
+/// differently (CLAUDE.md), so the exported text goes through libc.
+fn printFloat(w: *Io.Writer, format: [*:0]const u8, value: f32) Io.Writer.Error!void {
+    var buffer: [128]u8 = undefined;
+    const len = snprintf(&buffer, buffer.len, format, @as(f64, value));
+    try w.writeAll(buffer[0..@min(@as(usize, @intCast(len)), buffer.len - 1)]);
+}
 
-    var varFileName = std.mem.zeroes([256]u8);
-    _ = strncpy(&varFileName, GetFileNameWithoutExt(fileName), 256 - 1);
-    {
-        var i: usize = 0;
-        while (varFileName[i] != 0) : (i += 1) {
-            if ((varFileName[i] >= 'a') and (varFileName[i] <= 'z')) varFileName[i] = varFileName[i] - 32;
+fn writeMeshObj(w: *Io.Writer, mesh: Mesh) Io.Writer.Error!void {
+    const vertexCount = count(mesh.vertexCount);
+
+    try w.writeAll(
+        \\# //////////////////////////////////////////////////////////////////////////////////
+        \\# //                                                                              //
+        \\# // rMeshOBJ exporter v1.0 - Mesh exported as triangle faces and not optimized   //
+        \\# //                                                                              //
+        \\# // more info and bugs-report:  github.com/raysan5/raylib                        //
+        \\# // feedback and support:       ray[at]raylib.com                                //
+        \\# //                                                                              //
+        \\# // Copyright (c) 2018-2026 Ramon Santamaria (@raysan5)                          //
+        \\# //                                                                              //
+        \\# //////////////////////////////////////////////////////////////////////////////////
+        \\
+        \\
+    );
+    try w.print("# Vertex Count:     {d}\n", .{mesh.vertexCount});
+    try w.print("# Triangle Count:   {d}\n\n", .{mesh.triangleCount});
+    try w.writeAll("g mesh\n");
+
+    const lines = [_]struct { prefix: []const u8, values: [*c]const f32, components: usize, format: [:0]const u8 }{
+        .{ .prefix = "v", .values = mesh.vertices, .components = 3, .format = "%.6f" },
+        .{ .prefix = "vt", .values = mesh.texcoords, .components = 2, .format = "%.6f" },
+        .{ .prefix = "vn", .values = mesh.normals, .components = 3, .format = "%.4f" },
+    };
+    for (lines) |line| {
+        for (0..vertexCount) |i| {
+            try w.writeAll(line.prefix);
+            for (line.values[i * line.components ..][0..line.components]) |value| {
+                try w.writeByte(' ');
+                try printFloat(w, line.format, value);
+            }
+            try w.writeByte('\n');
         }
     }
 
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "// Mesh basic information\n");
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#define %s_VERTEX_COUNT    %i\n", &varFileName, mesh.vertexCount);
-    byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "#define %s_TRIANGLE_COUNT   %i\n\n", &varFileName, mesh.triangleCount);
-
-    if (mesh.vertices != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static float %s_VERTEX_DATA[%i] = { ", &varFileName, mesh.vertexCount * 3);
-        var i: c_int = 0;
-        while (i < mesh.vertexCount * 3 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "%.3ff,\n" else "%.3ff, ", mesh.vertices[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "%.3ff };\n\n", mesh.vertices[@intCast(mesh.vertexCount * 3 - 1)]);
+    for (0..count(mesh.triangleCount)) |t| {
+        // Face vertices are 1-based; unindexed meshes use the vertices in order
+        var face: [3]c_int = undefined;
+        for (&face, 0..) |*vertex, k| {
+            vertex.* = if (mesh.indices != null) @as(c_int, mesh.indices[t * 3 + k]) + 1 else @intCast(t * 3 + k + 1);
+        }
+        try w.print("f {d}/{d}/{d} {d}/{d}/{d} {d}/{d}/{d}\n", .{ face[0], face[0], face[0], face[1], face[1], face[1], face[2], face[2], face[2] });
     }
+}
 
-    if (mesh.texcoords != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static float %s_TEXCOORD_DATA[%i] = { ", &varFileName, mesh.vertexCount * 2);
-        var i: c_int = 0;
-        while (i < mesh.vertexCount * 2 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "%.3ff,\n" else "%.3ff, ", mesh.texcoords[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "%.3ff };\n\n", mesh.texcoords[@intCast(mesh.vertexCount * 2 - 1)]);
-    }
+fn writeMeshCode(w: *Io.Writer, mesh: Mesh, name: []const u8) Io.Writer.Error!void {
+    try w.writeAll(
+        \\////////////////////////////////////////////////////////////////////////////////////////
+        \\//                                                                                    //
+        \\// MeshAsCode exporter v1.0 - Mesh vertex data exported as arrays                     //
+        \\//                                                                                    //
+        \\// more info and bugs-report:  github.com/raysan5/raylib                              //
+        \\// feedback and support:       ray[at]raylib.com                                      //
+        \\//                                                                                    //
+        \\// Copyright (c) 2023 Ramon Santamaria (@raysan5)                                     //
+        \\//                                                                                    //
+        \\////////////////////////////////////////////////////////////////////////////////////////
+        \\
+        \\
+    );
 
-    if (mesh.texcoords2 != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static float %s_TEXCOORD2_DATA[%i] = { ", &varFileName, mesh.vertexCount * 2);
-        var i: c_int = 0;
-        while (i < mesh.vertexCount * 2 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "%.3ff,\n" else "%.3ff, ", mesh.texcoords2[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "%.3ff };\n\n", mesh.texcoords2[@intCast(mesh.vertexCount * 2 - 1)]);
-    }
+    try w.writeAll("// Mesh basic information\n");
+    try w.print("#define {s}_VERTEX_COUNT    {d}\n", .{ name, mesh.vertexCount });
+    try w.print("#define {s}_TRIANGLE_COUNT   {d}\n\n", .{ name, mesh.triangleCount });
 
-    if (mesh.normals != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static float %s_NORMAL_DATA[%i] = { ", &varFileName, mesh.vertexCount * 3);
-        var i: c_int = 0;
-        while (i < mesh.vertexCount * 3 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "%.3ff,\n" else "%.3ff, ", mesh.normals[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "%.3ff };\n\n", mesh.normals[@intCast(mesh.vertexCount * 3 - 1)]);
-    }
-
-    if (mesh.tangents != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static float %s_TANGENT_DATA[%i] = { ", &varFileName, mesh.vertexCount * 4);
-        var i: c_int = 0;
-        while (i < mesh.vertexCount * 4 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "%.3ff,\n" else "%.3ff, ", mesh.tangents[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "%.3ff };\n\n", mesh.tangents[@intCast(mesh.vertexCount * 4 - 1)]);
+    const vertexCount = count(mesh.vertexCount);
+    const floatArrays = [_]struct { label: []const u8, values: [*c]const f32, components: usize }{
+        .{ .label = "VERTEX", .values = mesh.vertices, .components = 3 },
+        .{ .label = "TEXCOORD", .values = mesh.texcoords, .components = 2 },
+        .{ .label = "TEXCOORD2", .values = mesh.texcoords2, .components = 2 },
+        .{ .label = "NORMAL", .values = mesh.normals, .components = 3 },
+        .{ .label = "TANGENT", .values = mesh.tangents, .components = 4 },
+    };
+    for (floatArrays) |array| {
+        if (array.values == null) continue;
+        const values = array.values[0 .. vertexCount * array.components];
+        try w.print("static float {s}_{s}_DATA[{d}] = {{ ", .{ name, array.label, values.len });
+        for (values, 0..) |value, i| {
+            try printFloat(w, "%.3ff", value);
+            try w.writeAll(codeSeparator(i, values.len));
+        }
+        try w.writeAll("\n");
     }
 
     if (mesh.colors != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static unsigned char %s_COLOR_DATA[%i] = { ", &varFileName, mesh.vertexCount * 4);
-        var i: c_int = 0;
-        while (i < mesh.vertexCount * 4 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "0x%x,\n" else "0x%x, ", mesh.colors[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "0x%x };\n\n", mesh.colors[@intCast(mesh.vertexCount * 4 - 1)]);
+        const colors = mesh.colors[0 .. vertexCount * 4];
+        try w.print("static unsigned char {s}_COLOR_DATA[{d}] = {{ ", .{ name, colors.len });
+        for (colors, 0..) |color, i| {
+            try w.print("0x{x}", .{color});
+            try w.writeAll(codeSeparator(i, colors.len));
+        }
+        try w.writeAll("\n");
     }
 
     if (mesh.indices != null) {
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "static unsigned short %s_INDEX_DATA[%i] = { ", &varFileName, mesh.triangleCount * 3);
-        var i: c_int = 0;
-        while (i < mesh.triangleCount * 3 - 1) : (i += 1) byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), if (@rem(i, TEXT_BYTES_PER_LINE) == 0) "%i,\n" else "%i, ", mesh.indices[@intCast(i)]);
-        byteCount += sprintf(txtData + @as(usize, @intCast(byteCount)), "%i };\n", mesh.indices[@intCast(mesh.triangleCount * 3 - 1)]);
+        const indices = mesh.indices[0 .. count(mesh.triangleCount) * 3];
+        try w.print("static unsigned short {s}_INDEX_DATA[{d}] = {{ ", .{ name, indices.len });
+        // NOTE: The index array, last in the file, ends without a blank line
+        for (indices, 0..) |index, i| {
+            try w.print("{d}", .{index});
+            try w.writeAll(codeSeparator(i, indices.len));
+        }
     }
-
-    result = SaveFileText(fileName, txtData);
-
-    RL_FREE(txtData);
-
-    return result;
 }
 
+/// What follows array element `i` of `len` in ExportMeshAsCode: a line break
+/// every 20 elements (raylib's TEXT_BYTES_PER_LINE), and the closing brace
+/// after the last
+fn codeSeparator(i: usize, len: usize) []const u8 {
+    if (i + 1 == len) return " };\n";
+    return if (i % 20 == 0) ",\n" else ", ";
+}
 //----------------------------------------------------------------------------------
 // Module Functions Definition - Materials
 //----------------------------------------------------------------------------------
 
-// Process obj materials
-fn ProcessMaterialsOBJ(materials: [*c]Material, mats: [*c]tinyobj_material_t, materialCount: c_int) void {
-    var m: c_int = 0;
-    while (m < materialCount) : (m += 1) {
-        const um: usize = @intCast(m);
-        materials[um] = LoadMaterialDefault();
+/// Build raylib materials from tinyobj's
+fn processMaterialsObj(materials: []Material, mats: ?[*]tinyobj_material_t) void {
+    for (materials, 0..) |*material, m| {
+        // Default material: the default shader only supports MATERIAL_MAP_DIFFUSE
+        material.* = LoadMaterialDefault();
 
-        if (mats == null) continue;
+        const mat = &(mats orelse continue)[m];
+        const maps = material.maps;
 
-        materials[um].maps[MATERIAL_MAP_DIFFUSE].texture = .{ .id = rlGetTextureIdDefault(), .width = 1, .height = 1, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+        // rlgl's default texture (1x1 UNCOMPRESSED_R8G8B8A8) in case none is defined
+        maps[MATERIAL_MAP_DIFFUSE].texture = .{ .id = rlGetTextureIdDefault(), .width = 1, .height = 1, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
-        if (mats[um].diffuse_texname != null) {
-            materials[um].maps[MATERIAL_MAP_DIFFUSE].texture = LoadTexture(mats[um].diffuse_texname);
-        } else materials[um].maps[MATERIAL_MAP_DIFFUSE].color = .{ .r = @intFromFloat(mats[um].diffuse[0] * 255.0), .g = @intFromFloat(mats[um].diffuse[1] * 255.0), .b = @intFromFloat(mats[um].diffuse[2] * 255.0), .a = 255 };
-        materials[um].maps[MATERIAL_MAP_DIFFUSE].value = 0.0;
+        if (mat.diffuse_texname) |texname| {
+            maps[MATERIAL_MAP_DIFFUSE].texture = LoadTexture(texname);
+        } else maps[MATERIAL_MAP_DIFFUSE].color = colorFromFloats(mat.diffuse);
+        maps[MATERIAL_MAP_DIFFUSE].value = 0.0;
 
-        if (mats[um].specular_texname != null) materials[um].maps[MATERIAL_MAP_SPECULAR].texture = LoadTexture(mats[um].specular_texname);
-        materials[um].maps[MATERIAL_MAP_SPECULAR].color = .{ .r = @intFromFloat(mats[um].specular[0] * 255.0), .g = @intFromFloat(mats[um].specular[1] * 255.0), .b = @intFromFloat(mats[um].specular[2] * 255.0), .a = 255 };
-        materials[um].maps[MATERIAL_MAP_SPECULAR].value = 0.0;
+        if (mat.specular_texname) |texname| maps[MATERIAL_MAP_SPECULAR].texture = LoadTexture(texname);
+        maps[MATERIAL_MAP_SPECULAR].color = colorFromFloats(mat.specular);
+        maps[MATERIAL_MAP_SPECULAR].value = 0.0;
 
-        if (mats[um].bump_texname != null) materials[um].maps[MATERIAL_MAP_NORMAL].texture = LoadTexture(mats[um].bump_texname);
-        materials[um].maps[MATERIAL_MAP_NORMAL].color = WHITE;
-        materials[um].maps[MATERIAL_MAP_NORMAL].value = mats[um].shininess;
+        if (mat.bump_texname) |texname| maps[MATERIAL_MAP_NORMAL].texture = LoadTexture(texname);
+        maps[MATERIAL_MAP_NORMAL].color = WHITE;
+        maps[MATERIAL_MAP_NORMAL].value = mat.shininess;
 
-        materials[um].maps[MATERIAL_MAP_EMISSION].color = .{ .r = @intFromFloat(mats[um].emission[0] * 255.0), .g = @intFromFloat(mats[um].emission[1] * 255.0), .b = @intFromFloat(mats[um].emission[2] * 255.0), .a = 255 };
+        maps[MATERIAL_MAP_EMISSION].color = colorFromFloats(mat.emission);
 
-        if (mats[um].displacement_texname != null) materials[um].maps[MATERIAL_MAP_HEIGHT].texture = LoadTexture(mats[um].displacement_texname);
+        if (mat.displacement_texname) |texname| maps[MATERIAL_MAP_HEIGHT].texture = LoadTexture(texname);
     }
+}
+
+/// An opaque color from 0..1 RGB components, converted as C's (unsigned char) casts do
+fn colorFromFloats(rgb: [3]f32) Color {
+    return .{ .r = cByte(rgb[0] * 255.0), .g = cByte(rgb[1] * 255.0), .b = cByte(rgb[2] * 255.0), .a = 255 };
 }
 
 // Load materials from model file
 export fn LoadMaterials(fileName: [*c]const u8, materialCount: [*c]c_int) callconv(.c) [*c]Material {
     var materials: [*c]Material = null;
-    var count: c_uint = 0;
+    var matCount: c_uint = 0;
 
     if (IsFileExtension(fileName, ".mtl")) {
-        var mats: [*c]tinyobj_material_t = null;
+        var mats: ?[*]tinyobj_material_t = null;
 
-        const result = tinyobj_parse_mtl_file(&mats, &count, fileName);
+        const result = tinyobj_parse_mtl_file(&mats, &matCount, fileName);
         if (result != TINYOBJ_SUCCESS) TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to parse materials file", fileName);
+        defer tinyobj_materials_free(mats, matCount);
 
-        materials = @ptrCast(@alignCast(RL_CALLOC(count, @sizeOf(Material))));
-        ProcessMaterialsOBJ(materials, mats, @intCast(count));
-
-        tinyobj_materials_free(mats, count);
+        if (cmem.alloc(Material, matCount)) |loaded| {
+            processMaterialsObj(loaded, mats);
+            materials = loaded.ptr;
+        } else |_| {
+            TraceLog(LOG_WARNING, "MATERIAL: [%s] Failed to allocate memory for materials", fileName);
+            matCount = 0;
+        }
     }
 
-    materialCount.* = @intCast(count);
+    materialCount.* = @intCast(matCount);
     return materials;
 }
 
 // Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
 export fn LoadMaterialDefault() callconv(.c) Material {
     var material = std.mem.zeroes(Material);
-    material.maps = @ptrCast(@alignCast(RL_CALLOC(@intCast(MAX_MATERIAL_MAPS), @sizeOf(MaterialMap))));
+    const maps = cmem.alloc(MaterialMap, MAX_MATERIAL_MAPS) catch {
+        TraceLog(LOG_WARNING, "MATERIAL: Failed to allocate memory for material maps");
+        return material;
+    };
+    material.maps = maps.ptr;
 
+    // Using rlgl default shader and default texture (1x1 pixel UNCOMPRESSED_R8G8B8A8, white)
     material.shader.id = rlGetShaderIdDefault();
     material.shader.locs = rlGetShaderLocsDefault();
 
-    material.maps[MATERIAL_MAP_DIFFUSE].texture = .{ .id = rlGetTextureIdDefault(), .width = 1, .height = 1, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    maps[MATERIAL_MAP_DIFFUSE].texture = .{ .id = rlGetTextureIdDefault(), .width = 1, .height = 1, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
-    material.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-    material.maps[MATERIAL_MAP_SPECULAR].color = WHITE;
+    maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    maps[MATERIAL_MAP_SPECULAR].color = WHITE;
 
     return material;
 }
 
-// Check if material is valid
+// Check if material is valid (shader assigned, map textures loaded in GPU)
 export fn IsMaterialValid(material: Material) callconv(.c) bool {
-    var result = false;
-    if ((material.maps != null) and (material.shader.id > 0)) result = true;
-    return result;
+    // NOTE: The map textures are not checked, as in raylib
+    return (material.maps != null) and (material.shader.id > 0);
 }
 
-// Unload material from memory
+// Unload material from GPU memory (VRAM)
 export fn UnloadMaterial(material: Material) callconv(.c) void {
+    // Unload material shader (avoid unloading default shader, managed by raylib)
     if (material.shader.id != rlGetShaderIdDefault()) UnloadShader(material.shader);
 
+    // Unload loaded texture maps (avoid unloading default texture, managed by raylib)
     if (material.maps != null) {
-        var i: c_int = 0;
-        while (i < MAX_MATERIAL_MAPS) : (i += 1) {
-            if (material.maps[@intCast(i)].texture.id != rlGetTextureIdDefault()) rlUnloadTexture(material.maps[@intCast(i)].texture.id);
+        for (material.maps[0..MAX_MATERIAL_MAPS]) |map| {
+            if (map.texture.id != rlGetTextureIdDefault()) rlUnloadTexture(map.texture.id);
         }
     }
 
-    RL_FREE(material.maps);
+    cmem.free(material.maps);
 }
 
-// Set texture for a material map type
+// Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...)
 export fn SetMaterialTexture(material: [*c]Material, mapType: c_int, texture: Texture2D) callconv(.c) void {
     material.*.maps[@intCast(mapType)].texture = texture;
 }
 
-// Set the material for a mesh
+// Set material for a mesh
 export fn SetModelMeshMaterial(model: [*c]Model, meshId: c_int, materialId: c_int) callconv(.c) void {
     if (meshId >= model.*.meshCount) {
         TraceLog(LOG_WARNING, "MESH: Id greater than mesh count");
@@ -3010,6 +2966,52 @@ export fn LoadModelAnimations(fileName: [*c]const u8, animCount: [*c]c_int) call
     return animations;
 }
 
+/// One animation frame position: the two keyframes around it and the blend between them
+const FramePair = struct {
+    current: usize,
+    next: usize,
+    blend: f32,
+
+    /// `current` is the frame's integer part (C's (int) cast), and both
+    /// keyframes wrap around the animation
+    fn init(frame: f32, keyframeCount: c_int, wrapFirst: bool) FramePair {
+        var current = cInt(frame);
+        // UpdateModelAnimationBonesEx wraps the frame before computing the blend
+        if (wrapFirst) current = @rem(current, keyframeCount);
+        var next = current + 1;
+        const blend = Clamp(frame - @as(f32, @floatFromInt(current)), 0.0, 1.0);
+        if (current >= keyframeCount) current = @rem(current, keyframeCount);
+        if (next >= keyframeCount) next = @rem(next, keyframeCount);
+        return .{ .current = @intCast(current), .next = @intCast(next), .blend = blend };
+    }
+
+    /// The interpolated pose of `bone` between the pair's two keyframes
+    fn pose(pair: FramePair, anim: ModelAnimation, bone: usize) Transform {
+        const a = anim.keyframePoses[pair.current][bone];
+        const b = anim.keyframePoses[pair.next][bone];
+        return .{
+            .translation = Vector3Lerp(a.translation, b.translation, pair.blend),
+            .rotation = QuaternionSlerp(a.rotation, b.rotation, pair.blend),
+            .scale = Vector3Lerp(a.scale, b.scale, pair.blend),
+        };
+    }
+};
+
+/// Scale, then rotation, then translation
+fn transformMatrix(transform: Transform) Matrix {
+    return MatrixMultiply(
+        MatrixMultiply(MatrixScale(transform.scale.x, transform.scale.y, transform.scale.z), QuaternionToMatrix(transform.rotation)),
+        MatrixTranslate(transform.translation.x, transform.translation.y, transform.translation.z),
+    );
+}
+
+/// Bone matrix for the model's current pose of `bone`, relative to its bind pose
+fn updateBoneMatrix(model: Model, bone: usize) void {
+    const bindPoseMatrix = transformMatrix(model.skeleton.bindPose[bone]);
+    const currentPoseMatrix = transformMatrix(model.currentPose[bone]);
+    model.boneMatrices[bone] = MatrixMultiply(MatrixInvert(bindPoseMatrix), currentPoseMatrix);
+}
+
 // Update model animation data (bone matrices) for a specific pose
 // NOTE: Request frame could be fractional, using a lerp interpolation between two frames
 // NOTE: Not declared in raylib.h, but a public (non-static) symbol of upstream rmodels.c
@@ -3017,214 +3019,158 @@ export fn UpdateModelAnimationBones(model: Model, anim: ModelAnimation, frame: f
     if (model.boneMatrices == null) return;
 
     if ((anim.keyframeCount > 0) and (model.skeleton.bones != null) and (anim.keyframePoses != null)) {
-        var currentFrame: c_int = @intFromFloat(frame);
-        var nextFrame: c_int = currentFrame + 1;
-        var blend: f32 = frame - @as(f32, @floatFromInt(currentFrame));
-        blend = Clamp(blend, 0.0, 1.0);
-        if (currentFrame >= anim.keyframeCount) currentFrame = @rem(currentFrame, anim.keyframeCount);
-        if (nextFrame >= anim.keyframeCount) nextFrame = @rem(nextFrame, anim.keyframeCount);
+        const pair: FramePair = .init(frame, anim.keyframeCount, false);
 
-        var bindPoseMatrix = std.mem.zeroes(Matrix);
-        var currentPoseMatrix = std.mem.zeroes(Matrix);
-
-        var bi: usize = 0;
-        while (bi < model.skeleton.boneCount) : (bi += 1) {
-            const cf: usize = @intCast(currentFrame);
-            const nf: usize = @intCast(nextFrame);
-            model.currentPose[bi].translation = Vector3Lerp(anim.keyframePoses[cf][bi].translation, anim.keyframePoses[nf][bi].translation, blend);
-            model.currentPose[bi].rotation = QuaternionSlerp(anim.keyframePoses[cf][bi].rotation, anim.keyframePoses[nf][bi].rotation, blend);
-            model.currentPose[bi].scale = Vector3Lerp(anim.keyframePoses[cf][bi].scale, anim.keyframePoses[nf][bi].scale, blend);
-
-            const bindPoseTransform = &model.skeleton.bindPose[bi];
-            bindPoseMatrix = MatrixMultiply(MatrixMultiply(MatrixScale(bindPoseTransform.scale.x, bindPoseTransform.scale.y, bindPoseTransform.scale.z), QuaternionToMatrix(bindPoseTransform.rotation)), MatrixTranslate(bindPoseTransform.translation.x, bindPoseTransform.translation.y, bindPoseTransform.translation.z));
-
-            const currentPoseTransform = &model.currentPose[bi];
-            currentPoseMatrix = MatrixMultiply(MatrixMultiply(MatrixScale(currentPoseTransform.scale.x, currentPoseTransform.scale.y, currentPoseTransform.scale.z), QuaternionToMatrix(currentPoseTransform.rotation)), MatrixTranslate(currentPoseTransform.translation.x, currentPoseTransform.translation.y, currentPoseTransform.translation.z));
-
-            model.boneMatrices[bi] = MatrixMultiply(MatrixInvert(bindPoseMatrix), currentPoseMatrix);
+        for (0..model.skeleton.boneCount) |bone| {
+            model.currentPose[bone] = pair.pose(anim, bone);
+            updateBoneMatrix(model, bone);
         }
     }
 }
 
-// Update model animation data (vertex buffers / bone matrices) for a specific pose
+// Update model animation pose (vertex buffers and bone matrices)
 // NOTE: Animated vertex data is uploaded to GPU in case of CPU skinning; for GPU
 // skinning, bone matrices are uploaded to the shader on DrawModelEx()
 export fn UpdateModelAnimation(model: Model, anim: ModelAnimation, frame: f32) callconv(.c) void {
     if ((anim.keyframeCount > 0) and (model.skeleton.bones != null) and (anim.keyframePoses != null)) {
         UpdateModelAnimationBones(model, anim, frame);
-        UpdateModelAnimationVertexBuffers(model);
+        updateModelAnimationVertexBuffers(model);
     }
+}
+
+fn isBlendable(animA: ModelAnimation, animB: ModelAnimation, blend: f32) bool {
+    return (animA.keyframeCount > 0) and (animA.keyframePoses != null) and
+        (animB.keyframeCount > 0) and (animB.keyframePoses != null) and
+        (blend >= 0.0) and (blend <= 1.0);
 }
 
 // Update model animation data (bone matrices) for a pose defined by two animations blended together
 // NOTE: Not declared in raylib.h, but a public (non-static) symbol of upstream rmodels.c
 export fn UpdateModelAnimationBonesEx(model: Model, animA: ModelAnimation, frameA: f32, animB: ModelAnimation, frameB: f32, blend: f32) callconv(.c) void {
     if (model.boneMatrices == null) return;
+    if (!isBlendable(animA, animB, blend)) return;
 
-    if ((animA.keyframeCount > 0) and (animA.keyframePoses != null) and
-        (animB.keyframeCount > 0) and (animB.keyframePoses != null) and
-        (blend >= 0.0) and (blend <= 1.0))
-    {
-        var currentFrameA: c_int = @rem(@as(c_int, @intFromFloat(frameA)), animA.keyframeCount);
-        var nextFrameA: c_int = currentFrameA + 1;
-        var blendA: f32 = frameA - @as(f32, @floatFromInt(currentFrameA));
-        blendA = Clamp(blendA, 0.0, 1.0);
-        if (currentFrameA >= animA.keyframeCount) currentFrameA = @rem(currentFrameA, animA.keyframeCount);
-        if (nextFrameA >= animA.keyframeCount) nextFrameA = @rem(nextFrameA, animA.keyframeCount);
+    const pairA: FramePair = .init(frameA, animA.keyframeCount, true);
+    const pairB: FramePair = .init(frameB, animB.keyframeCount, true);
 
-        var currentFrameB: c_int = @rem(@as(c_int, @intFromFloat(frameB)), animB.keyframeCount);
-        var nextFrameB: c_int = currentFrameB + 1;
-        var blendB: f32 = frameB - @as(f32, @floatFromInt(currentFrameB));
-        blendB = Clamp(blendB, 0.0, 1.0);
-        if (currentFrameB >= animB.keyframeCount) currentFrameB = @rem(currentFrameB, animB.keyframeCount);
-        if (nextFrameB >= animB.keyframeCount) nextFrameB = @rem(nextFrameB, animB.keyframeCount);
+    for (0..model.skeleton.boneCount) |bone| {
+        const poseA = pairA.pose(animA, bone);
+        const poseB = pairB.pose(animB, bone);
 
-        var bindPoseMatrix = std.mem.zeroes(Matrix);
-        var currentPoseMatrix = std.mem.zeroes(Matrix);
-
-        var bi: usize = 0;
-        while (bi < model.skeleton.boneCount) : (bi += 1) {
-            const cfa: usize = @intCast(currentFrameA);
-            const nfa: usize = @intCast(nextFrameA);
-            const cfb: usize = @intCast(currentFrameB);
-            const nfb: usize = @intCast(nextFrameB);
-
-            const frameATranslation = Vector3Lerp(animA.keyframePoses[cfa][bi].translation, animA.keyframePoses[nfa][bi].translation, blendA);
-            const frameARotation = QuaternionSlerp(animA.keyframePoses[cfa][bi].rotation, animA.keyframePoses[nfa][bi].rotation, blendA);
-            const frameAScale = Vector3Lerp(animA.keyframePoses[cfa][bi].scale, animA.keyframePoses[nfa][bi].scale, blendA);
-
-            const frameBTranslation = Vector3Lerp(animB.keyframePoses[cfb][bi].translation, animB.keyframePoses[nfb][bi].translation, blendB);
-            const frameBRotation = QuaternionSlerp(animB.keyframePoses[cfb][bi].rotation, animB.keyframePoses[nfb][bi].rotation, blendB);
-            const frameBScale = Vector3Lerp(animB.keyframePoses[cfb][bi].scale, animB.keyframePoses[nfb][bi].scale, blendB);
-
-            model.currentPose[bi].translation = Vector3Lerp(frameATranslation, frameBTranslation, blend);
-            model.currentPose[bi].rotation = QuaternionSlerp(frameARotation, frameBRotation, blend);
-            model.currentPose[bi].scale = Vector3Lerp(frameAScale, frameBScale, blend);
-
-            const bindPoseTransform = &model.skeleton.bindPose[bi];
-            bindPoseMatrix = MatrixMultiply(MatrixMultiply(MatrixScale(bindPoseTransform.scale.x, bindPoseTransform.scale.y, bindPoseTransform.scale.z), QuaternionToMatrix(bindPoseTransform.rotation)), MatrixTranslate(bindPoseTransform.translation.x, bindPoseTransform.translation.y, bindPoseTransform.translation.z));
-
-            const currentPoseTransform = &model.currentPose[bi];
-            currentPoseMatrix = MatrixMultiply(MatrixMultiply(MatrixScale(currentPoseTransform.scale.x, currentPoseTransform.scale.y, currentPoseTransform.scale.z), QuaternionToMatrix(currentPoseTransform.rotation)), MatrixTranslate(currentPoseTransform.translation.x, currentPoseTransform.translation.y, currentPoseTransform.translation.z));
-
-            model.boneMatrices[bi] = MatrixMultiply(MatrixInvert(bindPoseMatrix), currentPoseMatrix);
-        }
+        model.currentPose[bone] = .{
+            .translation = Vector3Lerp(poseA.translation, poseB.translation, blend),
+            .rotation = QuaternionSlerp(poseA.rotation, poseB.rotation, blend),
+            .scale = Vector3Lerp(poseA.scale, poseB.scale, blend),
+        };
+        updateBoneMatrix(model, bone);
     }
 }
 
-// Update model animation data (vertex buffers / bone matrices) for a pose defined by
-// two animations blended together
+// Update model animation pose, blending two animations
 export fn UpdateModelAnimationEx(model: Model, animA: ModelAnimation, frameA: f32, animB: ModelAnimation, frameB: f32, blend: f32) callconv(.c) void {
     if (model.boneMatrices == null) return;
 
-    if ((animA.keyframeCount > 0) and (animA.keyframePoses != null) and
-        (animB.keyframeCount > 0) and (animB.keyframePoses != null) and
-        (blend >= 0.0) and (blend <= 1.0))
-    {
+    if (isBlendable(animA, animB, blend)) {
         UpdateModelAnimationBonesEx(model, animA, frameA, animB, frameB, blend);
-        UpdateModelAnimationVertexBuffers(model);
+        updateModelAnimationVertexBuffers(model);
     }
 }
 
-// Update model vertex animation buffers (positions and normals)
-// NOTE: Required for CPU skinning, uploads animated vertex buffers to GPU
-// NOTE: Upstream 6.2 also precomputes a per-bone normal matrix table here that it never
-// reads (normals still use the per-vertex MatrixTranspose(MatrixInvert(...))); that dead
-// computation has no observable effect and is not ported
-fn UpdateModelAnimationVertexBuffers(model: Model) void {
-    var m: c_int = 0;
-    while (m < model.meshCount) : (m += 1) {
-        const mesh = &model.meshes[@intCast(m)]; // Not a copy: CPU buffers may be allocated below
-        var animVertex = std.mem.zeroes(Vector3);
-        var animNormal = std.mem.zeroes(Vector3);
-        const vertexValuesCount = mesh.vertexCount * 3;
-
-        var boneIndex: c_int = 0;
-        var boneCounter: c_int = 0;
-        var boneWeight: f32 = 0.0;
-        var bufferUpdateRequired = false;
-
+/// CPU skinning: recompute animated positions and normals from the bone
+/// matrices and upload them to the GPU
+/// NOTE: Upstream 6.2 also precomputes a per-bone normal matrix table here that it
+/// never reads (normals still use the per-vertex MatrixTranspose(MatrixInvert(...)));
+/// that dead computation has no observable effect and is not ported
+fn updateModelAnimationVertexBuffers(model: Model) void {
+    for (modelMeshes(model), 0..) |*mesh, m| {
+        // Skip if missing bone data
         if ((mesh.boneWeights == null) or (mesh.boneIndices == null)) continue;
 
-        // Skip if the shader is using the bones directly
+        // Skip if the shader is using the bones directly (GPU skinning)
         if (SUPPORT_GPU_SKINNING) {
-            const material = model.materials[@intCast(model.meshMaterial[@intCast(m)])];
+            const material = model.materials[@intCast(model.meshMaterial[m])];
             if ((material.shader.locs != null) and (material.shader.locs[SHADER_LOC_VERTEX_BONEIDS] != -1)) continue;
         }
 
-        // Lazy allocation of CPU animation buffers (positions and normals) for software skinning
-        const valuesSize: usize = @as(usize, @intCast(mesh.vertexCount * 3)) * @sizeOf(f32);
-        if (mesh.animVertices == null) {
-            mesh.animVertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(mesh.vertexCount * 3), @sizeOf(f32))));
-            _ = memcpy(mesh.animVertices, mesh.vertices, valuesSize);
-        }
-        if ((mesh.normals != null) and (mesh.animNormals == null)) {
-            mesh.animNormals = @ptrCast(@alignCast(RL_CALLOC(@intCast(mesh.vertexCount * 3), @sizeOf(f32))));
-            _ = memcpy(mesh.animNormals, mesh.normals, valuesSize);
-        }
+        skinMesh(mesh, model.boneMatrices) catch {
+            TraceLog(LOG_WARNING, "MESH: Failed to allocate memory for animated vertex data");
+        };
+    }
+}
 
-        var vCounter: c_int = 0;
-        while (vCounter < vertexValuesCount) : (vCounter += 3) {
-            const vc: usize = @intCast(vCounter);
-            mesh.animVertices[vc] = 0;
-            mesh.animVertices[vc + 1] = 0;
-            mesh.animVertices[vc + 2] = 0;
-            if (mesh.animNormals != null) {
-                mesh.animNormals[vc] = 0;
-                mesh.animNormals[vc + 1] = 0;
-                mesh.animNormals[vc + 2] = 0;
+fn skinMesh(mesh: *Mesh, boneMatrices: [*c]const Matrix) error{OutOfMemory}!void {
+    const valueCount = count(mesh.vertexCount) * 3;
+    const vertices = mesh.vertices[0..valueCount];
+    const normals: ?[]const f32 = if (mesh.normals != null) mesh.normals[0..valueCount] else null;
+
+    // Lazy allocation of the CPU animation buffers, for software skinning
+    if (mesh.animVertices == null) {
+        const animVertices = try cmem.alloc(f32, valueCount);
+        @memcpy(animVertices, vertices);
+        mesh.animVertices = animVertices.ptr;
+    }
+    if (normals != null and mesh.animNormals == null) {
+        const animNormals = try cmem.alloc(f32, valueCount);
+        @memcpy(animNormals, normals.?);
+        mesh.animNormals = animNormals.ptr;
+    }
+
+    const animVertices = mesh.animVertices[0..valueCount];
+    const animNormals: ?[]f32 = if (mesh.animNormals != null) mesh.animNormals[0..valueCount] else null;
+    const boneWeights = mesh.boneWeights[0 .. valueCount / 3 * 4];
+    const boneIndices = mesh.boneIndices[0 .. valueCount / 3 * 4];
+
+    var bufferUpdateRequired = false;
+    var v: usize = 0;
+    while (v < valueCount) : (v += 3) {
+        @memset(animVertices[v..][0..3], 0);
+        if (animNormals) |n| @memset(n[v..][0..3], 0);
+
+        // Up to 4 bones per vertex
+        const first = v / 3 * 4;
+        for (boneWeights[first..][0..4], boneIndices[first..][0..4]) |boneWeight, boneIndex| {
+            // Early stop when no transformation will be applied
+            if (boneWeight == 0.0) continue;
+
+            const animVertex = Vector3Transform(.{ .x = vertices[v], .y = vertices[v + 1], .z = vertices[v + 2] }, boneMatrices[boneIndex]);
+            animVertices[v] += animVertex.x * boneWeight;
+            animVertices[v + 1] += animVertex.y * boneWeight;
+            animVertices[v + 2] += animVertex.z * boneWeight;
+            bufferUpdateRequired = true;
+
+            if ((normals != null) and (animNormals != null)) {
+                const base = normals.?;
+                const n = animNormals.?;
+                const animNormal = Vector3Transform(.{ .x = base[v], .y = base[v + 1], .z = base[v + 2] }, MatrixTranspose(MatrixInvert(boneMatrices[boneIndex])));
+                n[v] += animNormal.x * boneWeight;
+                n[v + 1] += animNormal.y * boneWeight;
+                n[v + 2] += animNormal.z * boneWeight;
             }
-
-            var j: c_int = 0;
-            while (j < 4) : ({
-                j += 1;
-                boneCounter += 1;
-            }) {
-                const bc: usize = @intCast(boneCounter);
-                boneWeight = mesh.boneWeights[bc];
-                boneIndex = mesh.boneIndices[bc];
-
-                if (boneWeight == 0.0) continue;
-                animVertex = .{ .x = mesh.vertices[vc], .y = mesh.vertices[vc + 1], .z = mesh.vertices[vc + 2] };
-                animVertex = Vector3Transform(animVertex, model.boneMatrices[@intCast(boneIndex)]);
-                mesh.animVertices[vc] += animVertex.x * boneWeight;
-                mesh.animVertices[vc + 1] += animVertex.y * boneWeight;
-                mesh.animVertices[vc + 2] += animVertex.z * boneWeight;
-                bufferUpdateRequired = true;
-
-                if ((mesh.normals != null) and (mesh.animNormals != null)) {
-                    animNormal = .{ .x = mesh.normals[vc], .y = mesh.normals[vc + 1], .z = mesh.normals[vc + 2] };
-                    animNormal = Vector3Transform(animNormal, MatrixTranspose(MatrixInvert(model.boneMatrices[@intCast(boneIndex)])));
-                    mesh.animNormals[vc] += animNormal.x * boneWeight;
-                    mesh.animNormals[vc + 1] += animNormal.y * boneWeight;
-                    mesh.animNormals[vc + 2] += animNormal.z * boneWeight;
-                }
-            }
         }
+    }
 
-        if (bufferUpdateRequired) {
-            rlUpdateVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION], mesh.animVertices, mesh.vertexCount * 3 * @sizeOf(f32), 0);
-            if (mesh.normals != null) rlUpdateVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL], mesh.animNormals, mesh.vertexCount * 3 * @sizeOf(f32), 0);
-        }
+    if (bufferUpdateRequired) {
+        // Update GPU vertex buffers with the animated positions and normals
+        rlUpdateVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_POSITION], mesh.animVertices, mesh.vertexCount * 3 * @sizeOf(f32), 0);
+        if (mesh.normals != null) rlUpdateVertexBuffer(mesh.vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_NORMAL], mesh.animNormals, mesh.vertexCount * 3 * @sizeOf(f32), 0);
     }
 }
 
 // Unload animation array data
 export fn UnloadModelAnimations(animations: [*c]ModelAnimation, animCount: c_int) callconv(.c) void {
-    var a: c_int = 0;
-    while (a < animCount) : (a += 1) {
-        var i: c_int = 0;
-        while (i < animations[@intCast(a)].keyframeCount) : (i += 1) RL_FREE(animations[@intCast(a)].keyframePoses[@intCast(i)]);
-        RL_FREE(animations[@intCast(a)].keyframePoses);
+    if (animations != null) {
+        for (animations[0..count(animCount)]) |animation| {
+            for (animation.keyframePoses[0..count(animation.keyframeCount)]) |pose| cmem.free(pose);
+            cmem.free(animation.keyframePoses);
+        }
     }
-    RL_FREE(animations);
+    cmem.free(animations);
 }
 
 // Check model animation skeleton match
+// NOTE: Only the number of bones is checked
 export fn IsModelAnimationValid(model: Model, anim: ModelAnimation) callconv(.c) bool {
-    var result = true;
-    if (model.skeleton.boneCount != anim.boneCount) result = false;
-    return result;
+    return model.skeleton.boneCount == anim.boneCount;
 }
 
 //----------------------------------------------------------------------------------
@@ -3233,29 +3179,19 @@ export fn IsModelAnimationValid(model: Model, anim: ModelAnimation) callconv(.c)
 
 // Compute mesh bounding box limits
 export fn GetMeshBoundingBox(mesh: Mesh) callconv(.c) BoundingBox {
-    var minVertex = std.mem.zeroes(Vector3);
-    var maxVertex = std.mem.zeroes(Vector3);
-
-    if (mesh.vertices != null) {
-        minVertex = .{ .x = mesh.vertices[0], .y = mesh.vertices[1], .z = mesh.vertices[2] };
-        maxVertex = .{ .x = mesh.vertices[0], .y = mesh.vertices[1], .z = mesh.vertices[2] };
-
-        var i: c_int = 1;
-        while (i < mesh.vertexCount) : (i += 1) {
-            const u: usize = @intCast(i);
-            const v: Vector3 = .{ .x = mesh.vertices[u * 3], .y = mesh.vertices[u * 3 + 1], .z = mesh.vertices[u * 3 + 2] };
-            // C inlines raymath's fminf/fmaxf as LLVM minnum/maxnum, which is what
-            // @min/@max lower to; the exported Vector3Min calls libm instead, and
-            // the two disagree on the sign of a zero result
-            minVertex = .{ .x = @min(minVertex.x, v.x), .y = @min(minVertex.y, v.y), .z = @min(minVertex.z, v.z) };
-            maxVertex = .{ .x = @max(maxVertex.x, v.x), .y = @max(maxVertex.y, v.y), .z = @max(maxVertex.z, v.z) };
-        }
-    }
-
     var box = std.mem.zeroes(BoundingBox);
-    box.min = minVertex;
-    box.max = maxVertex;
+    if (mesh.vertices == null) return box;
 
+    // NOTE: Reads the first vertex even when vertexCount is 0, as raylib does
+    const positions = vector3s(mesh.vertices[0 .. @max(count(mesh.vertexCount), 1) * 3]);
+    box = .{ .min = positions[0], .max = positions[0] };
+    for (positions[1..]) |v| {
+        // C inlines raymath's fminf/fmaxf as LLVM minnum/maxnum, which is what
+        // @min/@max lower to; the exported Vector3Min calls libm instead, and
+        // the two disagree on the sign of a zero result
+        box.min = .{ .x = @min(box.min.x, v.x), .y = @min(box.min.y, v.y), .z = @min(box.min.z, v.z) };
+        box.max = .{ .x = @max(box.max.x, v.x), .y = @max(box.max.y, v.y), .z = @max(box.max.z, v.z) };
+    }
     return box;
 }
 
@@ -3266,50 +3202,62 @@ export fn GenMeshTangents(mesh: [*c]Mesh) callconv(.c) void {
         return;
     }
 
-    if (mesh.*.tangents == null) {
-        mesh.*.tangents = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.*.vertexCount * 4 * @sizeOf(f32)))));
-    } else {
-        RL_FREE(mesh.*.tangents);
-        mesh.*.tangents = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.*.vertexCount * 4 * @sizeOf(f32)))));
-    }
-
-    const tan1: [*c]Vector3 = @ptrCast(@alignCast(RL_CALLOC(@intCast(mesh.*.vertexCount), @sizeOf(Vector3))));
-    const tan2: [*c]Vector3 = @ptrCast(@alignCast(RL_CALLOC(@intCast(mesh.*.vertexCount), @sizeOf(Vector3))));
-
-    if (tan1 == null or tan2 == null) {
+    computeTangents(mesh) catch {
         TraceLog(LOG_WARNING, "MESH: Failed to allocate temporary memory for tangent calculation");
-        if (tan1 != null) RL_FREE(tan1);
-        if (tan2 != null) RL_FREE(tan2);
         return;
-    }
+    };
 
-    var t: c_int = 0;
-    while (t < mesh.*.triangleCount) : (t += 1) {
-        var idx0: c_int = 0;
-        var idx1: c_int = 0;
-        var idx2: c_int = 0;
-
-        if (mesh.*.indices != null) {
-            idx0 = mesh.*.indices[@intCast(t * 3 + 0)];
-            idx1 = mesh.*.indices[@intCast(t * 3 + 1)];
-            idx2 = mesh.*.indices[@intCast(t * 3 + 2)];
+    if (mesh.*.vboId != null) {
+        // Upload tangents to GPU, as a new buffer or into the existing one
+        const tangentsSize = mesh.*.vertexCount * 4 * @sizeOf(f32);
+        if (mesh.*.vboId[SHADER_LOC_VERTEX_TANGENT] != 0) {
+            rlUpdateVertexBuffer(mesh.*.vboId[SHADER_LOC_VERTEX_TANGENT], mesh.*.tangents, tangentsSize, 0);
         } else {
-            idx0 = t * 3 + 0;
-            idx1 = t * 3 + 1;
-            idx2 = t * 3 + 2;
+            mesh.*.vboId[SHADER_LOC_VERTEX_TANGENT] = rlLoadVertexBuffer(mesh.*.tangents, tangentsSize, false);
         }
 
-        const vi0: usize = @intCast(idx0);
-        const vi1: usize = @intCast(idx1);
-        const vi2: usize = @intCast(idx2);
+        _ = rlEnableVertexArray(mesh.*.vaoId);
+        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT, 4, RL_FLOAT, false, 0, 0);
+        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT);
+        rlDisableVertexArray();
+    }
 
-        const v1 = Vector3{ .x = mesh.*.vertices[vi0 * 3 + 0], .y = mesh.*.vertices[vi0 * 3 + 1], .z = mesh.*.vertices[vi0 * 3 + 2] };
-        const v2 = Vector3{ .x = mesh.*.vertices[vi1 * 3 + 0], .y = mesh.*.vertices[vi1 * 3 + 1], .z = mesh.*.vertices[vi1 * 3 + 2] };
-        const v3 = Vector3{ .x = mesh.*.vertices[vi2 * 3 + 0], .y = mesh.*.vertices[vi2 * 3 + 1], .z = mesh.*.vertices[vi2 * 3 + 2] };
+    TraceLog(LOG_INFO, "MESH: Tangents data computed and uploaded for provided mesh");
+}
 
-        const uv1 = Vector2{ .x = mesh.*.texcoords[vi0 * 2 + 0], .y = mesh.*.texcoords[vi0 * 2 + 1] };
-        const uv2 = Vector2{ .x = mesh.*.texcoords[vi1 * 2 + 0], .y = mesh.*.texcoords[vi1 * 2 + 1] };
-        const uv3 = Vector2{ .x = mesh.*.texcoords[vi2 * 2 + 0], .y = mesh.*.texcoords[vi2 * 2 + 1] };
+/// Fills mesh.tangents (replacing any) from positions, texcoords and normals
+fn computeTangents(mesh: *Mesh) error{OutOfMemory}!void {
+    const vertexCount = count(mesh.vertexCount);
+    const gpa = std.heap.c_allocator;
+
+    // Per-vertex accumulated tangent (s) and bitangent (t) directions
+    const tan1 = try gpa.alloc(Vector3, vertexCount);
+    defer gpa.free(tan1);
+    const tan2 = try gpa.alloc(Vector3, vertexCount);
+    defer gpa.free(tan2);
+    @memset(tan1, Vector3Zero());
+    @memset(tan2, Vector3Zero());
+
+    const tangents = try cmem.alloc(f32, vertexCount * 4);
+    cmem.free(mesh.tangents);
+    mesh.tangents = tangents.ptr;
+
+    const positions = vector3s(mesh.vertices[0 .. vertexCount * 3]);
+    const uvs = vector2s(mesh.texcoords[0 .. vertexCount * 2]);
+    const normals = vector3s(mesh.normals[0 .. vertexCount * 3]);
+
+    for (0..count(mesh.triangleCount)) |t| {
+        var index: [3]usize = .{ t * 3, t * 3 + 1, t * 3 + 2 };
+        if (mesh.indices != null) {
+            for (&index) |*i| i.* = mesh.indices[i.*];
+        }
+
+        const v1 = positions[index[0]];
+        const v2 = positions[index[1]];
+        const v3 = positions[index[2]];
+        const uv1 = uvs[index[0]];
+        const uv2 = uvs[index[1]];
+        const uv3 = uvs[index[2]];
 
         const x1 = v2.x - v1.x;
         const y1 = v2.y - v1.y;
@@ -3324,274 +3272,152 @@ export fn GenMeshTangents(mesh: [*c]Mesh) callconv(.c) void {
         const t2 = uv3.y - uv1.y;
 
         const div = s1 * t2 - s2 * t1;
-        const r: f32 = if (fabsf(div) < 0.0001) 0.0 else 1.0 / div;
+        const r: f32 = if (@abs(div) < 0.0001) 0.0 else 1.0 / div;
 
         const sdir = Vector3{ .x = (t2 * x1 - t1 * x2) * r, .y = (t2 * y1 - t1 * y2) * r, .z = (t2 * z1 - t1 * z2) * r };
         const tdir = Vector3{ .x = (s1 * x2 - s2 * x1) * r, .y = (s1 * y2 - s2 * y1) * r, .z = (s1 * z2 - s2 * z1) * r };
 
-        tan1[vi0] = Vector3Add(tan1[vi0], sdir);
-        tan1[vi1] = Vector3Add(tan1[vi1], sdir);
-        tan1[vi2] = Vector3Add(tan1[vi2], sdir);
-
-        tan2[vi0] = Vector3Add(tan2[vi0], tdir);
-        tan2[vi1] = Vector3Add(tan2[vi1], tdir);
-        tan2[vi2] = Vector3Add(tan2[vi2], tdir);
+        for (index) |i| {
+            tan1[i] = Vector3Add(tan1[i], sdir);
+            tan2[i] = Vector3Add(tan2[i], tdir);
+        }
     }
 
-    var i: c_int = 0;
-    while (i < mesh.*.vertexCount) : (i += 1) {
-        const u: usize = @intCast(i);
-        const normal = Vector3{ .x = mesh.*.normals[u * 3 + 0], .y = mesh.*.normals[u * 3 + 1], .z = mesh.*.normals[u * 3 + 2] };
-        var tangent = tan1[u];
+    for (normals, tan1, tan2, 0..) |normal, tangent, bitangent, i| {
+        const out = tangents[i * 4 ..][0..4];
 
+        // Degenerate tangent: any vector perpendicular to the normal
         if (Vector3Length(tangent) < 0.0001) {
-            if (fabsf(normal.z) > 0.707) tangent = .{ .x = 1.0, .y = 0.0, .z = 0.0 } else tangent = Vector3Normalize(.{ .x = -normal.y, .y = normal.x, .z = 0.0 });
-
-            mesh.*.tangents[u * 4 + 0] = tangent.x;
-            mesh.*.tangents[u * 4 + 1] = tangent.y;
-            mesh.*.tangents[u * 4 + 2] = tangent.z;
-            mesh.*.tangents[u * 4 + 3] = 1.0;
+            const fallback = perpendicular(normal);
+            out.* = .{ fallback.x, fallback.y, fallback.z, 1.0 };
             continue;
         }
 
+        // Gram-Schmidt orthogonalization against the normal
         var orthogonalized = Vector3Subtract(tangent, Vector3Scale(normal, Vector3DotProduct(normal, tangent)));
+        orthogonalized = if (Vector3Length(orthogonalized) < 0.0001) perpendicular(normal) else Vector3Normalize(orthogonalized);
 
-        if (Vector3Length(orthogonalized) < 0.0001) {
-            if (fabsf(normal.z) > 0.707) orthogonalized = .{ .x = 1.0, .y = 0.0, .z = 0.0 } else orthogonalized = Vector3Normalize(.{ .x = -normal.y, .y = normal.x, .z = 0.0 });
-        } else {
-            orthogonalized = Vector3Normalize(orthogonalized);
-        }
-
-        mesh.*.tangents[u * 4 + 0] = orthogonalized.x;
-        mesh.*.tangents[u * 4 + 1] = orthogonalized.y;
-        mesh.*.tangents[u * 4 + 2] = orthogonalized.z;
-
-        mesh.*.tangents[u * 4 + 3] = if (Vector3DotProduct(Vector3CrossProduct(normal, orthogonalized), tan2[u]) < 0.0) -1.0 else 1.0;
+        // Handedness
+        const w: f32 = if (Vector3DotProduct(Vector3CrossProduct(normal, orthogonalized), bitangent) < 0.0) -1.0 else 1.0;
+        out.* = .{ orthogonalized.x, orthogonalized.y, orthogonalized.z, w };
     }
+}
 
-    RL_FREE(tan1);
-    RL_FREE(tan2);
-
-    if (mesh.*.vboId != null) {
-        if (mesh.*.vboId[SHADER_LOC_VERTEX_TANGENT] != 0) {
-            rlUpdateVertexBuffer(mesh.*.vboId[SHADER_LOC_VERTEX_TANGENT], mesh.*.tangents, mesh.*.vertexCount * 4 * @sizeOf(f32), 0);
-        } else {
-            mesh.*.vboId[SHADER_LOC_VERTEX_TANGENT] = rlLoadVertexBuffer(mesh.*.tangents, mesh.*.vertexCount * 4 * @sizeOf(f32), false);
-        }
-
-        _ = rlEnableVertexArray(mesh.*.vaoId);
-        rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT, 4, RL_FLOAT, false, 0, 0);
-        rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TANGENT);
-        rlDisableVertexArray();
-    }
-
-    TraceLog(LOG_INFO, "MESH: Tangents data computed and uploaded for provided mesh");
+/// A tangent for `normal` when the texture coordinates give none
+fn perpendicular(normal: Vector3) Vector3 {
+    if (@abs(normal.z) > 0.707) return .{ .x = 1.0, .y = 0.0, .z = 0.0 };
+    return Vector3Normalize(.{ .x = -normal.y, .y = normal.x, .z = 0.0 });
 }
 
 //----------------------------------------------------------------------------------
 // Module Functions Definition - Mesh generation
 //----------------------------------------------------------------------------------
 
-// Copy a par_shapes mesh (indexed) into a raylib Mesh (de-indexed triangle soup)
-fn copyParShapesMesh(mesh: *Mesh, ps: *par_shapes_mesh) void {
-    mesh.vertices = @ptrCast(@alignCast(RL_MALLOC(@intCast(ps.ntriangles * 3 * 3 * @sizeOf(f32)))));
-    mesh.texcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(ps.ntriangles * 3 * 2 * @sizeOf(f32)))));
-    mesh.normals = @ptrCast(@alignCast(RL_MALLOC(@intCast(ps.ntriangles * 3 * 3 * @sizeOf(f32)))));
-
-    mesh.vertexCount = ps.ntriangles * 3;
-    mesh.triangleCount = ps.ntriangles;
-
-    var k: c_int = 0;
-    while (k < mesh.vertexCount) : (k += 1) {
-        const uk: usize = @intCast(k);
-        const ti: usize = @intCast(ps.triangles[uk]);
-        mesh.vertices[uk * 3] = ps.points[ti * 3];
-        mesh.vertices[uk * 3 + 1] = ps.points[ti * 3 + 1];
-        mesh.vertices[uk * 3 + 2] = ps.points[ti * 3 + 2];
-
-        mesh.normals[uk * 3] = ps.normals[ti * 3];
-        mesh.normals[uk * 3 + 1] = ps.normals[ti * 3 + 1];
-        mesh.normals[uk * 3 + 2] = ps.normals[ti * 3 + 2];
-
-        mesh.texcoords[uk * 2] = ps.tcoords[ti * 2];
-        mesh.texcoords[uk * 2 + 1] = ps.tcoords[ti * 2 + 1];
-    }
+/// Uploads a generated mesh, or reports that generating it ran out of memory
+fn generated(result: error{OutOfMemory}!Mesh) Mesh {
+    var mesh = result catch {
+        TraceLog(LOG_WARNING, "MESH: Failed to allocate memory for mesh generation");
+        return empty_mesh;
+    };
+    UploadMesh(&mesh, false);
+    return mesh;
 }
+
+/// A mesh's vertex arrays on the C heap, which UnloadMesh frees
+const MeshArrays = struct {
+    vertices: []Vector3,
+    texcoords: []Vector2,
+    normals: []Vector3,
+
+    fn alloc(mesh: *Mesh, vertexCount: usize) error{OutOfMemory}!MeshArrays {
+        errdefer freeMeshArrays(mesh.*);
+        const vertices = try cmem.alloc(f32, vertexCount * 3);
+        mesh.vertices = vertices.ptr;
+        const texcoords = try cmem.alloc(f32, vertexCount * 2);
+        mesh.texcoords = texcoords.ptr;
+        const normals = try cmem.alloc(f32, vertexCount * 3);
+        mesh.normals = normals.ptr;
+        mesh.vertexCount = @intCast(vertexCount);
+        return .{ .vertices = vector3s(vertices), .texcoords = vector2s(texcoords), .normals = vector3s(normals) };
+    }
+};
 
 // Generate polygonal mesh
 export fn GenMeshPoly(sides: c_int, radius: f32) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
+    if (sides < 3) return empty_mesh; // Security check
+    return generated(polyMesh(@intCast(sides), radius));
+}
 
-    if (sides < 3) return mesh; // Security check
+fn polyMesh(sides: usize, radius: f32) error{OutOfMemory}!Mesh {
+    var mesh = empty_mesh;
+    const arrays = try MeshArrays.alloc(&mesh, sides * 3);
+    mesh.triangleCount = @intCast(sides);
 
-    const vertexCount = sides * 3;
-
-    const vertices: [*c]Vector3 = @ptrCast(@alignCast(RL_MALLOC(@intCast(vertexCount * @sizeOf(Vector3)))));
-
+    // One triangle per side, from the center
     var d: f32 = 0.0;
     const dStep: f32 = 360.0 / @as(f32, @floatFromInt(sides));
-    var v: c_int = 0;
-    while (v < vertexCount - 2) : (v += 3) {
-        const uv: usize = @intCast(v);
-        vertices[uv] = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
-        vertices[uv + 1] = .{ .x = sinf(DEG2RAD * d) * radius, .y = 0.0, .z = cosf(DEG2RAD * d) * radius };
-        vertices[uv + 2] = .{ .x = sinf(DEG2RAD * (d + dStep)) * radius, .y = 0.0, .z = cosf(DEG2RAD * (d + dStep)) * radius };
+    for (0..sides) |side| {
+        const triangle = arrays.vertices[side * 3 ..][0..3];
+        triangle[0] = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+        triangle[1] = .{ .x = sinf(DEG2RAD * d) * radius, .y = 0.0, .z = cosf(DEG2RAD * d) * radius };
+        triangle[2] = .{ .x = sinf(DEG2RAD * (d + dStep)) * radius, .y = 0.0, .z = cosf(DEG2RAD * (d + dStep)) * radius };
         d += dStep;
     }
 
-    const normals: [*c]Vector3 = @ptrCast(@alignCast(RL_MALLOC(@intCast(vertexCount * @sizeOf(Vector3)))));
-    var n: c_int = 0;
-    while (n < vertexCount) : (n += 1) normals[@intCast(n)] = .{ .x = 0.0, .y = 1.0, .z = 0.0 };
-
-    const texcoords: [*c]Vector2 = @ptrCast(@alignCast(RL_MALLOC(@intCast(vertexCount * @sizeOf(Vector2)))));
-    n = 0;
-    while (n < vertexCount) : (n += 1) texcoords[@intCast(n)] = .{ .x = 0.0, .y = 0.0 };
-
-    mesh.vertexCount = vertexCount;
-    mesh.triangleCount = sides;
-    mesh.vertices = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.texcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 2 * @sizeOf(f32)))));
-    mesh.normals = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-
-    var i: c_int = 0;
-    while (i < mesh.vertexCount) : (i += 1) {
-        const ui: usize = @intCast(i);
-        mesh.vertices[3 * ui] = vertices[ui].x;
-        mesh.vertices[3 * ui + 1] = vertices[ui].y;
-        mesh.vertices[3 * ui + 2] = vertices[ui].z;
-    }
-
-    i = 0;
-    while (i < mesh.vertexCount) : (i += 1) {
-        const ui: usize = @intCast(i);
-        mesh.texcoords[2 * ui] = texcoords[ui].x;
-        mesh.texcoords[2 * ui + 1] = texcoords[ui].y;
-    }
-
-    i = 0;
-    while (i < mesh.vertexCount) : (i += 1) {
-        const ui: usize = @intCast(i);
-        mesh.normals[3 * ui] = normals[ui].x;
-        mesh.normals[3 * ui + 1] = normals[ui].y;
-        mesh.normals[3 * ui + 2] = normals[ui].z;
-    }
-
-    RL_FREE(vertices);
-    RL_FREE(normals);
-    RL_FREE(texcoords);
-
-    UploadMesh(&mesh, false);
+    @memset(arrays.normals, .{ .x = 0.0, .y = 1.0, .z = 0.0 }); // Vector3.up
+    @memset(arrays.texcoords, .{ .x = 0.0, .y = 0.0 });
 
     return mesh;
 }
 
 // Generate plane mesh (with subdivisions)
-export fn GenMeshPlane(width: f32, length: f32, resX_in: c_int, resZ_in: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
+export fn GenMeshPlane(width: f32, length: f32, resX: c_int, resZ: c_int) callconv(.c) Mesh {
+    return generated(planeMesh(width, length, resX + 1, resZ + 1));
+}
 
-    const resX = resX_in + 1;
-    const resZ = resZ_in + 1;
+/// `columns` x `rows` vertices, shared between the faces
+fn planeMesh(width: f32, length: f32, columns: c_int, rows: c_int) error{OutOfMemory}!Mesh {
+    var mesh = empty_mesh;
+    const arrays = try MeshArrays.alloc(&mesh, count(columns * rows));
+    errdefer freeMeshArrays(mesh);
 
-    const vertexCount = resX * resZ; // vertices get reused for the faces
-
-    const vertices: [*c]Vector3 = @ptrCast(@alignCast(RL_MALLOC(@intCast(vertexCount * @sizeOf(Vector3)))));
-    {
-        var z: c_int = 0;
-        while (z < resZ) : (z += 1) {
-            const zPos = (@as(f32, @floatFromInt(z)) / @as(f32, @floatFromInt(resZ - 1)) - 0.5) * length;
-            var x: c_int = 0;
-            while (x < resX) : (x += 1) {
-                const xPos = (@as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(resX - 1)) - 0.5) * width;
-                vertices[@intCast(x + z * resX)] = .{ .x = xPos, .y = 0.0, .z = zPos };
-            }
+    const lastColumn: f32 = @floatFromInt(columns - 1);
+    const lastRow: f32 = @floatFromInt(rows - 1);
+    for (0..count(rows)) |z| {
+        const fz: f32 = @floatFromInt(z);
+        const zPos = (fz / lastRow - 0.5) * length; // [-length/2, length/2]
+        for (0..count(columns)) |x| {
+            const fx: f32 = @floatFromInt(x);
+            const xPos = (fx / lastColumn - 0.5) * width; // [-width/2, width/2]
+            const i = x + z * count(columns);
+            arrays.vertices[i] = .{ .x = xPos, .y = 0.0, .z = zPos };
+            arrays.texcoords[i] = .{ .x = fx / lastColumn, .y = fz / lastRow };
         }
     }
+    @memset(arrays.normals, .{ .x = 0.0, .y = 1.0, .z = 0.0 }); // Vector3.up
 
-    const normals: [*c]Vector3 = @ptrCast(@alignCast(RL_MALLOC(@intCast(vertexCount * @sizeOf(Vector3)))));
-    {
-        var nn: c_int = 0;
-        while (nn < vertexCount) : (nn += 1) normals[@intCast(nn)] = .{ .x = 0.0, .y = 1.0, .z = 0.0 };
+    // Two triangles per face
+    const faceCount = count((columns - 1) * (rows - 1));
+    mesh.triangleCount = @intCast(faceCount * 2);
+    const indices = try cmem.alloc(c_ushort, faceCount * 6);
+    mesh.indices = indices.ptr;
+
+    for (0..faceCount) |face| {
+        const i: c_int = @intCast(face + face / count(columns - 1));
+        const quad = [6]c_int{ i + columns, i + 1, i, i + columns, i + columns + 1, i + 1 };
+        // C stores the int indices into unsigned short: large planes wrap
+        for (indices[face * 6 ..][0..6], quad) |*index, vertex| index.* = @truncate(@as(c_uint, @bitCast(vertex)));
     }
-
-    const texcoords: [*c]Vector2 = @ptrCast(@alignCast(RL_MALLOC(@intCast(vertexCount * @sizeOf(Vector2)))));
-    {
-        var vv: c_int = 0;
-        while (vv < resZ) : (vv += 1) {
-            var uu: c_int = 0;
-            while (uu < resX) : (uu += 1) {
-                texcoords[@intCast(uu + vv * resX)] = .{ .x = @as(f32, @floatFromInt(uu)) / @as(f32, @floatFromInt(resX - 1)), .y = @as(f32, @floatFromInt(vv)) / @as(f32, @floatFromInt(resZ - 1)) };
-            }
-        }
-    }
-
-    const numFaces = (resX - 1) * (resZ - 1);
-    const triangles: [*c]c_int = @ptrCast(@alignCast(RL_MALLOC(@intCast(numFaces * 6 * @sizeOf(c_int)))));
-    {
-        var t: usize = 0;
-        var face: c_int = 0;
-        while (face < numFaces) : (face += 1) {
-            const i = face + @divTrunc(face, (resX - 1));
-            triangles[t] = i + resX;
-            t += 1;
-            triangles[t] = i + 1;
-            t += 1;
-            triangles[t] = i;
-            t += 1;
-            triangles[t] = i + resX;
-            t += 1;
-            triangles[t] = i + resX + 1;
-            t += 1;
-            triangles[t] = i + 1;
-            t += 1;
-        }
-    }
-
-    mesh.vertexCount = vertexCount;
-    mesh.triangleCount = numFaces * 2;
-    mesh.vertices = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.texcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 2 * @sizeOf(f32)))));
-    mesh.normals = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.indices = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.triangleCount * 3 * @sizeOf(c_ushort)))));
-
-    {
-        var i: c_int = 0;
-        while (i < mesh.vertexCount) : (i += 1) {
-            const ui: usize = @intCast(i);
-            mesh.vertices[3 * ui] = vertices[ui].x;
-            mesh.vertices[3 * ui + 1] = vertices[ui].y;
-            mesh.vertices[3 * ui + 2] = vertices[ui].z;
-        }
-        i = 0;
-        while (i < mesh.vertexCount) : (i += 1) {
-            const ui: usize = @intCast(i);
-            mesh.texcoords[2 * ui] = texcoords[ui].x;
-            mesh.texcoords[2 * ui + 1] = texcoords[ui].y;
-        }
-        i = 0;
-        while (i < mesh.vertexCount) : (i += 1) {
-            const ui: usize = @intCast(i);
-            mesh.normals[3 * ui] = normals[ui].x;
-            mesh.normals[3 * ui + 1] = normals[ui].y;
-            mesh.normals[3 * ui + 2] = normals[ui].z;
-        }
-        i = 0;
-        while (i < mesh.triangleCount * 3) : (i += 1) mesh.indices[@intCast(i)] = @intCast(triangles[@intCast(i)]);
-    }
-
-    RL_FREE(vertices);
-    RL_FREE(normals);
-    RL_FREE(texcoords);
-    RL_FREE(triangles);
-
-    UploadMesh(&mesh, false);
 
     return mesh;
 }
 
 // Generate cuboid mesh
 export fn GenMeshCube(width: f32, height: f32, length: f32) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
+    return generated(cubeMesh(width, height, length));
+}
 
+fn cubeMesh(width: f32, height: f32, length: f32) error{OutOfMemory}!Mesh {
     const vertices = [_]f32{
         -width / 2, -height / 2, length / 2,
         width / 2,  -height / 2, length / 2,
@@ -3673,341 +3499,261 @@ export fn GenMeshCube(width: f32, height: f32, length: f32) callconv(.c) Mesh {
         -1.0, 0.0,  0.0,
     };
 
-    mesh.vertices = @ptrCast(@alignCast(RL_MALLOC(24 * 3 * @sizeOf(f32))));
-    _ = memcpy(mesh.vertices, &vertices, 24 * 3 * @sizeOf(f32));
+    var mesh = empty_mesh;
+    const arrays = try MeshArrays.alloc(&mesh, 24);
+    errdefer freeMeshArrays(mesh);
+    @memcpy(std.mem.sliceAsBytes(arrays.vertices), std.mem.sliceAsBytes(vertices[0..]));
+    @memcpy(std.mem.sliceAsBytes(arrays.texcoords), std.mem.sliceAsBytes(texcoords[0..]));
+    @memcpy(std.mem.sliceAsBytes(arrays.normals), std.mem.sliceAsBytes(normals[0..]));
 
-    mesh.texcoords = @ptrCast(@alignCast(RL_MALLOC(24 * 2 * @sizeOf(f32))));
-    _ = memcpy(mesh.texcoords, &texcoords, 24 * 2 * @sizeOf(f32));
-
-    mesh.normals = @ptrCast(@alignCast(RL_MALLOC(24 * 3 * @sizeOf(f32))));
-    _ = memcpy(mesh.normals, &normals, 24 * 3 * @sizeOf(f32));
-
-    mesh.indices = @ptrCast(@alignCast(RL_MALLOC(36 * @sizeOf(c_ushort))));
-
-    var k: c_ushort = 0;
-    var i: usize = 0;
-    while (i < 36) : (i += 6) {
-        mesh.indices[i] = 4 * k;
-        mesh.indices[i + 1] = 4 * k + 1;
-        mesh.indices[i + 2] = 4 * k + 2;
-        mesh.indices[i + 3] = 4 * k;
-        mesh.indices[i + 4] = 4 * k + 2;
-        mesh.indices[i + 5] = 4 * k + 3;
-        k += 1;
+    // Two triangles per face, four vertices per face
+    const indices = try cmem.alloc(c_ushort, 36);
+    mesh.indices = indices.ptr;
+    for (0..6) |face| {
+        const k: c_ushort = @intCast(face * 4);
+        indices[face * 6 ..][0..6].* = .{ k, k + 1, k + 2, k, k + 2, k + 3 };
     }
 
-    mesh.vertexCount = 24;
     mesh.triangleCount = 12;
 
-    UploadMesh(&mesh, false);
+    return mesh;
+}
+
+/// Copies an indexed par_shapes mesh into a raylib mesh, as a triangle soup
+fn meshFromParShapes(shape: *const par_shapes_mesh) error{OutOfMemory}!Mesh {
+    var mesh = empty_mesh;
+    const triangleCount = count(shape.ntriangles);
+    const arrays = try MeshArrays.alloc(&mesh, triangleCount * 3);
+    mesh.triangleCount = shape.ntriangles;
+
+    const points = vector3s(shape.points.?[0..count(shape.npoints * 3)]);
+    const normals = vector3s(shape.normals.?[0..count(shape.npoints * 3)]);
+    const tcoords = vector2s(shape.tcoords.?[0..count(shape.npoints * 2)]);
+    for (shape.triangles.?[0 .. triangleCount * 3], arrays.vertices, arrays.normals, arrays.texcoords) |point, *vertex, *normal, *texcoord| {
+        vertex.* = points[point];
+        normal.* = normals[point];
+        texcoord.* = tcoords[point];
+    }
 
     return mesh;
+}
+
+/// meshFromParShapes, releasing the par_shapes mesh
+fn takeParShapes(shape: *par_shapes_mesh) error{OutOfMemory}!Mesh {
+    defer par_shapes_free_mesh(shape);
+    return meshFromParShapes(shape);
 }
 
 // Generate sphere mesh (standard sphere)
 export fn GenMeshSphere(radius: f32, rings: c_int, slices: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
+    if ((rings < 3) or (slices < 3)) {
+        TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: sphere");
+        return empty_mesh;
+    }
 
-    if ((rings >= 3) and (slices >= 3)) {
-        par_shapes_set_epsilon_degenerate_sphere(0.0);
-        const sphere = par_shapes_create_parametric_sphere(slices, rings).?;
-        par_shapes_scale(sphere, radius, radius, radius);
-
-        copyParShapesMesh(&mesh, sphere);
-
-        par_shapes_free_mesh(sphere);
-
-        UploadMesh(&mesh, false);
-    } else TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: sphere");
-
-    return mesh;
+    par_shapes_set_epsilon_degenerate_sphere(0.0);
+    const sphere = par_shapes_create_parametric_sphere(slices, rings);
+    par_shapes_scale(sphere, radius, radius, radius);
+    return generated(takeParShapes(sphere));
 }
 
 // Generate hemisphere mesh (half sphere, no bottom cap)
-export fn GenMeshHemiSphere(radius_in: f32, rings: c_int, slices: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
-    var radius = radius_in;
+export fn GenMeshHemiSphere(radius: f32, rings: c_int, slices: c_int) callconv(.c) Mesh {
+    if ((rings < 3) or (slices < 3)) {
+        TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: hemisphere");
+        return empty_mesh;
+    }
 
-    if ((rings >= 3) and (slices >= 3)) {
-        if (radius < 0.0) radius = 0.0;
+    const r = if (radius < 0.0) 0.0 else radius;
+    const sphere = par_shapes_create_hemisphere(slices, rings);
+    par_shapes_scale(sphere, r, r, r);
+    return generated(takeParShapes(sphere));
+}
 
-        const sphere = par_shapes_create_hemisphere(slices, rings).?;
-        par_shapes_scale(sphere, radius, radius, radius);
+const x_axis = [3]f32{ 1, 0, 0 };
+const y_axis = [3]f32{ 0, 1, 0 };
+const disk_center = [3]f32{ 0, 0, 0 };
 
-        copyParShapesMesh(&mesh, sphere);
-
-        par_shapes_free_mesh(sphere);
-
-        UploadMesh(&mesh, false);
-    } else TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: hemisphere");
-
-    return mesh;
+/// A disk cap for cylinders and cones, with all texture coordinates at `texcoord`
+fn parShapesCap(radius: f32, slices: c_int, normal: [3]f32, texcoord: f32) error{OutOfMemory}!*par_shapes_mesh {
+    const cap = par_shapes_create_disk(radius, slices, &disk_center, &normal);
+    errdefer par_shapes_free_mesh(cap);
+    // NOTE: par_shapes frees tcoords with RL_FREE, so they live on the C heap
+    const tcoords = try cmem.alloc(f32, count(2 * cap.npoints));
+    @memset(tcoords, texcoord);
+    cap.tcoords = tcoords.ptr;
+    return cap;
 }
 
 // Generate cylinder mesh
 export fn GenMeshCylinder(radius: f32, height: f32, slices: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
+    if (slices < 3) {
+        TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: cylinder");
+        return empty_mesh;
+    }
+    return generated(cylinderMesh(radius, height, slices));
+}
 
-    if (slices >= 3) {
-        const cylinder = par_shapes_create_cylinder(slices, 8).?;
-        par_shapes_scale(cylinder, radius, radius, height);
-        par_shapes_rotate(cylinder, -PI / 2.0, &[_]f32{ 1, 0, 0 });
+fn cylinderMesh(radius: f32, height: f32, slices: c_int) error{OutOfMemory}!Mesh {
+    // Instance a cylinder that sits on the Z=0 plane using the given tessellation
+    // levels across the UV domain, Think of "slices" like a number of pizza
+    // slices, and "stacks" like a number of stacked rings.
+    // Height and radius are both 1.0, but they can easily be changed with par_shapes_scale
+    const cylinder = par_shapes_create_cylinder(slices, 8);
+    errdefer par_shapes_free_mesh(cylinder);
+    par_shapes_scale(cylinder, radius, radius, height);
+    par_shapes_rotate(cylinder, -PI / 2.0, &x_axis);
 
-        const capTop = par_shapes_create_disk(radius, slices, &[_]f32{ 0, 0, 0 }, &[_]f32{ 0, 0, 1 }).?;
-        capTop.tcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(2 * capTop.npoints * @sizeOf(f32)))));
-        {
-            var i: c_int = 0;
-            while (i < 2 * capTop.npoints) : (i += 1) capTop.tcoords[@intCast(i)] = 0.0;
-        }
-        par_shapes_rotate(capTop, -PI / 2.0, &[_]f32{ 1, 0, 0 });
-        par_shapes_rotate(capTop, 90 * DEG2RAD, &[_]f32{ 0, 1, 0 });
-        par_shapes_translate(capTop, 0, height, 0);
+    // Generate an orientable disk shape (top cap)
+    const capTop = try parShapesCap(radius, slices, .{ 0, 0, 1 }, 0.0);
+    par_shapes_rotate(capTop, -PI / 2.0, &x_axis);
+    par_shapes_rotate(capTop, 90 * DEG2RAD, &y_axis);
+    par_shapes_translate(capTop, 0, height, 0);
 
-        const capBottom = par_shapes_create_disk(radius, slices, &[_]f32{ 0, 0, 0 }, &[_]f32{ 0, 0, -1 }).?;
-        capBottom.tcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(2 * capBottom.npoints * @sizeOf(f32)))));
-        {
-            var i: c_int = 0;
-            while (i < 2 * capBottom.npoints) : (i += 1) capBottom.tcoords[@intCast(i)] = 0.95;
-        }
-        par_shapes_rotate(capBottom, PI / 2.0, &[_]f32{ 1, 0, 0 });
-        par_shapes_rotate(capBottom, -90 * DEG2RAD, &[_]f32{ 0, 1, 0 });
+    // Generate an orientable disk shape (bottom cap)
+    const capBottom = parShapesCap(radius, slices, .{ 0, 0, -1 }, 0.95) catch |err| {
+        par_shapes_free_mesh(capTop);
+        return err;
+    };
+    par_shapes_rotate(capBottom, PI / 2.0, &x_axis);
+    par_shapes_rotate(capBottom, -90 * DEG2RAD, &y_axis);
 
-        par_shapes_merge_and_free(cylinder, capTop);
-        par_shapes_merge_and_free(cylinder, capBottom);
+    par_shapes_merge_and_free(cylinder, capTop);
+    par_shapes_merge_and_free(cylinder, capBottom);
 
-        copyParShapesMesh(&mesh, cylinder);
-
-        par_shapes_free_mesh(cylinder);
-
-        UploadMesh(&mesh, false);
-    } else TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: cylinder");
-
-    return mesh;
+    return takeParShapes(cylinder);
 }
 
 // Generate cone/pyramid mesh
 export fn GenMeshCone(radius: f32, height: f32, slices: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
+    if (slices < 3) {
+        TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: cone");
+        return empty_mesh;
+    }
+    return generated(coneMesh(radius, height, slices));
+}
 
-    if (slices >= 3) {
-        const cone = par_shapes_create_cone(slices, 8).?;
-        par_shapes_scale(cone, radius, radius, height);
-        par_shapes_rotate(cone, -PI / 2.0, &[_]f32{ 1, 0, 0 });
-        par_shapes_rotate(cone, PI / 2.0, &[_]f32{ 0, 1, 0 });
+fn coneMesh(radius: f32, height: f32, slices: c_int) error{OutOfMemory}!Mesh {
+    // Instance a cone that sits on the Z=0 plane using the given tessellation
+    // levels across the UV domain, Think of "slices" like a number of pizza
+    // slices, and "stacks" like a number of stacked rings.
+    // Height and radius are both 1.0, but they can easily be changed with par_shapes_scale
+    const cone = par_shapes_create_cone(slices, 8);
+    errdefer par_shapes_free_mesh(cone);
+    par_shapes_scale(cone, radius, radius, height);
+    par_shapes_rotate(cone, -PI / 2.0, &x_axis);
+    par_shapes_rotate(cone, PI / 2.0, &y_axis);
 
-        const capBottom = par_shapes_create_disk(radius, slices, &[_]f32{ 0, 0, 0 }, &[_]f32{ 0, 0, -1 }).?;
-        capBottom.tcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(2 * capBottom.npoints * @sizeOf(f32)))));
-        {
-            var i: c_int = 0;
-            while (i < 2 * capBottom.npoints) : (i += 1) capBottom.tcoords[@intCast(i)] = 0.95;
-        }
-        par_shapes_rotate(capBottom, PI / 2.0, &[_]f32{ 1, 0, 0 });
+    // Generate an orientable disk shape (bottom cap)
+    const capBottom = try parShapesCap(radius, slices, .{ 0, 0, -1 }, 0.95);
+    par_shapes_rotate(capBottom, PI / 2.0, &x_axis);
 
-        par_shapes_merge_and_free(cone, capBottom);
+    par_shapes_merge_and_free(cone, capBottom);
 
-        copyParShapesMesh(&mesh, cone);
-
-        par_shapes_free_mesh(cone);
-
-        UploadMesh(&mesh, false);
-    } else TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: cone");
-
-    return mesh;
+    return takeParShapes(cone);
 }
 
 // Generate torus mesh
-export fn GenMeshTorus(radius_in: f32, size: f32, radSeg: c_int, sides: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
-    var radius = radius_in;
+export fn GenMeshTorus(radius: f32, size: f32, radSeg: c_int, sides: c_int) callconv(.c) Mesh {
+    if ((sides < 3) or (radSeg < 3)) {
+        TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: torus");
+        return empty_mesh;
+    }
 
-    if ((sides >= 3) and (radSeg >= 3)) {
-        if (radius > 1.0) radius = 1.0 else if (radius < 0.1) radius = 0.1;
-
-        const torus = par_shapes_create_torus(radSeg, sides, radius).?;
-        par_shapes_scale(torus, size / 2, size / 2, size / 2);
-
-        copyParShapesMesh(&mesh, torus);
-
-        par_shapes_free_mesh(torus);
-
-        UploadMesh(&mesh, false);
-    } else TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: torus");
-
-    return mesh;
+    // NOTE: Deliberately not std.math.clamp: a NaN radius stays NaN, as in raylib
+    const r = if (radius > 1.0) 1.0 else if (radius < 0.1) 0.1 else radius;
+    const torus = par_shapes_create_torus(radSeg, sides, r);
+    par_shapes_scale(torus, size / 2, size / 2, size / 2);
+    return generated(takeParShapes(torus));
 }
 
 // Generate trefoil knot mesh
-export fn GenMeshKnot(radius_in: f32, size: f32, radSeg: c_int, sides: c_int) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
-    var radius = radius_in;
+export fn GenMeshKnot(radius: f32, size: f32, radSeg: c_int, sides: c_int) callconv(.c) Mesh {
+    if ((sides < 3) or (radSeg < 3)) {
+        TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: knot");
+        return empty_mesh;
+    }
 
-    if ((sides >= 3) and (radSeg >= 3)) {
-        if (radius > 3.0) radius = 3.0 else if (radius < 0.5) radius = 0.5;
-
-        const knot = par_shapes_create_trefoil_knot(radSeg, sides, radius).?;
-        par_shapes_scale(knot, size, size, size);
-
-        copyParShapesMesh(&mesh, knot);
-
-        par_shapes_free_mesh(knot);
-
-        UploadMesh(&mesh, false);
-    } else TraceLog(LOG_WARNING, "MESH: Failed to generate mesh: knot");
-
-    return mesh;
+    const r = if (radius > 3.0) 3.0 else if (radius < 0.5) 0.5 else radius;
+    const knot = par_shapes_create_trefoil_knot(radSeg, sides, r);
+    par_shapes_scale(knot, size, size, size);
+    return generated(takeParShapes(knot));
 }
 
 // Generate a mesh from heightmap
+// NOTE: Vertex data is uploaded to GPU
 export fn GenMeshHeightmap(heightmap: Image, size: Vector3) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
-
-    const mapX = heightmap.width;
-    const mapZ = heightmap.height;
-
     const pixels = LoadImageColors(heightmap);
+    defer UnloadImageColors(pixels);
+    return generated(heightmapMesh(pixels, count(heightmap.width), count(heightmap.height), size));
+}
 
-    mesh.triangleCount = (mapX - 1) * (mapZ - 1) * 2;
-    mesh.vertexCount = mesh.triangleCount * 3;
+fn grayValue(c: Color) f32 {
+    return @as(f32, @floatFromInt(@as(c_int, c.r) + c.g + c.b)) / 3.0;
+}
 
-    mesh.vertices = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.normals = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.texcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 2 * @sizeOf(f32)))));
-    mesh.colors = null;
+fn heightmapMesh(pixels: [*c]const Color, mapX: usize, mapZ: usize, size: Vector3) error{OutOfMemory}!Mesh {
+    var mesh = empty_mesh;
+    // One quad every four pixels, two triangles each
+    const quadsX = mapX -| 1;
+    const quadsZ = mapZ -| 1;
+    mesh.triangleCount = @intCast(quadsX * quadsZ * 2);
+    const arrays = try MeshArrays.alloc(&mesh, quadsX * quadsZ * 6);
 
-    var vCounter: usize = 0;
-    var tcCounter: usize = 0;
-    var nCounter: usize = 0;
+    const lastX: f32 = @floatFromInt(@as(isize, @intCast(mapX)) - 1);
+    const lastZ: f32 = @floatFromInt(@as(isize, @intCast(mapZ)) - 1);
+    const scaleFactor = Vector3{ .x = size.x / lastX, .y = size.y / 255.0, .z = size.z / lastZ };
 
-    const scaleFactor = Vector3{ .x = size.x / @as(f32, @floatFromInt(mapX - 1)), .y = size.y / 255.0, .z = size.z / @as(f32, @floatFromInt(mapZ - 1)) };
+    var quad: usize = 0;
+    for (0..quadsZ) |z| {
+        for (0..quadsX) |x| {
+            const fx: f32 = @floatFromInt(x);
+            const fz: f32 = @floatFromInt(z);
+            const fx1: f32 = @floatFromInt(x + 1);
+            const fz1: f32 = @floatFromInt(z + 1);
 
-    var vA = std.mem.zeroes(Vector3);
-    var vB = std.mem.zeroes(Vector3);
-    var vC = std.mem.zeroes(Vector3);
-    var vN = std.mem.zeroes(Vector3);
+            // The quad's corners, then its two triangles: (A, B, C) and (C, B, D)
+            const a = Vector3{ .x = fx * scaleFactor.x, .y = grayValue(pixels[x + z * mapX]) * scaleFactor.y, .z = fz * scaleFactor.z };
+            const b = Vector3{ .x = fx * scaleFactor.x, .y = grayValue(pixels[x + (z + 1) * mapX]) * scaleFactor.y, .z = fz1 * scaleFactor.z };
+            const c = Vector3{ .x = fx1 * scaleFactor.x, .y = grayValue(pixels[(x + 1) + z * mapX]) * scaleFactor.y, .z = fz * scaleFactor.z };
+            const d = Vector3{ .x = fx1 * scaleFactor.x, .y = grayValue(pixels[(x + 1) + (z + 1) * mapX]) * scaleFactor.y, .z = fz1 * scaleFactor.z };
+            arrays.vertices[quad * 6 ..][0..6].* = .{ a, b, c, c, b, d };
 
-    var z: c_int = 0;
-    while (z < mapZ - 1) : (z += 1) {
-        var x: c_int = 0;
-        while (x < mapX - 1) : (x += 1) {
-            const fx = @as(f32, @floatFromInt(x));
-            const fz = @as(f32, @floatFromInt(z));
-            const fx1 = @as(f32, @floatFromInt(x + 1));
-            const fz1 = @as(f32, @floatFromInt(z + 1));
+            const uvA = Vector2{ .x = fx / lastX, .y = fz / lastZ };
+            const uvB = Vector2{ .x = fx / lastX, .y = fz1 / lastZ };
+            const uvC = Vector2{ .x = fx1 / lastX, .y = fz / lastZ };
+            const uvD = Vector2{ .x = fx1 / lastX, .y = fz1 / lastZ };
+            arrays.texcoords[quad * 6 ..][0..6].* = .{ uvA, uvB, uvC, uvC, uvB, uvD };
 
-            mesh.vertices[vCounter] = fx * scaleFactor.x;
-            mesh.vertices[vCounter + 1] = grayValue(pixels[@intCast(x + z * mapX)]) * scaleFactor.y;
-            mesh.vertices[vCounter + 2] = fz * scaleFactor.z;
-
-            mesh.vertices[vCounter + 3] = fx * scaleFactor.x;
-            mesh.vertices[vCounter + 4] = grayValue(pixels[@intCast(x + (z + 1) * mapX)]) * scaleFactor.y;
-            mesh.vertices[vCounter + 5] = fz1 * scaleFactor.z;
-
-            mesh.vertices[vCounter + 6] = fx1 * scaleFactor.x;
-            mesh.vertices[vCounter + 7] = grayValue(pixels[@intCast((x + 1) + z * mapX)]) * scaleFactor.y;
-            mesh.vertices[vCounter + 8] = fz * scaleFactor.z;
-
-            mesh.vertices[vCounter + 9] = mesh.vertices[vCounter + 6];
-            mesh.vertices[vCounter + 10] = mesh.vertices[vCounter + 7];
-            mesh.vertices[vCounter + 11] = mesh.vertices[vCounter + 8];
-
-            mesh.vertices[vCounter + 12] = mesh.vertices[vCounter + 3];
-            mesh.vertices[vCounter + 13] = mesh.vertices[vCounter + 4];
-            mesh.vertices[vCounter + 14] = mesh.vertices[vCounter + 5];
-
-            mesh.vertices[vCounter + 15] = fx1 * scaleFactor.x;
-            mesh.vertices[vCounter + 16] = grayValue(pixels[@intCast((x + 1) + (z + 1) * mapX)]) * scaleFactor.y;
-            mesh.vertices[vCounter + 17] = fz1 * scaleFactor.z;
-            vCounter += 18;
-
-            mesh.texcoords[tcCounter] = fx / @as(f32, @floatFromInt(mapX - 1));
-            mesh.texcoords[tcCounter + 1] = fz / @as(f32, @floatFromInt(mapZ - 1));
-
-            mesh.texcoords[tcCounter + 2] = fx / @as(f32, @floatFromInt(mapX - 1));
-            mesh.texcoords[tcCounter + 3] = fz1 / @as(f32, @floatFromInt(mapZ - 1));
-
-            mesh.texcoords[tcCounter + 4] = fx1 / @as(f32, @floatFromInt(mapX - 1));
-            mesh.texcoords[tcCounter + 5] = fz / @as(f32, @floatFromInt(mapZ - 1));
-
-            mesh.texcoords[tcCounter + 6] = mesh.texcoords[tcCounter + 4];
-            mesh.texcoords[tcCounter + 7] = mesh.texcoords[tcCounter + 5];
-
-            mesh.texcoords[tcCounter + 8] = mesh.texcoords[tcCounter + 2];
-            mesh.texcoords[tcCounter + 9] = mesh.texcoords[tcCounter + 3];
-
-            mesh.texcoords[tcCounter + 10] = fx1 / @as(f32, @floatFromInt(mapX - 1));
-            mesh.texcoords[tcCounter + 11] = fz1 / @as(f32, @floatFromInt(mapZ - 1));
-            tcCounter += 12;
-
-            var i: usize = 0;
-            while (i < 18) : (i += 9) {
-                vA.x = mesh.vertices[nCounter + i];
-                vA.y = mesh.vertices[nCounter + i + 1];
-                vA.z = mesh.vertices[nCounter + i + 2];
-
-                vB.x = mesh.vertices[nCounter + i + 3];
-                vB.y = mesh.vertices[nCounter + i + 4];
-                vB.z = mesh.vertices[nCounter + i + 5];
-
-                vC.x = mesh.vertices[nCounter + i + 6];
-                vC.y = mesh.vertices[nCounter + i + 7];
-                vC.z = mesh.vertices[nCounter + i + 8];
-
-                vN = Vector3Normalize(Vector3CrossProduct(Vector3Subtract(vB, vA), Vector3Subtract(vC, vA)));
-
-                mesh.normals[nCounter + i] = vN.x;
-                mesh.normals[nCounter + i + 1] = vN.y;
-                mesh.normals[nCounter + i + 2] = vN.z;
-
-                mesh.normals[nCounter + i + 3] = vN.x;
-                mesh.normals[nCounter + i + 4] = vN.y;
-                mesh.normals[nCounter + i + 5] = vN.z;
-
-                mesh.normals[nCounter + i + 6] = vN.x;
-                mesh.normals[nCounter + i + 7] = vN.y;
-                mesh.normals[nCounter + i + 8] = vN.z;
+            // Flat normals, one per triangle
+            for (0..2) |t| {
+                const triangle = arrays.vertices[quad * 6 + t * 3 ..][0..3];
+                const normal = Vector3Normalize(Vector3CrossProduct(Vector3Subtract(triangle[1], triangle[0]), Vector3Subtract(triangle[2], triangle[0])));
+                @memset(arrays.normals[quad * 6 + t * 3 ..][0..3], normal);
             }
 
-            nCounter += 18;
+            quad += 1;
         }
     }
-
-    UnloadImageColors(pixels);
-
-    UploadMesh(&mesh, false);
 
     return mesh;
 }
 
-fn grayValue(c: Color) f32 {
-    return @as(f32, @floatFromInt(@as(c_int, c.r) + @as(c_int, c.g) + @as(c_int, c.b))) / 3.0;
-}
+const RectangleF = struct { x: f32, y: f32, width: f32, height: f32 };
 
-fn colorEqual(c1: Color, c2: Color) bool {
-    return (c1.r == c2.r) and (c1.g == c2.g) and (c1.b == c2.b) and (c1.a == c2.a);
-}
+/// One cube face of a cubicmap cell: six vertices (two triangles) picked from
+/// the cell's eight corners, one normal, and texture coordinates picked from
+/// the corners of a texture atlas rectangle
+const CubeFace = struct {
+    /// Indices into the cell's corners, 1-based as in raylib's v1..v8
+    corners: [6]u4,
+    normal: Vector3,
+    uv: RectangleF,
+    /// (right, bottom) flags into `uv`: 0 is the rectangle's x/y, 1 is x+width/y+height
+    uvCorners: [6][2]u1,
+};
 
-const RectangleF = extern struct { x: f32, y: f32, width: f32, height: f32 };
-
-// Generate a cubes mesh from pixel data
-export fn GenMeshCubicmap(cubicmap: Image, cubeSize: Vector3) callconv(.c) Mesh {
-    var mesh = std.mem.zeroes(Mesh);
-
-    const pixels = LoadImageColors(cubicmap);
-
-    const maxTriangles = cubicmap.width * cubicmap.height * 12;
-
-    var vCounter: usize = 0;
-    var tcCounter: usize = 0;
-    var nCounter: usize = 0;
-
-    const w = cubeSize.x;
-    const h = cubeSize.z;
-    const h2 = cubeSize.y;
-
-    const mapVertices: [*c]Vector3 = @ptrCast(@alignCast(RL_MALLOC(@intCast(maxTriangles * 3 * @sizeOf(Vector3)))));
-    const mapTexcoords: [*c]Vector2 = @ptrCast(@alignCast(RL_MALLOC(@intCast(maxTriangles * 3 * @sizeOf(Vector2)))));
-    const mapNormals: [*c]Vector3 = @ptrCast(@alignCast(RL_MALLOC(@intCast(maxTriangles * 3 * @sizeOf(Vector3)))));
-
+const cubicmap_faces = struct {
     const n1 = Vector3{ .x = 1.0, .y = 0.0, .z = 0.0 };
     const n2 = Vector3{ .x = -1.0, .y = 0.0, .z = 0.0 };
     const n3 = Vector3{ .x = 0.0, .y = 1.0, .z = 0.0 };
@@ -4015,6 +3761,7 @@ export fn GenMeshCubicmap(cubicmap: Image, cubeSize: Vector3) callconv(.c) Mesh 
     const n5 = Vector3{ .x = 0.0, .y = 0.0, .z = -1.0 };
     const n6 = Vector3{ .x = 0.0, .y = 0.0, .z = 1.0 };
 
+    // Texture atlas: the cubicmap texture is split in 4 quadrants
     const rightTexUV = RectangleF{ .x = 0.0, .y = 0.0, .width = 0.5, .height = 0.5 };
     const leftTexUV = RectangleF{ .x = 0.5, .y = 0.0, .width = 0.5, .height = 0.5 };
     const frontTexUV = RectangleF{ .x = 0.0, .y = 0.0, .width = 0.5, .height = 0.5 };
@@ -4022,277 +3769,112 @@ export fn GenMeshCubicmap(cubicmap: Image, cubeSize: Vector3) callconv(.c) Mesh 
     const topTexUV = RectangleF{ .x = 0.0, .y = 0.5, .width = 0.5, .height = 0.5 };
     const bottomTexUV = RectangleF{ .x = 0.5, .y = 0.5, .width = 0.5, .height = 0.5 };
 
-    var z: c_int = 0;
-    while (z < cubicmap.height) : (z += 1) {
-        var x: c_int = 0;
-        while (x < cubicmap.width) : (x += 1) {
-            const fx = @as(f32, @floatFromInt(x));
-            const fz = @as(f32, @floatFromInt(z));
-            const v1 = Vector3{ .x = w * (fx - 0.5), .y = h2, .z = h * (fz - 0.5) };
-            const v2 = Vector3{ .x = w * (fx - 0.5), .y = h2, .z = h * (fz + 0.5) };
-            const v3 = Vector3{ .x = w * (fx + 0.5), .y = h2, .z = h * (fz + 0.5) };
-            const v4 = Vector3{ .x = w * (fx + 0.5), .y = h2, .z = h * (fz - 0.5) };
-            const v5 = Vector3{ .x = w * (fx + 0.5), .y = 0, .z = h * (fz - 0.5) };
-            const v6 = Vector3{ .x = w * (fx - 0.5), .y = 0, .z = h * (fz - 0.5) };
-            const v7 = Vector3{ .x = w * (fx - 0.5), .y = 0, .z = h * (fz + 0.5) };
-            const v8 = Vector3{ .x = w * (fx + 0.5), .y = 0, .z = h * (fz + 0.5) };
+    // Faces of a wall cell (white pixel)
+    const top: CubeFace = .{ .corners = .{ 1, 2, 3, 1, 3, 4 }, .normal = n3, .uv = topTexUV, .uvCorners = .{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 }, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 } } };
+    const bottom: CubeFace = .{ .corners = .{ 6, 8, 7, 6, 5, 8 }, .normal = n4, .uv = bottomTexUV, .uvCorners = .{ .{ 1, 0 }, .{ 0, 1 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 }, .{ 0, 1 } } };
+    const front: CubeFace = .{ .corners = .{ 2, 7, 3, 3, 7, 8 }, .normal = n6, .uv = frontTexUV, .uvCorners = .{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 0 }, .{ 0, 1 }, .{ 1, 1 } } };
+    const back: CubeFace = .{ .corners = .{ 1, 5, 6, 1, 4, 5 }, .normal = n5, .uv = backTexUV, .uvCorners = .{ .{ 1, 0 }, .{ 0, 1 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 }, .{ 0, 1 } } };
+    const right: CubeFace = .{ .corners = .{ 3, 8, 4, 4, 8, 5 }, .normal = n1, .uv = rightTexUV, .uvCorners = .{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 0 }, .{ 0, 1 }, .{ 1, 1 } } };
+    const left: CubeFace = .{ .corners = .{ 1, 7, 2, 1, 6, 7 }, .normal = n2, .uv = leftTexUV, .uvCorners = .{ .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 } } };
 
-            const pix = pixels[@intCast(z * cubicmap.width + x)];
+    // Faces of a floor cell (black pixel): a ceiling looking down, a floor looking up
+    const ceiling: CubeFace = .{ .corners = .{ 1, 3, 2, 1, 4, 3 }, .normal = n4, .uv = topTexUV, .uvCorners = .{ .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 }, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 } } };
+    const floor: CubeFace = .{ .corners = .{ 6, 7, 8, 6, 8, 5 }, .normal = n3, .uv = bottomTexUV, .uvCorners = .{ .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 }, .{ 1, 0 }, .{ 0, 1 }, .{ 0, 0 } } };
+};
 
-            if (colorEqual(pix, WHITE)) {
-                // Top
-                mapVertices[vCounter] = v1;
-                mapVertices[vCounter + 1] = v2;
-                mapVertices[vCounter + 2] = v3;
-                mapVertices[vCounter + 3] = v1;
-                mapVertices[vCounter + 4] = v3;
-                mapVertices[vCounter + 5] = v4;
-                vCounter += 6;
+/// Faces collected for a cubicmap mesh
+const CubicmapGeometry = struct {
+    vertices: []Vector3,
+    normals: []Vector3,
+    texcoords: []Vector2,
+    len: usize = 0,
 
-                mapNormals[nCounter] = n3;
-                mapNormals[nCounter + 1] = n3;
-                mapNormals[nCounter + 2] = n3;
-                mapNormals[nCounter + 3] = n3;
-                mapNormals[nCounter + 4] = n3;
-                mapNormals[nCounter + 5] = n3;
-                nCounter += 6;
+    fn add(geometry: *CubicmapGeometry, cell: [8]Vector3, face: CubeFace) void {
+        for (face.corners, face.uvCorners, 0..) |corner, uvCorner, i| {
+            geometry.vertices[geometry.len + i] = cell[corner - 1];
+            geometry.normals[geometry.len + i] = face.normal;
+            geometry.texcoords[geometry.len + i] = .{
+                .x = if (uvCorner[0] == 1) face.uv.x + face.uv.width else face.uv.x,
+                .y = if (uvCorner[1] == 1) face.uv.y + face.uv.height else face.uv.y,
+            };
+        }
+        geometry.len += 6;
+    }
+};
 
-                mapTexcoords[tcCounter] = .{ .x = topTexUV.x, .y = topTexUV.y };
-                mapTexcoords[tcCounter + 1] = .{ .x = topTexUV.x, .y = topTexUV.y + topTexUV.height };
-                mapTexcoords[tcCounter + 2] = .{ .x = topTexUV.x + topTexUV.width, .y = topTexUV.y + topTexUV.height };
-                mapTexcoords[tcCounter + 3] = .{ .x = topTexUV.x, .y = topTexUV.y };
-                mapTexcoords[tcCounter + 4] = .{ .x = topTexUV.x + topTexUV.width, .y = topTexUV.y + topTexUV.height };
-                mapTexcoords[tcCounter + 5] = .{ .x = topTexUV.x + topTexUV.width, .y = topTexUV.y };
-                tcCounter += 6;
+fn colorEqual(c1: Color, c2: Color) bool {
+    return (c1.r == c2.r) and (c1.g == c2.g) and (c1.b == c2.b) and (c1.a == c2.a);
+}
 
-                // Bottom
-                mapVertices[vCounter] = v6;
-                mapVertices[vCounter + 1] = v8;
-                mapVertices[vCounter + 2] = v7;
-                mapVertices[vCounter + 3] = v6;
-                mapVertices[vCounter + 4] = v5;
-                mapVertices[vCounter + 5] = v8;
-                vCounter += 6;
+// Generate a cubes mesh from pixel data
+// NOTE: Vertex data is uploaded to GPU
+export fn GenMeshCubicmap(cubicmap: Image, cubeSize: Vector3) callconv(.c) Mesh {
+    const pixels = LoadImageColors(cubicmap);
+    defer UnloadImageColors(pixels);
+    return generated(cubicmapMesh(pixels, count(cubicmap.width), count(cubicmap.height), cubeSize));
+}
 
-                mapNormals[nCounter] = n4;
-                mapNormals[nCounter + 1] = n4;
-                mapNormals[nCounter + 2] = n4;
-                mapNormals[nCounter + 3] = n4;
-                mapNormals[nCounter + 4] = n4;
-                mapNormals[nCounter + 5] = n4;
-                nCounter += 6;
+fn cubicmapMesh(pixels: [*c]const Color, width: usize, height: usize, cubeSize: Vector3) error{OutOfMemory}!Mesh {
+    const gpa = std.heap.c_allocator;
 
-                mapTexcoords[tcCounter] = .{ .x = bottomTexUV.x + bottomTexUV.width, .y = bottomTexUV.y };
-                mapTexcoords[tcCounter + 1] = .{ .x = bottomTexUV.x, .y = bottomTexUV.y + bottomTexUV.height };
-                mapTexcoords[tcCounter + 2] = .{ .x = bottomTexUV.x + bottomTexUV.width, .y = bottomTexUV.y + bottomTexUV.height };
-                mapTexcoords[tcCounter + 3] = .{ .x = bottomTexUV.x + bottomTexUV.width, .y = bottomTexUV.y };
-                mapTexcoords[tcCounter + 4] = .{ .x = bottomTexUV.x, .y = bottomTexUV.y };
-                mapTexcoords[tcCounter + 5] = .{ .x = bottomTexUV.x, .y = bottomTexUV.y + bottomTexUV.height };
-                tcCounter += 6;
+    // Room for six faces in every cell
+    const maxVertices = width * height * 36;
+    var geometry: CubicmapGeometry = .{
+        .vertices = try gpa.alloc(Vector3, maxVertices),
+        .normals = undefined,
+        .texcoords = undefined,
+    };
+    defer gpa.free(geometry.vertices);
+    geometry.normals = try gpa.alloc(Vector3, maxVertices);
+    defer gpa.free(geometry.normals);
+    geometry.texcoords = try gpa.alloc(Vector2, maxVertices);
+    defer gpa.free(geometry.texcoords);
 
-                if (((z < cubicmap.height - 1) and colorEqual(pixels[@intCast((z + 1) * cubicmap.width + x)], BLACK)) or (z == cubicmap.height - 1)) {
-                    // Front
-                    mapVertices[vCounter] = v2;
-                    mapVertices[vCounter + 1] = v7;
-                    mapVertices[vCounter + 2] = v3;
-                    mapVertices[vCounter + 3] = v3;
-                    mapVertices[vCounter + 4] = v7;
-                    mapVertices[vCounter + 5] = v8;
-                    vCounter += 6;
+    const w = cubeSize.x;
+    const h = cubeSize.z;
+    const h2 = cubeSize.y;
+    const faces = cubicmap_faces;
 
-                    mapNormals[nCounter] = n6;
-                    mapNormals[nCounter + 1] = n6;
-                    mapNormals[nCounter + 2] = n6;
-                    mapNormals[nCounter + 3] = n6;
-                    mapNormals[nCounter + 4] = n6;
-                    mapNormals[nCounter + 5] = n6;
-                    nCounter += 6;
+    for (0..height) |z| {
+        for (0..width) |x| {
+            const fx: f32 = @floatFromInt(x);
+            const fz: f32 = @floatFromInt(z);
+            // The cell's corners v1..v8: top (y = h2) then bottom (y = 0)
+            const cell = [8]Vector3{
+                .{ .x = w * (fx - 0.5), .y = h2, .z = h * (fz - 0.5) },
+                .{ .x = w * (fx - 0.5), .y = h2, .z = h * (fz + 0.5) },
+                .{ .x = w * (fx + 0.5), .y = h2, .z = h * (fz + 0.5) },
+                .{ .x = w * (fx + 0.5), .y = h2, .z = h * (fz - 0.5) },
+                .{ .x = w * (fx + 0.5), .y = 0, .z = h * (fz - 0.5) },
+                .{ .x = w * (fx - 0.5), .y = 0, .z = h * (fz - 0.5) },
+                .{ .x = w * (fx - 0.5), .y = 0, .z = h * (fz + 0.5) },
+                .{ .x = w * (fx + 0.5), .y = 0, .z = h * (fz + 0.5) },
+            };
 
-                    mapTexcoords[tcCounter] = .{ .x = frontTexUV.x, .y = frontTexUV.y };
-                    mapTexcoords[tcCounter + 1] = .{ .x = frontTexUV.x, .y = frontTexUV.y + frontTexUV.height };
-                    mapTexcoords[tcCounter + 2] = .{ .x = frontTexUV.x + frontTexUV.width, .y = frontTexUV.y };
-                    mapTexcoords[tcCounter + 3] = .{ .x = frontTexUV.x + frontTexUV.width, .y = frontTexUV.y };
-                    mapTexcoords[tcCounter + 4] = .{ .x = frontTexUV.x, .y = frontTexUV.y + frontTexUV.height };
-                    mapTexcoords[tcCounter + 5] = .{ .x = frontTexUV.x + frontTexUV.width, .y = frontTexUV.y + frontTexUV.height };
-                    tcCounter += 6;
-                }
-
-                if (((z > 0) and colorEqual(pixels[@intCast((z - 1) * cubicmap.width + x)], BLACK)) or (z == 0)) {
-                    // Back
-                    mapVertices[vCounter] = v1;
-                    mapVertices[vCounter + 1] = v5;
-                    mapVertices[vCounter + 2] = v6;
-                    mapVertices[vCounter + 3] = v1;
-                    mapVertices[vCounter + 4] = v4;
-                    mapVertices[vCounter + 5] = v5;
-                    vCounter += 6;
-
-                    mapNormals[nCounter] = n5;
-                    mapNormals[nCounter + 1] = n5;
-                    mapNormals[nCounter + 2] = n5;
-                    mapNormals[nCounter + 3] = n5;
-                    mapNormals[nCounter + 4] = n5;
-                    mapNormals[nCounter + 5] = n5;
-                    nCounter += 6;
-
-                    mapTexcoords[tcCounter] = .{ .x = backTexUV.x + backTexUV.width, .y = backTexUV.y };
-                    mapTexcoords[tcCounter + 1] = .{ .x = backTexUV.x, .y = backTexUV.y + backTexUV.height };
-                    mapTexcoords[tcCounter + 2] = .{ .x = backTexUV.x + backTexUV.width, .y = backTexUV.y + backTexUV.height };
-                    mapTexcoords[tcCounter + 3] = .{ .x = backTexUV.x + backTexUV.width, .y = backTexUV.y };
-                    mapTexcoords[tcCounter + 4] = .{ .x = backTexUV.x, .y = backTexUV.y };
-                    mapTexcoords[tcCounter + 5] = .{ .x = backTexUV.x, .y = backTexUV.y + backTexUV.height };
-                    tcCounter += 6;
-                }
-
-                if (((x < cubicmap.width - 1) and colorEqual(pixels[@intCast(z * cubicmap.width + (x + 1))], BLACK)) or (x == cubicmap.width - 1)) {
-                    // Right
-                    mapVertices[vCounter] = v3;
-                    mapVertices[vCounter + 1] = v8;
-                    mapVertices[vCounter + 2] = v4;
-                    mapVertices[vCounter + 3] = v4;
-                    mapVertices[vCounter + 4] = v8;
-                    mapVertices[vCounter + 5] = v5;
-                    vCounter += 6;
-
-                    mapNormals[nCounter] = n1;
-                    mapNormals[nCounter + 1] = n1;
-                    mapNormals[nCounter + 2] = n1;
-                    mapNormals[nCounter + 3] = n1;
-                    mapNormals[nCounter + 4] = n1;
-                    mapNormals[nCounter + 5] = n1;
-                    nCounter += 6;
-
-                    mapTexcoords[tcCounter] = .{ .x = rightTexUV.x, .y = rightTexUV.y };
-                    mapTexcoords[tcCounter + 1] = .{ .x = rightTexUV.x, .y = rightTexUV.y + rightTexUV.height };
-                    mapTexcoords[tcCounter + 2] = .{ .x = rightTexUV.x + rightTexUV.width, .y = rightTexUV.y };
-                    mapTexcoords[tcCounter + 3] = .{ .x = rightTexUV.x + rightTexUV.width, .y = rightTexUV.y };
-                    mapTexcoords[tcCounter + 4] = .{ .x = rightTexUV.x, .y = rightTexUV.y + rightTexUV.height };
-                    mapTexcoords[tcCounter + 5] = .{ .x = rightTexUV.x + rightTexUV.width, .y = rightTexUV.y + rightTexUV.height };
-                    tcCounter += 6;
-                }
-
-                if (((x > 0) and colorEqual(pixels[@intCast(z * cubicmap.width + (x - 1))], BLACK)) or (x == 0)) {
-                    // Left
-                    mapVertices[vCounter] = v1;
-                    mapVertices[vCounter + 1] = v7;
-                    mapVertices[vCounter + 2] = v2;
-                    mapVertices[vCounter + 3] = v1;
-                    mapVertices[vCounter + 4] = v6;
-                    mapVertices[vCounter + 5] = v7;
-                    vCounter += 6;
-
-                    mapNormals[nCounter] = n2;
-                    mapNormals[nCounter + 1] = n2;
-                    mapNormals[nCounter + 2] = n2;
-                    mapNormals[nCounter + 3] = n2;
-                    mapNormals[nCounter + 4] = n2;
-                    mapNormals[nCounter + 5] = n2;
-                    nCounter += 6;
-
-                    mapTexcoords[tcCounter] = .{ .x = leftTexUV.x, .y = leftTexUV.y };
-                    mapTexcoords[tcCounter + 1] = .{ .x = leftTexUV.x + leftTexUV.width, .y = leftTexUV.y + leftTexUV.height };
-                    mapTexcoords[tcCounter + 2] = .{ .x = leftTexUV.x + leftTexUV.width, .y = leftTexUV.y };
-                    mapTexcoords[tcCounter + 3] = .{ .x = leftTexUV.x, .y = leftTexUV.y };
-                    mapTexcoords[tcCounter + 4] = .{ .x = leftTexUV.x, .y = leftTexUV.y + leftTexUV.height };
-                    mapTexcoords[tcCounter + 5] = .{ .x = leftTexUV.x + leftTexUV.width, .y = leftTexUV.y + leftTexUV.height };
-                    tcCounter += 6;
-                }
-            } else if (colorEqual(pix, BLACK)) {
-                // Top
-                mapVertices[vCounter] = v1;
-                mapVertices[vCounter + 1] = v3;
-                mapVertices[vCounter + 2] = v2;
-                mapVertices[vCounter + 3] = v1;
-                mapVertices[vCounter + 4] = v4;
-                mapVertices[vCounter + 5] = v3;
-                vCounter += 6;
-
-                mapNormals[nCounter] = n4;
-                mapNormals[nCounter + 1] = n4;
-                mapNormals[nCounter + 2] = n4;
-                mapNormals[nCounter + 3] = n4;
-                mapNormals[nCounter + 4] = n4;
-                mapNormals[nCounter + 5] = n4;
-                nCounter += 6;
-
-                mapTexcoords[tcCounter] = .{ .x = topTexUV.x, .y = topTexUV.y };
-                mapTexcoords[tcCounter + 1] = .{ .x = topTexUV.x + topTexUV.width, .y = topTexUV.y + topTexUV.height };
-                mapTexcoords[tcCounter + 2] = .{ .x = topTexUV.x, .y = topTexUV.y + topTexUV.height };
-                mapTexcoords[tcCounter + 3] = .{ .x = topTexUV.x, .y = topTexUV.y };
-                mapTexcoords[tcCounter + 4] = .{ .x = topTexUV.x + topTexUV.width, .y = topTexUV.y };
-                mapTexcoords[tcCounter + 5] = .{ .x = topTexUV.x + topTexUV.width, .y = topTexUV.y + topTexUV.height };
-                tcCounter += 6;
-
-                // Bottom
-                mapVertices[vCounter] = v6;
-                mapVertices[vCounter + 1] = v7;
-                mapVertices[vCounter + 2] = v8;
-                mapVertices[vCounter + 3] = v6;
-                mapVertices[vCounter + 4] = v8;
-                mapVertices[vCounter + 5] = v5;
-                vCounter += 6;
-
-                mapNormals[nCounter] = n3;
-                mapNormals[nCounter + 1] = n3;
-                mapNormals[nCounter + 2] = n3;
-                mapNormals[nCounter + 3] = n3;
-                mapNormals[nCounter + 4] = n3;
-                mapNormals[nCounter + 5] = n3;
-                nCounter += 6;
-
-                mapTexcoords[tcCounter] = .{ .x = bottomTexUV.x + bottomTexUV.width, .y = bottomTexUV.y };
-                mapTexcoords[tcCounter + 1] = .{ .x = bottomTexUV.x + bottomTexUV.width, .y = bottomTexUV.y + bottomTexUV.height };
-                mapTexcoords[tcCounter + 2] = .{ .x = bottomTexUV.x, .y = bottomTexUV.y + bottomTexUV.height };
-                mapTexcoords[tcCounter + 3] = .{ .x = bottomTexUV.x + bottomTexUV.width, .y = bottomTexUV.y };
-                mapTexcoords[tcCounter + 4] = .{ .x = bottomTexUV.x, .y = bottomTexUV.y + bottomTexUV.height };
-                mapTexcoords[tcCounter + 5] = .{ .x = bottomTexUV.x, .y = bottomTexUV.y };
-                tcCounter += 6;
+            const pixel = pixels[z * width + x];
+            if (colorEqual(pixel, WHITE)) {
+                // Wall: top and bottom faces, and a side wherever the
+                // neighbour is open floor or the map ends
+                geometry.add(cell, faces.top);
+                geometry.add(cell, faces.bottom);
+                if ((z == height - 1) or colorEqual(pixels[(z + 1) * width + x], BLACK)) geometry.add(cell, faces.front);
+                if ((z == 0) or colorEqual(pixels[(z - 1) * width + x], BLACK)) geometry.add(cell, faces.back);
+                if ((x == width - 1) or colorEqual(pixels[z * width + (x + 1)], BLACK)) geometry.add(cell, faces.right);
+                if ((x == 0) or colorEqual(pixels[z * width + (x - 1)], BLACK)) geometry.add(cell, faces.left);
+            } else if (colorEqual(pixel, BLACK)) {
+                // Open floor: ceiling and floor
+                geometry.add(cell, faces.ceiling);
+                geometry.add(cell, faces.floor);
             }
         }
     }
 
-    mesh.vertexCount = @intCast(vCounter);
-    mesh.triangleCount = @intCast(vCounter / 3);
-
-    mesh.vertices = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.normals = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 3 * @sizeOf(f32)))));
-    mesh.texcoords = @ptrCast(@alignCast(RL_MALLOC(@intCast(mesh.vertexCount * 2 * @sizeOf(f32)))));
-    mesh.colors = null;
-
-    var fCounter: usize = 0;
-
-    var i: usize = 0;
-    while (i < vCounter) : (i += 1) {
-        mesh.vertices[fCounter] = mapVertices[i].x;
-        mesh.vertices[fCounter + 1] = mapVertices[i].y;
-        mesh.vertices[fCounter + 2] = mapVertices[i].z;
-        fCounter += 3;
-    }
-
-    fCounter = 0;
-    i = 0;
-    while (i < nCounter) : (i += 1) {
-        mesh.normals[fCounter] = mapNormals[i].x;
-        mesh.normals[fCounter + 1] = mapNormals[i].y;
-        mesh.normals[fCounter + 2] = mapNormals[i].z;
-        fCounter += 3;
-    }
-
-    fCounter = 0;
-    i = 0;
-    while (i < tcCounter) : (i += 1) {
-        mesh.texcoords[fCounter] = mapTexcoords[i].x;
-        mesh.texcoords[fCounter + 1] = mapTexcoords[i].y;
-        fCounter += 2;
-    }
-
-    RL_FREE(mapVertices);
-    RL_FREE(mapNormals);
-    RL_FREE(mapTexcoords);
-
-    UnloadImageColors(pixels);
-
-    UploadMesh(&mesh, false);
+    var mesh = empty_mesh;
+    const arrays = try MeshArrays.alloc(&mesh, geometry.len);
+    mesh.triangleCount = @intCast(geometry.len / 3);
+    @memcpy(arrays.vertices, geometry.vertices[0..geometry.len]);
+    @memcpy(arrays.normals, geometry.normals[0..geometry.len]);
+    @memcpy(arrays.texcoords, geometry.texcoords[0..geometry.len]);
 
     return mesh;
 }
@@ -4520,14 +4102,6 @@ export fn GetRayCollisionSphere(ray: Ray, center: Vector3, radius: f32) callconv
     return collision;
 }
 
-/// C's `(int)` cast as x86-64 performs it: NaN and out-of-range values give
-/// INT_MIN where Zig's @intFromFloat would trap (an axis-aligned ray makes
-/// GetRayCollisionBox divide by zero, and its normal goes infinite)
-fn cInt(v: f32) c_int {
-    if (!(v >= -2147483648.0 and v < 2147483648.0)) return std.math.minInt(c_int);
-    return @intFromFloat(v);
-}
-
 // Get collision info between ray and box
 export fn GetRayCollisionBox(ray_in: Ray, box: BoundingBox) callconv(.c) RayCollision {
     var ray = ray_in;
@@ -4689,210 +4263,184 @@ fn BuildPoseFromParentJoints(bones: [*c]BoneInfo, boneCount: c_int, transforms: 
 }
 
 // Load OBJ mesh data
-fn LoadOBJ(fileName: [*c]const u8) Model {
-    var objAttributes = std.mem.zeroes(tinyobj_attrib_t);
-    var objShapes: [*c]tinyobj_shape_t = null;
-    var objShapeCount: c_uint = 0;
-
-    var objMaterials: [*c]tinyobj_material_t = null;
-    var objMaterialCount: c_uint = 0;
-
-    var model = std.mem.zeroes(Model);
+// NOTE: A mesh is created for every shape, and for every change of material
+// within one; tinyobj triangulates the faces
+fn loadObj(fileName: [*c]const u8) Model {
+    var model = empty_model;
     model.transform = MatrixIdentity();
 
     const fileText = LoadFileText(fileName);
-
     if (fileText == null) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Unable to read obj file", fileName);
         return model;
     }
 
-    var currentDir = std.mem.zeroes([MAX_FILEPATH_LENGTH]u8);
-    _ = strncpy(&currentDir, GetWorkingDirectory(), MAX_FILEPATH_LENGTH - 1);
+    // Switch to the OBJ directory so material and texture paths resolve
+    var currentDirBuffer: [MAX_FILEPATH_LENGTH]u8 = undefined;
+    const currentDir = copyCString(&currentDirBuffer, GetWorkingDirectory());
     const workingDir = GetDirectoryPath(fileName);
-    if (chdir(workingDir) != 0) TraceLog(LOG_WARNING, "MODEL: [%s] Failed to change working directory", workingDir);
+    changeDirectory(workingDir) catch TraceLog(LOG_WARNING, "MODEL: [%s] Failed to change working directory", workingDir);
 
-    const dataSize: c_uint = @intCast(strlen(fileText));
-
-    const flags = TINYOBJ_FLAG_TRIANGULATE;
-    const ret = tinyobj_parse_obj(&objAttributes, &objShapes, &objShapeCount, &objMaterials, &objMaterialCount, fileText, dataSize, flags);
-
-    if (ret != TINYOBJ_SUCCESS) {
+    var obj: ObjData = .{};
+    const text = std.mem.span(fileText);
+    if (tinyobj_parse_obj(&obj.attrib, &obj.shapes, &obj.shapeCount, &obj.materials, &obj.materialCount, text.ptr, @intCast(text.len), TINYOBJ_FLAG_TRIANGULATE) != TINYOBJ_SUCCESS) {
+        // NOTE: Deliberately as raylib: returns without freeing the text or
+        // restoring the working directory
         TraceLog(LOG_WARNING, "MODEL: Unable to read obj data %s", fileName);
         return model;
     }
 
     UnloadFileText(fileText);
 
-    var faceVertIndex: c_uint = 0;
-    var nextShape: c_uint = 1;
-    var lastMaterial: c_int = -1;
-    var meshIndex: c_uint = 0;
+    defer changeDirectory(currentDir.ptr) catch TraceLog(LOG_WARNING, "MODEL: [%s] Failed to change working directory", currentDir.ptr);
+    defer obj.deinit();
 
-    var nextShapeEnd: c_uint = objAttributes.num_face_num_verts;
+    return objModel(obj) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for obj data", fileName);
+        return model;
+    };
+}
 
-    if (objShapeCount > 1) nextShapeEnd = objShapes[nextShape].face_offset;
+/// tinyobj's parse results
+const ObjData = struct {
+    attrib: tinyobj_attrib_t = std.mem.zeroes(tinyobj_attrib_t),
+    shapes: ?[*]tinyobj_shape_t = null,
+    shapeCount: c_uint = 0,
+    materials: ?[*]tinyobj_material_t = null,
+    materialCount: c_uint = 0,
 
-    var faceId: c_uint = 0;
-    while (faceId < objAttributes.num_faces) : (faceId += 1) {
-        if (faceId >= nextShapeEnd) {
-            nextShape += 1;
-            if (nextShape < objShapeCount) nextShapeEnd = objShapes[nextShape].face_offset else nextShapeEnd = objAttributes.num_face_num_verts;
-            meshIndex += 1;
-        } else if ((lastMaterial != -1) and (objAttributes.material_ids[faceId] != lastMaterial)) {
-            meshIndex += 1;
-        }
+    fn deinit(obj: *ObjData) void {
+        tinyobj_attrib_free(&obj.attrib);
+        tinyobj_shapes_free(obj.shapes, obj.shapeCount);
+        tinyobj_materials_free(obj.materials, obj.materialCount);
+    }
+};
 
-        lastMaterial = objAttributes.material_ids[faceId];
-        faceVertIndex += @intCast(objAttributes.face_num_verts[faceId]);
+/// Walks an OBJ's faces in order, telling where a new mesh starts: at each
+/// shape boundary and wherever the material changes
+const ObjMeshSplitter = struct {
+    attrib: *const tinyobj_attrib_t,
+    shapes: []const tinyobj_shape_t,
+    nextShape: usize = 1,
+    nextShapeEnd: c_uint,
+    lastMaterial: c_int = -1,
+
+    fn init(obj: *const ObjData) ObjMeshSplitter {
+        const shapes = if (obj.shapes) |shapes| shapes[0..obj.shapeCount] else &.{};
+        // NOTE: Deliberately as raylib: past the last shape, the end is the total
+        // number of face vertices, compared against a face index
+        return .{
+            .attrib = &obj.attrib,
+            .shapes = shapes,
+            .nextShapeEnd = if (shapes.len > 1) shapes[1].face_offset else obj.attrib.num_face_num_verts,
+        };
     }
 
-    model.meshCount = @intCast(meshIndex + 1);
-    model.meshes = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(Mesh) * @as(usize, @intCast(model.meshCount))))));
-
-    if (objMaterialCount > 0) {
-        model.materialCount = @intCast(objMaterialCount);
-        model.materials = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(Material) * objMaterialCount))));
-    } else {
-        model.materialCount = 1;
-        model.materials = @ptrCast(@alignCast(MemAlloc(@sizeOf(Material) * 1)));
-    }
-
-    model.meshMaterial = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(c_int) * @as(usize, @intCast(model.meshCount))))));
-
-    var localMeshVertexCounts: [*c]c_uint = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(c_uint) * @as(usize, @intCast(model.meshCount))))));
-
-    faceVertIndex = 0;
-    nextShapeEnd = objAttributes.num_face_num_verts;
-    lastMaterial = -1;
-    meshIndex = 0;
-    var localMeshVertexCount: c_uint = 0;
-
-    nextShape = 1;
-    if (objShapeCount > 1) nextShapeEnd = objShapes[nextShape].face_offset;
-
-    faceId = 0;
-    while (faceId < objAttributes.num_faces) : (faceId += 1) {
+    /// Whether face `faceId` (visited in order) starts a new mesh
+    fn startsMesh(splitter: *ObjMeshSplitter, faceId: usize) bool {
         var newMesh = false;
-        if (faceId >= nextShapeEnd) {
-            nextShape += 1;
-            if (nextShape < objShapeCount) nextShapeEnd = objShapes[nextShape].face_offset else nextShapeEnd = objAttributes.num_face_num_verts;
-            newMesh = true;
-        } else if ((lastMaterial != -1) and (objAttributes.material_ids[faceId] != lastMaterial)) {
+        if (faceId >= splitter.nextShapeEnd) {
+            splitter.nextShape += 1;
+            splitter.nextShapeEnd = if (splitter.nextShape < splitter.shapes.len) splitter.shapes[splitter.nextShape].face_offset else splitter.attrib.num_face_num_verts;
             newMesh = true;
         }
 
-        lastMaterial = objAttributes.material_ids[faceId];
+        const material = splitter.attrib.material_ids.?[faceId];
+        if ((splitter.lastMaterial != -1) and (material != splitter.lastMaterial)) newMesh = true;
+        splitter.lastMaterial = material;
+        return newMesh;
+    }
+};
 
-        if (newMesh) {
-            localMeshVertexCounts[meshIndex] = localMeshVertexCount;
-            localMeshVertexCount = 0;
-            meshIndex += 1;
-        }
+fn objModel(obj: ObjData) error{OutOfMemory}!Model {
+    const attrib = &obj.attrib;
+    const gpa = std.heap.c_allocator;
 
-        faceVertIndex += @intCast(objAttributes.face_num_verts[faceId]);
-        localMeshVertexCount += @intCast(objAttributes.face_num_verts[faceId]);
+    var model = empty_model;
+    model.transform = MatrixIdentity();
+    errdefer freeModelData(model);
+
+    // Count the vertices of each mesh
+    var vertexCounts: std.ArrayList(usize) = .empty;
+    defer vertexCounts.deinit(gpa);
+    try vertexCounts.append(gpa, 0);
+
+    var splitter: ObjMeshSplitter = .init(&obj);
+    for (0..attrib.num_faces) |faceId| {
+        if (splitter.startsMesh(faceId)) try vertexCounts.append(gpa, 0);
+        vertexCounts.items[vertexCounts.items.len - 1] += count(attrib.face_num_verts.?[faceId]);
     }
 
-    localMeshVertexCounts[meshIndex] = localMeshVertexCount;
+    // Allocate the meshes, and at least one material
+    model.meshCount = @intCast(vertexCounts.items.len);
+    model.meshes = (try cmem.alloc(Mesh, vertexCounts.items.len)).ptr;
+    model.materialCount = @intCast(@max(obj.materialCount, 1));
+    model.materials = (try cmem.alloc(Material, @max(obj.materialCount, 1))).ptr;
+    model.meshMaterial = (try cmem.alloc(c_int, vertexCounts.items.len)).ptr;
 
-    {
-        var i: c_int = 0;
-        while (i < model.meshCount) : (i += 1) {
-            const ui: usize = @intCast(i);
-            const vertexCount = localMeshVertexCounts[ui];
-
-            model.meshes[ui].vertexCount = @intCast(vertexCount);
-            model.meshes[ui].triangleCount = @intCast(vertexCount / 3);
-
-            model.meshes[ui].vertices = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(f32) * vertexCount * 3))));
-            model.meshes[ui].normals = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(f32) * vertexCount * 3))));
-            model.meshes[ui].texcoords = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(f32) * vertexCount * 2))));
-            model.meshes[ui].colors = @ptrCast(@alignCast(MemAlloc(@intCast(@sizeOf(u8) * vertexCount * 4))));
-        }
+    for (modelMeshes(model), vertexCounts.items) |*mesh, vertexCount| {
+        mesh.vertexCount = @intCast(vertexCount);
+        mesh.triangleCount = @intCast(vertexCount / 3);
+        mesh.vertices = (try cmem.alloc(f32, vertexCount * 3)).ptr;
+        mesh.normals = (try cmem.alloc(f32, vertexCount * 3)).ptr;
+        mesh.texcoords = (try cmem.alloc(f32, vertexCount * 2)).ptr;
+        mesh.colors = (try cmem.alloc(u8, vertexCount * 4)).ptr;
     }
 
-    MemFree(localMeshVertexCounts);
-    localMeshVertexCounts = null;
-
-    faceVertIndex = 0;
-    nextShapeEnd = objAttributes.num_face_num_verts;
-    nextShape = 1;
-    if (objShapeCount > 1) nextShapeEnd = objShapes[nextShape].face_offset;
-    lastMaterial = -1;
-    meshIndex = 0;
-    localMeshVertexCount = 0;
-
-    faceId = 0;
-    while (faceId < objAttributes.num_faces) : (faceId += 1) {
-        var newMesh = false;
-        if (faceId >= nextShapeEnd) {
-            nextShape += 1;
-            if (nextShape < objShapeCount) nextShapeEnd = objShapes[nextShape].face_offset else nextShapeEnd = objAttributes.num_face_num_verts;
-            newMesh = true;
-        }
-
-        if ((lastMaterial != -1) and (objAttributes.material_ids[faceId] != lastMaterial)) newMesh = true;
-        lastMaterial = objAttributes.material_ids[faceId];
-
-        if (newMesh) {
-            localMeshVertexCount = 0;
+    // Fill the meshes
+    splitter = .init(&obj);
+    var meshIndex: usize = 0;
+    var meshVertex: usize = 0;
+    var faceVertIndex: usize = 0;
+    for (0..attrib.num_faces) |faceId| {
+        if (splitter.startsMesh(faceId)) {
             meshIndex += 1;
+            meshVertex = 0;
         }
 
-        var matId: c_int = 0;
-        if ((lastMaterial >= 0) and (lastMaterial < @as(c_int, @intCast(objMaterialCount)))) matId = lastMaterial;
+        const material = splitter.lastMaterial;
+        model.meshMaterial[meshIndex] = if ((material >= 0) and (material < @as(c_int, @intCast(obj.materialCount)))) material else 0;
 
-        model.meshMaterial[meshIndex] = matId;
-
-        var f: c_int = 0;
-        while (f < objAttributes.face_num_verts[faceId]) : (f += 1) {
-            const vertIndex = objAttributes.faces[faceVertIndex].v_idx;
-            const normalIndex = objAttributes.faces[faceVertIndex].vn_idx;
-            const texcordIndex = objAttributes.faces[faceVertIndex].vt_idx;
-
-            const mi: usize = @intCast(meshIndex);
-            const lc: usize = @intCast(localMeshVertexCount);
-
-            // NOTE: Out-of-range indices from malformed files are skipped, keeping zeroed values
-            var i: usize = 0;
-            if ((vertIndex >= 0) and (vertIndex < @as(c_int, @bitCast(objAttributes.num_vertices)))) {
-                while (i < 3) : (i += 1) model.meshes[mi].vertices[lc * 3 + i] = objAttributes.vertices[@as(usize, @intCast(vertIndex)) * 3 + i];
-            }
-
-            if ((objAttributes.texcoords != null) and (texcordIndex != TINYOBJ_INVALID_INDEX) and (texcordIndex >= 0) and (texcordIndex < @as(c_int, @bitCast(objAttributes.num_texcoords))) and (model.meshes[mi].texcoords != null)) {
-                i = 0;
-                while (i < 2) : (i += 1) model.meshes[mi].texcoords[lc * 2 + i] = objAttributes.texcoords[@as(usize, @intCast(texcordIndex)) * 2 + i];
-                model.meshes[mi].texcoords[lc * 2 + 1] = 1.0 - model.meshes[mi].texcoords[lc * 2 + 1];
-            }
-
-            if ((objAttributes.normals != null) and (normalIndex != TINYOBJ_INVALID_INDEX) and (normalIndex >= 0) and (normalIndex < @as(c_int, @bitCast(objAttributes.num_normals)))) {
-                i = 0;
-                while (i < 3) : (i += 1) model.meshes[mi].normals[lc * 3 + i] = objAttributes.normals[@as(usize, @intCast(normalIndex)) * 3 + i];
-            } else {
-                model.meshes[mi].normals[lc * 3 + 0] = 0.0;
-                model.meshes[mi].normals[lc * 3 + 1] = 1.0;
-                model.meshes[mi].normals[lc * 3 + 2] = 0.0;
-            }
-
-            i = 0;
-            while (i < 4) : (i += 1) model.meshes[mi].colors[lc * 4 + i] = 255;
+        const mesh = &modelMeshes(model)[meshIndex];
+        for (0..count(attrib.face_num_verts.?[faceId])) |_| {
+            fillObjVertex(mesh, meshVertex, attrib, attrib.faces.?[faceVertIndex]);
             faceVertIndex += 1;
-            localMeshVertexCount += 1;
+            meshVertex += 1;
         }
     }
 
-    if (objMaterialCount > 0) ProcessMaterialsOBJ(model.materials, objMaterials, @intCast(objMaterialCount)) else model.materials[0] = LoadMaterialDefault();
-
-    tinyobj_attrib_free(&objAttributes);
-    tinyobj_shapes_free(objShapes, objShapeCount);
-    tinyobj_materials_free(objMaterials, objMaterialCount);
-
-    if (chdir(&currentDir) != 0) {
-        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to change working directory", &currentDir);
-    }
+    if (obj.materialCount > 0) processMaterialsObj(model.materials[0..obj.materialCount], obj.materials) else model.materials[0] = LoadMaterialDefault();
 
     return model;
+}
+
+/// Copies one face vertex from tinyobj's arrays into mesh vertex `v`
+fn fillObjVertex(mesh: *Mesh, v: usize, attrib: *const tinyobj_attrib_t, index: tinyobj_vertex_index_t) void {
+    // NOTE: Out-of-range indices from malformed files are skipped, keeping zeroed values
+    if (objIndex(index.v_idx, attrib.num_vertices)) |i| {
+        @memcpy(mesh.vertices[v * 3 ..][0..3], attrib.vertices.?[i * 3 ..][0..3]);
+    }
+
+    if (attrib.texcoords) |texcoords| {
+        if (objIndex(index.vt_idx, attrib.num_texcoords)) |i| {
+            mesh.texcoords[v * 2 ..][0..2].* = .{ texcoords[i * 2], 1.0 - texcoords[i * 2 + 1] };
+        }
+    }
+
+    const normal = mesh.normals[v * 3 ..][0..3];
+    normal.* = .{ 0.0, 1.0, 0.0 };
+    if (attrib.normals) |normals| {
+        if (objIndex(index.vn_idx, attrib.num_normals)) |i| @memcpy(normal, normals[i * 3 ..][0..3]);
+    }
+
+    @memset(mesh.colors[v * 4 ..][0..4], 255);
+}
+
+/// A tinyobj index, when it is valid and within the `limit` items parsed
+fn objIndex(index: c_int, limit: c_uint) ?usize {
+    // TINYOBJ_INVALID_INDEX is negative, so it fails the range check too
+    if ((index < 0) or (index >= @as(c_int, @bitCast(limit)))) return null;
+    return @intCast(index);
 }
 
 // IQM file structs (read via memcpy from file data)
@@ -6103,9 +5651,9 @@ fn LoadGLTF(fileName: [*c]const u8) Model {
 }
 
 // Transform vertices/normals in place by a matrix (normalize normals when requested)
-fn transformVertices(values: [*c]f32, count: cgltf_size, mat: Matrix, normalize: bool) void {
+fn transformVertices(values: [*c]f32, valueCount: cgltf_size, mat: Matrix, normalize: bool) void {
     var k: usize = 0;
-    while (k < count) : (k += 1) {
+    while (k < valueCount) : (k += 1) {
         var vt = Vector3Transform(.{ .x = values[3 * k], .y = values[3 * k + 1], .z = values[3 * k + 2] }, mat);
         if (normalize) vt = Vector3Normalize(vt);
         values[3 * k] = vt.x;
