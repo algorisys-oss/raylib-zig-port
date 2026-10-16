@@ -54,6 +54,7 @@ pub fn main() !void {
 | `const char *` param | `[:0]const u8` (`?[:0]const u8` where raylib accepts NULL) | `loadShader(null, "fx.fs")` |
 | `const char *` return | `[:0]const u8` | `getFileName(path)` |
 | `T *p, int count` param pair | `[]const T` / `[]T` | `drawLineStrip(points, color)` |
+| `T *p, int count` pair raylib accepts as NULL | `?[]const T` (null = raylib's default set) | `loadFontEx(path, 96, null)` |
 | `T *dst` param | `*T` | `imageFlipVertical(&img)` |
 | int enum param (`int key`, `int button`, …) | typed `enum` | `isKeyPressed(.enter)` |
 | `unsigned int flags` (ConfigFlags) | `ConfigFlags` packed struct | `setConfigFlags(.{ .vsync_hint = true })` |

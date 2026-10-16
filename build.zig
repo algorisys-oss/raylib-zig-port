@@ -72,6 +72,27 @@ const c_defines = [_][]const u8{
 /// gated by `zig build apiexamples` against the original C example.
 const api_examples = [_][]const u8{
     "core/core_basic_window",
+    "audio/audio_mixed_processor",
+    "audio/audio_music_stream",
+    "audio/audio_sound_loading",
+    "audio/audio_sound_multi",
+    "audio/audio_sound_positioning",
+    "audio/audio_stream_effects",
+    "text/text_codepoints_loading",
+    "text/text_font_filters",
+    "text/text_font_loading",
+    "text/text_font_sdf",
+    "text/text_font_spritefont",
+    "text/text_format_text",
+    "text/text_inline_styling",
+    "text/text_input_box",
+    "text/text_rectangle_bounds",
+    "text/text_sprite_fonts",
+    "text/text_strings_management",
+    "text/text_unicode_emojis",
+    "text/text_unicode_ranges",
+    "text/text_words_alignment",
+    "text/text_writing_anim",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
