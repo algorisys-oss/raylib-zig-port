@@ -12,7 +12,7 @@ const glsl_version = 330; // Desktop GLSL version
 const frag_shader_file_name = std.fmt.comptimePrint("resources/shaders/glsl{d}/reload.fs", .{glsl_version});
 
 // libc time formatting (C example: localtime(), asctime()), for the on-screen timestamp
-const time_t = c_long;
+const time_t = std.c.time_t;
 const tm = opaque {};
 extern "c" fn localtime(timer: *const time_t) ?*const tm;
 extern "c" fn asctime(timeptr: *const tm) [*:0]const u8;

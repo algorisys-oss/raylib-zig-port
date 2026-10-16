@@ -150,8 +150,8 @@ pub fn main() !void {
     defer rl.closeWindow(); // Close window and OpenGL context
 
     // Definition of particles
-    const particles = try std.heap.page_allocator.alloc(Particle, max_particles); // Particle array
-    defer std.heap.page_allocator.free(particles);
+    const particles = try std.heap.c_allocator.alloc(Particle, max_particles); // Particle array
+    defer std.heap.c_allocator.free(particles);
     var circular_buffer: CircularBuffer = .{ .buffer = particles };
 
     // Particle emitter parameters

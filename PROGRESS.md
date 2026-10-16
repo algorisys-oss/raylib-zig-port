@@ -15,10 +15,15 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   `src/platforms/rcore_desktop_glfw.zig` (216 exports before and after).
 - `zig build webexamples`: browser gate, C oracle vs Zig-API translation in
   headless Chrome (SwiftShader), byte-compared. C-vs-C deterministic; negative
-  control fails. **1/1** (`core_basic_window`), Debug and ReleaseFast.
+  control fails. **46/46** (`core_basic_window` + all 45 shapes), Debug and
+  ReleaseFast.
 - `zig build webdemos`: the same examples without the shim, for the site.
 - Two port bugs found (hidden by x86-64): libc `time_t`/`timespec`/`stat`/
   `dirent` declared with x86-64 types; `va_list` forwarded as `&ap`.
+- Shapes on the web needed three example/build fixes: `page_allocator` ->
+  `c_allocator` in Zig-API examples (WasmAllocator grows memory behind
+  Emscripten), `std.c.time_t` in examples' own libc declarations, and raygui
+  compiled with the web flags (`-DPLATFORM_WEB`, no UBSan) on the Zig side.
 - Desktop gates after all of this: pixel 12/12, exdiff 217/217, apiexamples
   217/217, cdiff 4/4, audio 43/43, data, math/cam/gest, apitest, constaudit 0.
 

@@ -32,8 +32,8 @@ pub fn main() !void {
     defer rl.unloadTexture(tex_bunny);
 
     // Bunnies storage, filled up to `bunnies_count`
-    const bunnies = try std.heap.page_allocator.alloc(Bunny, max_bunnies);
-    defer std.heap.page_allocator.free(bunnies);
+    const bunnies = try std.heap.c_allocator.alloc(Bunny, max_bunnies);
+    defer std.heap.c_allocator.free(bunnies);
     var bunnies_count: usize = 0;
 
     var paused = false;

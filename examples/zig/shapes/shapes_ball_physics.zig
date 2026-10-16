@@ -37,8 +37,8 @@ pub fn main() !void {
     rl.initWindow(screen_width, screen_height, "raylib [shapes] example - ball physics");
     defer rl.closeWindow(); // Close window and OpenGL context
 
-    const ball_storage = try std.heap.page_allocator.alloc(Ball, max_balls);
-    defer std.heap.page_allocator.free(ball_storage);
+    const ball_storage = try std.heap.c_allocator.alloc(Ball, max_balls);
+    defer std.heap.c_allocator.free(ball_storage);
 
     // Init first ball in the array
     ball_storage[0] = .{

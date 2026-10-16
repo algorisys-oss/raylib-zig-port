@@ -4,6 +4,7 @@
 //! Example licensed under an unmodified zlib/libpng license.
 //! Copyright (c) 2025 JP Mortiboys (@themushroompirates)
 
+const std = @import("std");
 const rl = @import("raylib");
 const rm = rl.math;
 
@@ -23,8 +24,8 @@ const libc = struct {
         gmtoff: c_long,
         zone: ?[*:0]const u8,
     };
-    extern "c" fn time(tloc: ?*c_long) c_long;
-    extern "c" fn localtime(timer: *const c_long) *const Tm;
+    extern "c" fn time(tloc: ?*std.c.time_t) std.c.time_t;
+    extern "c" fn localtime(timer: *const std.c.time_t) *const Tm;
 };
 
 fn localTime() libc.Tm {

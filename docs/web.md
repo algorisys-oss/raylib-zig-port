@@ -6,8 +6,8 @@ This page explains how it is put together, how it is checked against C raylib,
 and what is not done yet.
 
 Status (2026-10-16): the platform backend and the OpenGL ES 3 path are ported.
-The browser gate covers 1 example (`core_basic_window`). It passes in Debug and
-in ReleaseFast.
+The browser gate covers 46 examples: `core_basic_window` and all 45 of the
+shapes category. All 46 pass in Debug and in ReleaseFast.
 
 ## What runs in the browser
 
@@ -160,10 +160,31 @@ list and formatted stack garbage. In Debug that went unnoticed; in ReleaseFast
 the browser tab crashed before the first log line. `src/c_va.zig` now gives
 the right argument for the target (`c_va.arg(&ap)`).
 
+## Writing Zig for the web build
+
+Two rules, both learned from examples that passed on the desktop and failed in
+the browser:
+
+- **Allocate with `std.heap.c_allocator`, not `std.heap.page_allocator`.** On
+  wasm, `page_allocator` is Zig's `WasmAllocator`, which grows wasm memory with
+  the `memory.grow` instruction directly. Emscripten's `malloc` and its
+  JavaScript views of memory assume they do all the growing, so the views go
+  stale: WebGL calls fail with "srcOffset + length too large" and JavaScript
+  throws "detached ArrayBuffer". A raylib program links libc anyway, and
+  `c_allocator` is `malloc`, which is also what the C original used.
+- **Declare libc's time functions with `std.c.time_t`.** `time_t` is 64-bit on
+  wasm32 but `c_long` is 32-bit. A `time(?*c_long) c_long` declaration links,
+  and wasm-ld replaces the call with a trap (`RuntimeError: unreachable`).
+
+raygui is compiled as C on both sides of the gate, and with the same
+defines: `-DPLATFORM_WEB` on the web (raygui reads the scroll wheel
+differently there), and without UBSan, which emcc has no runtime for. The Zig
+side once used the desktop flags, and every raygui example failed to link.
+
 ## Not done yet
 
-- The gate covers one example. The rest of the example set comes next, with
-  each browser exclusion recorded and explained.
+- The gate covers core_basic_window and the shapes category. The other
+  categories come next, with each browser exclusion recorded and explained.
 - Shaders: the examples hard-code GLSL 330. On the web they must load the
   `glsl100` (or `glsl300es`) variants, from one comptime constant.
 - Speed: not measured yet. Size, for `core_basic_window` at ReleaseFast with

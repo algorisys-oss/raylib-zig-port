@@ -31,7 +31,7 @@ pub fn main() !void {
 
     // Pixels data (Color type), owned here: the image below only borrows it,
     // so it is freed with the allocator rather than with UnloadImage()
-    const allocator = std.heap.page_allocator;
+    const allocator = std.heap.c_allocator;
     const pixels = try allocator.alloc(rl.Color, im_width * im_height);
     defer allocator.free(pixels);
 

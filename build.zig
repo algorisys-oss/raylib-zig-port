@@ -337,6 +337,51 @@ const api_examples = [_][]const u8{
 /// on the Zig library, and the final frames must be byte-identical.
 const web_examples = [_][]const u8{
     "core/core_basic_window",
+    "shapes/shapes_ball_physics",
+    "shapes/shapes_basic_shapes",
+    "shapes/shapes_bouncing_ball",
+    "shapes/shapes_bullet_hell",
+    "shapes/shapes_circle_sector_drawing",
+    "shapes/shapes_clock_of_clocks",
+    "shapes/shapes_collision_area",
+    "shapes/shapes_colors_palette",
+    "shapes/shapes_dashed_line",
+    "shapes/shapes_digital_clock",
+    "shapes/shapes_double_pendulum",
+    "shapes/shapes_drag_puzzle",
+    "shapes/shapes_easings_ball",
+    "shapes/shapes_easings_box",
+    "shapes/shapes_easings_rectangles",
+    "shapes/shapes_easings_testbed",
+    "shapes/shapes_ellipse_collision",
+    "shapes/shapes_following_eyes",
+    "shapes/shapes_hilbert_curve",
+    "shapes/shapes_kaleidoscope",
+    "shapes/shapes_lines_bezier",
+    "shapes/shapes_lines_drawing",
+    "shapes/shapes_logo_raylib",
+    "shapes/shapes_logo_raylib_anim",
+    "shapes/shapes_math_angle_rotation",
+    "shapes/shapes_math_sine_cosine",
+    "shapes/shapes_mouse_trail",
+    "shapes/shapes_outlines_testbed",
+    "shapes/shapes_outlines_thickness",
+    "shapes/shapes_penrose_tile",
+    "shapes/shapes_pie_chart",
+    "shapes/shapes_polygon_lines",
+    "shapes/shapes_rectangle_advanced",
+    "shapes/shapes_rectangle_scaling",
+    "shapes/shapes_recursive_tree",
+    "shapes/shapes_ring_drawing",
+    "shapes/shapes_rlgl_color_wheel",
+    "shapes/shapes_rlgl_triangle",
+    "shapes/shapes_rounded_rectangle_drawing",
+    "shapes/shapes_simple_particles",
+    "shapes/shapes_splines_drawing",
+    "shapes/shapes_starfield_effect",
+    "shapes/shapes_top_down_lights",
+    "shapes/shapes_triangle_strip",
+    "shapes/shapes_vector_angle",
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
@@ -523,9 +568,11 @@ fn linkExe(
 }
 
 /// The `raygui` binding module over `api` (raygui is linked as C: compiled
-/// here with the same flags exdiff uses for upstream C examples, so a Zig
-/// program and its C counterpart run identical raygui code).
-fn rayguiModule(b: *std.Build, api: *std.Build.Module) *std.Build.Module {
+/// here with the same flags the gate uses for upstream C examples, so a Zig
+/// program and its C counterpart run identical raygui code). On the web that
+/// means PLATFORM_WEB (raygui reads scrolling differently there) and no UBSan,
+/// which emcc has no runtime for.
+fn rayguiModule(b: *std.Build, api: *std.Build.Module, platform: Platform) *std.Build.Module {
     const mod = b.createModule(.{ .root_source_file = b.path("src/raygui/raygui.zig") });
     const c_mod = b.createModule(.{ .root_source_file = b.path("src/raygui/c.zig") });
     c_mod.addImport("raygui", mod);
@@ -535,7 +582,10 @@ fn rayguiModule(b: *std.Build, api: *std.Build.Module) *std.Build.Module {
     mod.addIncludePath(b.path("vendor/raylib/src"));
     mod.addCSourceFile(.{
         .file = b.path("src/c/raygui_impl.c"),
-        .flags = &.{ "-std=gnu99", "-DPLATFORM_DESKTOP", "-ffp-contract=off" },
+        .flags = switch (platform) {
+            .desktop => &.{ "-std=gnu99", "-DPLATFORM_DESKTOP", "-ffp-contract=off" },
+            .web => &.{ "-std=gnu99", "-DPLATFORM_WEB", "-ffp-contract=off", "-fno-sanitize=undefined" },
+        },
     });
     return mod;
 }
@@ -616,7 +666,7 @@ pub fn build(b: *std.Build) void {
     api_mod.linkLibrary(lib);
     for (sys_libs) |l| api_mod.linkSystemLibrary(l, .{ .use_pkg_config = .no });
     // `raygui` module — Zig binding for raygui (vendor/raygui, linked as C).
-    b.modules.put(b.graph.arena, b.dupe("raygui"), rayguiModule(b, api_mod)) catch @panic("OOM");
+    b.modules.put(b.graph.arena, b.dupe("raygui"), rayguiModule(b, api_mod, .desktop)) catch @panic("OOM");
 
     // `zig build apitest` — API structs layout-identical to raylib.h (via
     // translate-c), every wrapper compiles, enum/flag/color values match.
@@ -672,7 +722,7 @@ pub fn build(b: *std.Build) void {
         }
         const gate: ApiGate = .{
             .api = gate_api,
-            .raygui = rayguiModule(b, gate_api),
+            .raygui = rayguiModule(b, gate_api, .desktop),
             .helpers = &helpers,
             .lib = lib,
             .target = target,
@@ -1021,7 +1071,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     const gate_c = b.createModule(.{ .root_source_file = b.path("src/api/c_exdiff.zig") });
     gate_c.addImport("raylib", gate_api);
     gate_api.addImport("raylib_c", gate_c);
-    const raygui = rayguiModule(b, gate_api);
+    const raygui = rayguiModule(b, gate_api, .web);
     raygui.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
     var helpers: [2]std.Build.Module.Import = undefined;
     for (&helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
@@ -1040,7 +1090,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     const demo_c = b.createModule(.{ .root_source_file = b.path("src/api/c.zig") });
     demo_c.addImport("raylib", demo_api);
     demo_api.addImport("raylib_c", demo_c);
-    const demo_raygui = rayguiModule(b, demo_api);
+    const demo_raygui = rayguiModule(b, demo_api, .web);
     demo_raygui.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
     var demo_helpers: [2]std.Build.Module.Import = undefined;
     for (&demo_helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {

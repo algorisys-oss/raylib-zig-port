@@ -25,8 +25,8 @@ pub fn main() !void {
     defer rl.closeWindow(); // Close window and OpenGL context
 
     // Bullets definition
-    const bullets = try std.heap.page_allocator.alloc(Bullet, max_bullets); // Bullets array
-    defer std.heap.page_allocator.free(bullets);
+    const bullets = try std.heap.c_allocator.alloc(Bullet, max_bullets); // Bullets array
+    defer std.heap.c_allocator.free(bullets);
     var bullet_count: usize = 0;
     var bullet_disabled_count: usize = 0; // Used to calculate how many bullets are on screen
     const bullet_radius = 10;

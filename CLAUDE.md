@@ -274,6 +274,10 @@ before claiming a module done.
   must be correct" in InitWindow). Use `std.c` types (`time_t`, `timespec`,
   `dirent`, `Stat` where it exists) for anything libc defines per OS; when a
   wasm link fails validation, relink with `--profiling-funcs` to get names.
+- **No `std.heap.page_allocator` in code that runs on the web.** On wasm it
+  grows memory behind Emscripten's back (stale JS heap views, WebGL errors,
+  "detached ArrayBuffer"). Zig-API examples use `std.heap.c_allocator`. The
+  same `time_t` rule applies to examples' own libc declarations (docs/web.md).
 - **Forwarding `...` to vprintf: `&ap` is x86-64 only.** C's `va_list` is an
   array on x86-64 (decays to a pointer) and a plain pointer on wasm32. Passing
   `&ap` everywhere made TraceLog/TextFormat format stack garbage on the web,

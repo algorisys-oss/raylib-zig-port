@@ -88,7 +88,9 @@ try {
   }
   for (const line of log) console.error('  | ' + line);
 } finally {
-  await browser.close();
+  // A tab stuck in a busy wasm loop can keep browser.close() from ever
+  // returning; give it a few seconds, then exit anyway (Chrome is our child).
+  await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 10000))]);
   server.close();
 }
 process.exit(status);
