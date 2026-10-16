@@ -1508,19 +1508,17 @@ const cgltf_meshopt_compression_mode = c_int;
 const cgltf_meshopt_compression_filter = c_int;
 const cgltf_alpha_mode = c_int;
 const cgltf_buffer_view_type = c_int;
-const cgltf_camera_type = c_int;
-const cgltf_light_type = c_int;
 const cgltf_filter_type = c_int;
 const cgltf_wrap_mode = c_int;
 
 const cgltf_extras = extern struct {
     start_offset: cgltf_size,
     end_offset: cgltf_size,
-    data: [*c]u8,
+    data: ?[*:0]u8,
 };
 const cgltf_extension = extern struct {
-    name: [*c]u8,
-    data: [*c]u8,
+    name: ?[*:0]u8,
+    data: ?[*:0]u8,
 };
 const cgltf_memory_options = extern struct {
     alloc_func: ?*const fn (?*anyopaque, cgltf_size) callconv(.c) ?*anyopaque,
@@ -1528,7 +1526,7 @@ const cgltf_memory_options = extern struct {
     user_data: ?*anyopaque,
 };
 const cgltf_file_options = extern struct {
-    read: ?*const fn (?*const cgltf_memory_options, ?*const cgltf_file_options, [*c]const u8, [*c]cgltf_size, [*c]?*anyopaque) callconv(.c) cgltf_result,
+    read: ?*const fn (?*const cgltf_memory_options, ?*const cgltf_file_options, [*:0]const u8, *cgltf_size, *?*anyopaque) callconv(.c) cgltf_result,
     release: ?*const fn (?*const cgltf_memory_options, ?*const cgltf_file_options, ?*anyopaque, cgltf_size) callconv(.c) void,
     user_data: ?*anyopaque,
 };
@@ -1539,17 +1537,17 @@ const cgltf_options = extern struct {
     file: cgltf_file_options,
 };
 const cgltf_buffer = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     size: cgltf_size,
-    uri: [*c]u8,
+    uri: ?[*:0]u8,
     data: ?*anyopaque,
     data_free_method: cgltf_data_free_method,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_meshopt_compression = extern struct {
-    buffer: [*c]cgltf_buffer,
+    buffer: ?*cgltf_buffer,
     offset: cgltf_size,
     size: cgltf_size,
     stride: cgltf_size,
@@ -1559,8 +1557,8 @@ const cgltf_meshopt_compression = extern struct {
     is_khr: cgltf_bool,
 };
 const cgltf_buffer_view = extern struct {
-    name: [*c]u8,
-    buffer: [*c]cgltf_buffer,
+    name: ?[*:0]u8,
+    buffer: ?*cgltf_buffer,
     offset: cgltf_size,
     size: cgltf_size,
     stride: cgltf_size,
@@ -1570,25 +1568,25 @@ const cgltf_buffer_view = extern struct {
     meshopt_compression: cgltf_meshopt_compression,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_accessor_sparse = extern struct {
     count: cgltf_size,
-    indices_buffer_view: [*c]cgltf_buffer_view,
+    indices_buffer_view: ?*cgltf_buffer_view,
     indices_byte_offset: cgltf_size,
     indices_component_type: cgltf_component_type,
-    values_buffer_view: [*c]cgltf_buffer_view,
+    values_buffer_view: ?*cgltf_buffer_view,
     values_byte_offset: cgltf_size,
 };
 const cgltf_accessor = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     component_type: cgltf_component_type,
     normalized: cgltf_bool,
     type: cgltf_type,
     offset: cgltf_size,
     count: cgltf_size,
     stride: cgltf_size,
-    buffer_view: [*c]cgltf_buffer_view,
+    buffer_view: ?*cgltf_buffer_view,
     has_min: cgltf_bool,
     min: [16]cgltf_float,
     has_max: cgltf_bool,
@@ -1597,44 +1595,44 @@ const cgltf_accessor = extern struct {
     sparse: cgltf_accessor_sparse,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_attribute = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     type: cgltf_attribute_type,
     index: cgltf_int,
-    data: [*c]cgltf_accessor,
+    data: *cgltf_accessor,
 };
 const cgltf_image = extern struct {
-    name: [*c]u8,
-    uri: [*c]u8,
-    buffer_view: [*c]cgltf_buffer_view,
-    mime_type: [*c]u8,
+    name: ?[*:0]u8,
+    uri: ?[*:0]u8,
+    buffer_view: ?*cgltf_buffer_view,
+    mime_type: ?[*:0]u8,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_sampler = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     mag_filter: cgltf_filter_type,
     min_filter: cgltf_filter_type,
     wrap_s: cgltf_wrap_mode,
     wrap_t: cgltf_wrap_mode,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_texture = extern struct {
-    name: [*c]u8,
-    image: [*c]cgltf_image,
-    sampler: [*c]cgltf_sampler,
+    name: ?[*:0]u8,
+    image: ?*cgltf_image,
+    sampler: ?*cgltf_sampler,
     has_basisu: cgltf_bool,
-    basisu_image: [*c]cgltf_image,
+    basisu_image: ?*cgltf_image,
     has_webp: cgltf_bool,
-    webp_image: [*c]cgltf_image,
+    webp_image: ?*cgltf_image,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_texture_transform = extern struct {
     offset: [2]cgltf_float,
@@ -1644,7 +1642,7 @@ const cgltf_texture_transform = extern struct {
     texcoord: cgltf_int,
 };
 const cgltf_texture_view = extern struct {
-    texture: [*c]cgltf_texture,
+    texture: ?*cgltf_texture,
     texcoord: cgltf_int,
     scale: cgltf_float,
     has_transform: cgltf_bool,
@@ -1722,7 +1720,7 @@ const cgltf_dispersion = extern struct {
     dispersion: cgltf_float,
 };
 const cgltf_material = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     has_pbr_metallic_roughness: cgltf_bool,
     has_pbr_specular_glossiness: cgltf_bool,
     has_clearcoat: cgltf_bool,
@@ -1759,64 +1757,64 @@ const cgltf_material = extern struct {
     unlit: cgltf_bool,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_material_mapping = extern struct {
     variant: cgltf_size,
-    material: [*c]cgltf_material,
+    material: ?*cgltf_material,
     extras: cgltf_extras,
 };
 const cgltf_morph_target = extern struct {
-    attributes: [*c]cgltf_attribute,
+    attributes: ?[*]cgltf_attribute,
     attributes_count: cgltf_size,
 };
 const cgltf_draco_mesh_compression = extern struct {
-    buffer_view: [*c]cgltf_buffer_view,
-    attributes: [*c]cgltf_attribute,
+    buffer_view: ?*cgltf_buffer_view,
+    attributes: ?[*]cgltf_attribute,
     attributes_count: cgltf_size,
 };
 const cgltf_mesh_gpu_instancing = extern struct {
-    attributes: [*c]cgltf_attribute,
+    attributes: ?[*]cgltf_attribute,
     attributes_count: cgltf_size,
 };
 const cgltf_primitive = extern struct {
     type: cgltf_primitive_type,
-    indices: [*c]cgltf_accessor,
-    material: [*c]cgltf_material,
-    attributes: [*c]cgltf_attribute,
+    indices: ?*cgltf_accessor,
+    material: ?*cgltf_material,
+    attributes: ?[*]cgltf_attribute,
     attributes_count: cgltf_size,
-    targets: [*c]cgltf_morph_target,
+    targets: ?[*]cgltf_morph_target,
     targets_count: cgltf_size,
     extras: cgltf_extras,
     has_draco_mesh_compression: cgltf_bool,
     draco_mesh_compression: cgltf_draco_mesh_compression,
-    mappings: [*c]cgltf_material_mapping,
+    mappings: ?[*]cgltf_material_mapping,
     mappings_count: cgltf_size,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_mesh = extern struct {
-    name: [*c]u8,
-    primitives: [*c]cgltf_primitive,
+    name: ?[*:0]u8,
+    primitives: ?[*]cgltf_primitive,
     primitives_count: cgltf_size,
-    weights: [*c]cgltf_float,
+    weights: ?[*]cgltf_float,
     weights_count: cgltf_size,
-    target_names: [*c][*c]u8,
+    target_names: ?[*][*:0]u8,
     target_names_count: cgltf_size,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_node = extern struct {
-    name: [*c]u8,
-    parent: [*c]cgltf_node,
-    children: [*c][*c]cgltf_node,
+    name: ?[*:0]u8,
+    parent: ?*cgltf_node,
+    children: ?[*]*cgltf_node,
     children_count: cgltf_size,
     skin: ?*anyopaque,
-    mesh: [*c]cgltf_mesh,
+    mesh: ?*cgltf_mesh,
     camera: ?*anyopaque,
     light: ?*anyopaque,
-    weights: [*c]cgltf_float,
+    weights: ?[*]cgltf_float,
     weights_count: cgltf_size,
     has_translation: cgltf_bool,
     has_rotation: cgltf_bool,
@@ -1830,117 +1828,122 @@ const cgltf_node = extern struct {
     has_mesh_gpu_instancing: cgltf_bool,
     mesh_gpu_instancing: cgltf_mesh_gpu_instancing,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_skin = extern struct {
-    name: [*c]u8,
-    joints: [*c][*c]cgltf_node,
+    name: ?[*:0]u8,
+    joints: ?[*]*cgltf_node,
     joints_count: cgltf_size,
-    skeleton: [*c]cgltf_node,
-    inverse_bind_matrices: [*c]cgltf_accessor,
+    skeleton: ?*cgltf_node,
+    inverse_bind_matrices: ?*cgltf_accessor,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_animation_sampler = extern struct {
-    input: [*c]cgltf_accessor,
-    output: [*c]cgltf_accessor,
+    input: *cgltf_accessor,
+    output: *cgltf_accessor,
     interpolation: cgltf_interpolation_type,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_animation_channel = extern struct {
-    sampler: [*c]cgltf_animation_sampler,
-    target_node: [*c]cgltf_node,
+    sampler: *cgltf_animation_sampler,
+    target_node: ?*cgltf_node,
     target_path: cgltf_animation_path_type,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_animation = extern struct {
-    name: [*c]u8,
-    samplers: [*c]cgltf_animation_sampler,
+    name: ?[*:0]u8,
+    samplers: ?[*]cgltf_animation_sampler,
     samplers_count: cgltf_size,
-    channels: [*c]cgltf_animation_channel,
+    channels: ?[*]cgltf_animation_channel,
     channels_count: cgltf_size,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_asset = extern struct {
-    copyright: [*c]u8,
-    generator: [*c]u8,
-    version: [*c]u8,
-    min_version: [*c]u8,
+    copyright: ?[*:0]u8,
+    generator: ?[*:0]u8,
+    version: ?[*:0]u8,
+    min_version: ?[*:0]u8,
     extras: cgltf_extras,
     extensions_count: cgltf_size,
-    extensions: [*c]cgltf_extension,
+    extensions: ?[*]cgltf_extension,
 };
 const cgltf_data = extern struct {
     file_type: cgltf_file_type,
     file_data: ?*anyopaque,
     file_size: cgltf_size,
     asset: cgltf_asset,
-    meshes: [*c]cgltf_mesh,
+    meshes: ?[*]cgltf_mesh,
     meshes_count: cgltf_size,
-    materials: [*c]cgltf_material,
+    materials: ?[*]cgltf_material,
     materials_count: cgltf_size,
-    accessors: [*c]cgltf_accessor,
+    accessors: ?[*]cgltf_accessor,
     accessors_count: cgltf_size,
-    buffer_views: [*c]cgltf_buffer_view,
+    buffer_views: ?[*]cgltf_buffer_view,
     buffer_views_count: cgltf_size,
-    buffers: [*c]cgltf_buffer,
+    buffers: ?[*]cgltf_buffer,
     buffers_count: cgltf_size,
-    images: [*c]cgltf_image,
+    images: ?[*]cgltf_image,
     images_count: cgltf_size,
-    textures: [*c]cgltf_texture,
+    textures: ?[*]cgltf_texture,
     textures_count: cgltf_size,
-    samplers: [*c]cgltf_sampler,
+    samplers: ?[*]cgltf_sampler,
     samplers_count: cgltf_size,
-    skins: [*c]cgltf_skin,
+    skins: ?[*]cgltf_skin,
     skins_count: cgltf_size,
     cameras: ?*anyopaque,
     cameras_count: cgltf_size,
     lights: ?*anyopaque,
     lights_count: cgltf_size,
-    nodes: [*c]cgltf_node,
+    nodes: ?[*]cgltf_node,
     nodes_count: cgltf_size,
     scenes: ?*anyopaque,
     scenes_count: cgltf_size,
     scene: ?*anyopaque,
-    animations: [*c]cgltf_animation,
+    animations: ?[*]cgltf_animation,
     animations_count: cgltf_size,
     variants: ?*anyopaque,
     variants_count: cgltf_size,
     extras: cgltf_extras,
     data_extensions_count: cgltf_size,
-    data_extensions: [*c]cgltf_extension,
-    extensions_used: [*c][*c]u8,
+    data_extensions: ?[*]cgltf_extension,
+    extensions_used: ?[*][*:0]u8,
     extensions_used_count: cgltf_size,
-    extensions_required: [*c][*c]u8,
+    extensions_required: ?[*][*:0]u8,
     extensions_required_count: cgltf_size,
-    json: [*c]const u8,
+    json: ?[*]const u8,
     json_size: cgltf_size,
     bin: ?*const anyopaque,
     bin_size: cgltf_size,
     memory: cgltf_memory_options,
     file: cgltf_file_options,
 };
-extern fn cgltf_parse(options: ?*const cgltf_options, data: ?*const anyopaque, size: cgltf_size, out_data: [*c][*c]cgltf_data) cgltf_result;
-extern fn cgltf_load_buffers(options: ?*const cgltf_options, data: [*c]cgltf_data, gltf_path: [*c]const u8) cgltf_result;
-extern fn cgltf_free(data: [*c]cgltf_data) void;
-extern fn cgltf_node_transform_world(node: ?*const cgltf_node, out_matrix: [*c]cgltf_float) void;
-extern fn cgltf_accessor_read_float(accessor: ?*const cgltf_accessor, index: cgltf_size, out: [*c]cgltf_float, element_size: cgltf_size) cgltf_bool;
-extern fn cgltf_load_buffer_base64(options: ?*const cgltf_options, size: cgltf_size, base64: [*c]const u8, out_data: [*c]?*anyopaque) cgltf_result;
+extern fn cgltf_parse(options: *const cgltf_options, data: ?*const anyopaque, size: cgltf_size, out_data: *?*cgltf_data) cgltf_result;
+extern fn cgltf_load_buffers(options: *const cgltf_options, data: *cgltf_data, gltf_path: [*c]const u8) cgltf_result;
+extern fn cgltf_free(data: *cgltf_data) void;
+extern fn cgltf_node_transform_world(node: *const cgltf_node, out_matrix: *[16]cgltf_float) void;
+extern fn cgltf_accessor_read_float(accessor: *const cgltf_accessor, index: cgltf_size, out: [*]cgltf_float, element_size: cgltf_size) cgltf_bool;
+extern fn cgltf_load_buffer_base64(options: *const cgltf_options, size: cgltf_size, base64: [*]const u8, out_data: *?*anyopaque) cgltf_result;
+
+/// The `len` items a cgltf array field points at (none when it is null)
+fn cgltfItems(comptime T: type, ptr: ?[*]T, len: cgltf_size) []T {
+    return if (ptr) |items| items[0..len] else &.{};
+}
 
 // ---- vox_loader ----
 const VoxColor = extern struct { r: u8, g: u8, b: u8, a: u8 };
 const VoxVector3 = extern struct { x: f32, y: f32, z: f32 };
-const ArrayVector3 = extern struct { array: [*c]VoxVector3, used: c_int, size: c_int };
-const ArrayColor = extern struct { array: [*c]VoxColor, used: c_int, size: c_int };
-const ArrayUShort = extern struct { array: [*c]c_ushort, used: c_int, size: c_int };
-const CubeChunk3D = extern struct { m_array: [*c]u8, arraySize: c_int };
+const ArrayVector3 = extern struct { array: ?[*]VoxVector3, used: c_int, size: c_int };
+const ArrayColor = extern struct { array: ?[*]VoxColor, used: c_int, size: c_int };
+const ArrayUShort = extern struct { array: ?[*]c_ushort, used: c_int, size: c_int };
+const CubeChunk3D = extern struct { m_array: ?[*]u8, arraySize: c_int };
 const VoxArray3D = extern struct {
     sizeX: c_int,
     sizeY: c_int,
@@ -1948,7 +1951,7 @@ const VoxArray3D = extern struct {
     chunksSizeX: c_int,
     chunksSizeY: c_int,
     chunksSizeZ: c_int,
-    m_arrayChunks: [*c]CubeChunk3D,
+    m_arrayChunks: ?[*]CubeChunk3D,
     arrayChunksSize: c_int,
     ChunkFlattenOffset: c_int,
     chunksAllocated: c_int,
@@ -1960,8 +1963,8 @@ const VoxArray3D = extern struct {
     palette: [256]VoxColor,
 };
 const VOX_SUCCESS: c_int = 0;
-extern fn Vox_LoadFromMemory(pvoxData: [*c]u8, voxDataSize: c_uint, pvoxarray: [*c]VoxArray3D) c_int;
-extern fn Vox_FreeArrays(voxarray: [*c]VoxArray3D) void;
+extern fn Vox_LoadFromMemory(pvoxData: [*]u8, voxDataSize: c_uint, pvoxarray: *VoxArray3D) c_int;
+extern fn Vox_FreeArrays(voxarray: *VoxArray3D) void;
 
 // ---- m3d ----
 const M3D_INDEX = u32;
@@ -1970,8 +1973,8 @@ const M3D_UNDEF: u32 = 0xffffffff;
 const M3D_NUMBONE: usize = 4;
 const m3dti_t = extern struct { u: M3D_FLOAT, v: M3D_FLOAT };
 const m3dtx_t = extern struct {
-    name: [*c]u8,
-    d: [*c]u8,
+    name: ?[*:0]u8,
+    d: ?[*]u8,
     w: u16,
     h: u16,
     f: u8,
@@ -1979,11 +1982,11 @@ const m3dtx_t = extern struct {
 const m3dw_t = extern struct { vertexid: M3D_INDEX, weight: M3D_FLOAT };
 const m3db_t = extern struct {
     parent: M3D_INDEX,
-    name: [*c]u8,
+    name: ?[*:0]u8,
     pos: M3D_INDEX,
     ori: M3D_INDEX,
     numweight: M3D_INDEX,
-    weight: [*c]m3dw_t,
+    weight: ?[*]m3dw_t,
     mat4: [16]M3D_FLOAT,
 };
 const m3ds_t = extern struct {
@@ -2009,9 +2012,9 @@ const m3dp_t = extern struct {
     value: m3dp_value,
 };
 const m3dm_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     numprop: u8,
-    prop: [*c]m3dp_t,
+    prop: ?[*]m3dp_t,
 };
 const m3df_t = extern struct {
     materialid: M3D_INDEX,
@@ -2019,19 +2022,19 @@ const m3df_t = extern struct {
     normal: [3]M3D_INDEX,
     texcoord: [3]M3D_INDEX,
 };
-const m3dvi_t = extern struct { count: u16, name: [*c]u8 };
+const m3dvi_t = extern struct { count: u16, name: ?[*:0]u8 };
 const m3dvt_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     rotation: u8,
     voxshape: u16,
     materialid: M3D_INDEX,
     color: u32,
     skinid: M3D_INDEX,
     numitem: u8,
-    item: [*c]m3dvi_t,
+    item: ?[*]m3dvi_t,
 };
 const m3dvx_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     x: i32,
     y: i32,
     z: i32,
@@ -2040,19 +2043,19 @@ const m3dvx_t = extern struct {
     d: u32,
     uncertain: u8,
     groupid: u8,
-    data: [*c]u16,
+    data: ?[*]u16,
 };
-const m3dc_t = extern struct { type: u16, arg: [*c]u32 };
+const m3dc_t = extern struct { type: u16, arg: ?[*]u32 };
 const m3dh_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     group: M3D_INDEX,
     numcmd: u32,
-    cmd: [*c]m3dc_t,
+    cmd: ?[*]m3dc_t,
 };
 const m3dl_t = extern struct {
-    name: [*c]u8,
-    lang: [*c]u8,
-    text: [*c]u8,
+    name: ?[*:0]u8,
+    lang: ?[*:0]u8,
+    text: ?[*:0]u8,
     color: u32,
     vertexid: M3D_INDEX,
 };
@@ -2060,17 +2063,17 @@ const m3dtr_t = extern struct { boneid: M3D_INDEX, pos: M3D_INDEX, ori: M3D_INDE
 const m3dfr_t = extern struct {
     msec: u32,
     numtransform: M3D_INDEX,
-    transform: [*c]m3dtr_t,
+    transform: ?[*]m3dtr_t,
 };
 const m3da_t = extern struct {
-    name: [*c]u8,
+    name: ?[*:0]u8,
     durationmsec: u32,
     numframe: M3D_INDEX,
-    frame: [*c]m3dfr_t,
+    frame: ?[*]m3dfr_t,
 };
 const m3di_t = extern struct {
-    name: [*c]u8,
-    data: [*c]u8,
+    name: ?[*:0]u8,
+    data: ?[*]u8,
     length: u32,
 };
 const m3dhdr_t = opaque {};
@@ -2092,50 +2095,50 @@ const m3d_t = extern struct {
     fi_s: u8,
     vd_s: u8,
     vp_s: u8,
-    name: [*c]u8,
-    license: [*c]u8,
-    author: [*c]u8,
-    desc: [*c]u8,
+    name: ?[*:0]u8,
+    license: ?[*:0]u8,
+    author: ?[*:0]u8,
+    desc: ?[*:0]u8,
     scale: M3D_FLOAT,
     numcmap: M3D_INDEX,
-    cmap: [*c]u32,
+    cmap: ?[*]u32,
     numtmap: M3D_INDEX,
-    tmap: [*c]m3dti_t,
+    tmap: ?[*]m3dti_t,
     numtexture: M3D_INDEX,
-    texture: [*c]m3dtx_t,
+    texture: ?[*]m3dtx_t,
     numbone: M3D_INDEX,
-    bone: [*c]m3db_t,
+    bone: ?[*]m3db_t,
     numvertex: M3D_INDEX,
-    vertex: [*c]m3dv_t,
+    vertex: ?[*]m3dv_t,
     numskin: M3D_INDEX,
-    skin: [*c]m3ds_t,
+    skin: ?[*]m3ds_t,
     nummaterial: M3D_INDEX,
-    material: [*c]m3dm_t,
+    material: ?[*]m3dm_t,
     numface: M3D_INDEX,
-    face: [*c]m3df_t,
+    face: ?[*]m3df_t,
     numvoxtype: M3D_INDEX,
-    voxtype: [*c]m3dvt_t,
+    voxtype: ?[*]m3dvt_t,
     numvoxel: M3D_INDEX,
-    voxel: [*c]m3dvx_t,
+    voxel: ?[*]m3dvx_t,
     numshape: M3D_INDEX,
-    shape: [*c]m3dh_t,
+    shape: ?[*]m3dh_t,
     numlabel: M3D_INDEX,
-    label: [*c]m3dl_t,
+    label: ?[*]m3dl_t,
     numaction: M3D_INDEX,
-    action: [*c]m3da_t,
+    action: ?[*]m3da_t,
     numinlined: M3D_INDEX,
-    inlined: [*c]m3di_t,
+    inlined: ?[*]m3di_t,
     numextra: M3D_INDEX,
-    extra: [*c]?*m3dchunk_t,
+    extra: ?[*]?*m3dchunk_t,
     preview: m3di_t,
 };
-const m3dread_t = ?*const fn ([*c]u8, [*c]c_uint) callconv(.c) [*c]u8;
+const m3dread_t = ?*const fn ([*:0]u8, *c_uint) callconv(.c) ?[*]u8;
 const m3dfree_t = ?*const fn (?*anyopaque) callconv(.c) void;
-extern fn m3d_load(data: [*c]u8, readfilecb: m3dread_t, freecb: m3dfree_t, mtllib: [*c]m3d_t) [*c]m3d_t;
-extern fn m3d_free(model: [*c]m3d_t) void;
-extern fn m3d_pose(model: [*c]m3d_t, actionid: M3D_INDEX, msec: u32) [*c]m3db_t;
+extern fn m3d_load(data: [*]u8, readfilecb: m3dread_t, freecb: m3dfree_t, mtllib: ?*m3d_t) ?*m3d_t;
+extern fn m3d_free(model: *m3d_t) void;
+extern fn m3d_pose(model: *m3d_t, actionid: M3D_INDEX, msec: u32) ?[*]m3db_t;
 
-inline fn M3D_ERR_ISFATAL(x: i8) bool {
+fn M3D_ERR_ISFATAL(x: i8) bool {
     return (x < 0) and (x > -65);
 }
 
@@ -2155,6 +2158,8 @@ const m3dp_map_Km: u8 = 134;
 const m3dp_map_Pm: u8 = 193;
 
 //----------------------------------------------------------------------------------
+
+//----------------------------------------------------------------------------------
 // Module Internal Functions Declaration (forward references)
 //----------------------------------------------------------------------------------
 // (defined later in this file)
@@ -2170,11 +2175,11 @@ export fn LoadModel(fileName: [*c]const u8) callconv(.c) Model {
     else if (IsFileExtension(fileName, ".iqm"))
         loadIqm(fileName)
     else if (IsFileExtension(fileName, ".gltf") or IsFileExtension(fileName, ".glb"))
-        LoadGLTF(fileName)
+        loadGltf(fileName)
     else if (IsFileExtension(fileName, ".vox"))
-        LoadVOX(fileName)
+        loadVox(fileName)
     else if (IsFileExtension(fileName, ".m3d"))
-        LoadM3D(fileName)
+        loadM3d(fileName)
     else
         empty_model;
 
@@ -2960,8 +2965,8 @@ export fn LoadModelAnimations(fileName: [*c]const u8, animCount: [*c]c_int) call
     var animations: [*c]ModelAnimation = null;
 
     if (IsFileExtension(fileName, ".iqm")) animations = loadModelAnimationsIqm(fileName, animCount);
-    if (IsFileExtension(fileName, ".m3d")) animations = LoadModelAnimationsM3D(fileName, animCount);
-    if (IsFileExtension(fileName, ".gltf;.glb")) animations = LoadModelAnimationsGLTF(fileName, animCount);
+    if (IsFileExtension(fileName, ".m3d")) animations = loadModelAnimationsM3d(fileName, animCount);
+    if (IsFileExtension(fileName, ".gltf;.glb")) animations = loadModelAnimationsGltf(fileName, animCount);
 
     return animations;
 }
@@ -4665,43 +4670,71 @@ fn iqmAnimations(fileName: [*c]const u8, file: iqm.File) error{OutOfMemory}![]Mo
 // GLTF loader
 //----------------------------------------------------------------------------------
 
-// Load attribute helper: copies `numComp`-component elements from an accessor's buffer
-// into dstPtr, converting from srcType to dstType (mirrors the LOAD_ATTRIBUTE macros).
-fn loadAttribute(comptime SrcType: type, comptime DstType: type, accessor: *cgltf_accessor, numComp: usize, dstPtr: [*]DstType) void {
-    const bufRaw: [*]u8 = @ptrCast(@alignCast(accessor.buffer_view.*.buffer.*.data));
-    const byteOffset = accessor.buffer_view.*.offset + accessor.offset;
-    const buffer: [*]const SrcType = @ptrCast(@alignCast(bufRaw + byteOffset));
-    const strideElems = accessor.stride / @sizeOf(SrcType);
+/// The values of an accessor, element by element and component by component,
+/// read as `T` from its buffer. Like raylib's LOAD_ATTRIBUTE macro, the offsets
+/// and stride are counted in whole `T`s.
+fn AccessorValues(comptime T: type) type {
+    return struct {
+        bytes: []const u8,
+        first: usize,
+        stride: usize,
+        components: usize,
+        count: usize,
+        element: usize = 0,
+        component: usize = 0,
 
-    var n: usize = 0;
-    var k: usize = 0;
-    while (k < accessor.count) : (k += 1) {
-        var l: usize = 0;
-        while (l < numComp) : (l += 1) {
-            dstPtr[numComp * k + l] = castNum(SrcType, DstType, buffer[n + l]);
+        const Self = @This();
+
+        fn init(accessor: *const cgltf_accessor, components: usize) Self {
+            const view = accessor.buffer_view.?;
+            const buffer = view.buffer.?;
+            const data: [*]const u8 = @ptrCast(buffer.data.?);
+            return .{
+                .bytes = data[0..buffer.size],
+                .first = view.offset / @sizeOf(T) + accessor.offset / @sizeOf(T),
+                .stride = accessor.stride / @sizeOf(T),
+                .components = components,
+                .count = accessor.count,
+            };
         }
-        n += strideElems;
+
+        fn next(values: *Self) ?T {
+            if (values.element >= values.count) return null;
+            const index = values.first + values.element * values.stride + values.component;
+            values.component += 1;
+            if (values.component == values.components) {
+                values.component = 0;
+                values.element += 1;
+            }
+            return std.mem.bytesToValue(T, values.bytes[index * @sizeOf(T) ..][0..@sizeOf(T)]);
+        }
+
+        /// Fills `out` (count * components values, or fewer if `out` is shorter)
+        fn read(values: *Self, out: []T) void {
+            for (out) |*value| value.* = values.next() orelse return;
+        }
+    };
+}
+
+/// An accessor's values read as `T` and converted to `f32`, scaled by `1/divisor`
+fn readAccessorFloats(comptime T: type, accessor: *const cgltf_accessor, components: usize, out: []f32, divisor: ?f32) void {
+    var values: AccessorValues(T) = .init(accessor, components);
+    for (out) |*value| {
+        const v = values.next() orelse return;
+        const float: f32 = if (T == f32) v else @floatFromInt(v);
+        value.* = if (divisor) |d| float / d else float;
     }
 }
 
-inline fn castNum(comptime SrcType: type, comptime DstType: type, v: SrcType) DstType {
-    if (DstType == f32) {
-        return switch (@typeInfo(SrcType)) {
-            .float => @floatCast(v),
-            else => @floatFromInt(v),
-        };
-    } else {
-        return switch (@typeInfo(SrcType)) {
-            .float => @intFromFloat(v),
-            else => @intCast(v),
-        };
-    }
+/// An accessor's `n`-component values, as a new C-heap array of `n` floats each
+fn accessorFloats(comptime T: type, accessor: *const cgltf_accessor, components: usize, divisor: ?f32) error{OutOfMemory}![]f32 {
+    const out = try cmem.alloc(f32, accessor.count * components);
+    readAccessorFloats(T, accessor, components, out, divisor);
+    return out;
 }
 
 // Load file data callback for cgltf
-fn LoadFileGLTFCallback(memoryOptions: ?*const cgltf_memory_options, fileOptions: ?*const cgltf_file_options, path: [*c]const u8, size: [*c]cgltf_size, data: [*c]?*anyopaque) callconv(.c) cgltf_result {
-    _ = memoryOptions;
-    _ = fileOptions;
+fn loadFileGltfCallback(_: ?*const cgltf_memory_options, _: ?*const cgltf_file_options, path: [*:0]const u8, size: *cgltf_size, data: *?*anyopaque) callconv(.c) cgltf_result {
     var filesize: c_int = 0;
     const filedata = LoadFileData(path, &filesize);
 
@@ -4714,107 +4747,116 @@ fn LoadFileGLTFCallback(memoryOptions: ?*const cgltf_memory_options, fileOptions
 }
 
 // Release file data callback for cgltf
-fn ReleaseFileGLTFCallback(memoryOptions: ?*const cgltf_memory_options, fileOptions: ?*const cgltf_file_options, data: ?*anyopaque, size: cgltf_size) callconv(.c) void {
-    _ = memoryOptions;
-    _ = fileOptions;
-    _ = size;
+fn releaseFileGltfCallback(_: ?*const cgltf_memory_options, _: ?*const cgltf_file_options, data: ?*anyopaque, _: cgltf_size) callconv(.c) void {
     UnloadFileData(@ptrCast(data));
 }
 
+/// cgltf options that read files through raylib's LoadFileData (honouring user callbacks)
+fn gltfOptions() cgltf_options {
+    var options = std.mem.zeroes(cgltf_options);
+    options.file.read = loadFileGltfCallback;
+    options.file.release = releaseFileGltfCallback;
+    return options;
+}
+
 // Load image from different glTF provided methods (uri, path, buffer_view)
-fn LoadImageFromCgltfImage(cgltfImage: [*c]cgltf_image, texPath: [*c]const u8) Image {
-    var image = std.mem.zeroes(Image);
+fn loadImageFromCgltfImage(cgltfImage: ?*const cgltf_image, texPath: [*c]const u8) Image {
+    const image = cgltfImage orelse return std.mem.zeroes(Image);
 
-    if (cgltfImage == null) return image;
-
-    if (cgltfImage.*.uri != null) {
-        if ((strlen(cgltfImage.*.uri) > 5) and
-            (cgltfImage.*.uri[0] == 'd') and
-            (cgltfImage.*.uri[1] == 'a') and
-            (cgltfImage.*.uri[2] == 't') and
-            (cgltfImage.*.uri[3] == 'a') and
-            (cgltfImage.*.uri[4] == ':'))
-        {
-            var i: usize = 0;
-            while ((cgltfImage.*.uri[i] != ',') and (cgltfImage.*.uri[i] != 0)) i += 1;
-
-            if (cgltfImage.*.uri[i] == 0) {
-                TraceLog(LOG_WARNING, "IMAGE: glTF data URI is not a valid image");
-            } else {
-                var base64Size: c_int = @intCast(strlen(cgltfImage.*.uri + i + 1));
-                while (cgltfImage.*.uri[i + @as(usize, @intCast(base64Size))] == '=') base64Size -= 1;
-                const numberOfEncodedBits = base64Size * 6 - @rem(base64Size * 6, 8);
-                const outSize = @divTrunc(numberOfEncodedBits, 8);
-                var data: ?*anyopaque = null;
-
-                var options = std.mem.zeroes(cgltf_options);
-                options.file.read = LoadFileGLTFCallback;
-                options.file.release = ReleaseFileGLTFCallback;
-                const result = cgltf_load_buffer_base64(&options, @intCast(outSize), cgltfImage.*.uri + i + 1, &data);
-
-                if (result == cgltf_result_success) {
-                    image = LoadImageFromMemory(".png", @ptrCast(data), outSize);
-                    RL_FREE(data);
-                }
-            }
-        } else {
-            image = LoadImage(TextFormat("%s/%s", texPath, cgltfImage.*.uri));
-        }
-    } else if ((cgltfImage.*.buffer_view != null) and (cgltfImage.*.buffer_view.*.buffer.*.data != null)) {
-        const data: [*c]u8 = @ptrCast(@alignCast(RL_MALLOC(cgltfImage.*.buffer_view.*.size)));
-        var offset: usize = cgltfImage.*.buffer_view.*.offset;
-        const stride: usize = if (cgltfImage.*.buffer_view.*.stride != 0) cgltfImage.*.buffer_view.*.stride else 1;
-
-        const src: [*c]u8 = @ptrCast(@alignCast(cgltfImage.*.buffer_view.*.buffer.*.data));
-        var i: usize = 0;
-        while (i < cgltfImage.*.buffer_view.*.size) : (i += 1) {
-            data[i] = src[offset];
-            offset += stride;
-        }
-
-        if ((strcmp(cgltfImage.*.mime_type, "image\\/png") == 0) or (strcmp(cgltfImage.*.mime_type, "image/png") == 0)) {
-            image = LoadImageFromMemory(".png", data, @intCast(cgltfImage.*.buffer_view.*.size));
-        } else if ((strcmp(cgltfImage.*.mime_type, "image\\/jpeg") == 0) or (strcmp(cgltfImage.*.mime_type, "image/jpeg") == 0)) {
-            image = LoadImageFromMemory(".jpg", data, @intCast(cgltfImage.*.buffer_view.*.size));
-        } else TraceLog(LOG_WARNING, "MODEL: glTF image data MIME type not recognized", TextFormat("%s/%s", texPath, cgltfImage.*.uri));
-
-        RL_FREE(data);
+    if (image.uri) |uri| {
+        const text = std.mem.span(uri);
+        // Data URI format: data:<mediatype>;base64,<data>
+        if ((text.len > 5) and std.mem.startsWith(u8, text, "data:")) return loadImageFromDataUri(text);
+        // Image path, relative to the glTF file
+        return LoadImage(TextFormat("%s/%s", texPath, uri));
     }
 
-    return image;
+    if (image.buffer_view) |view| {
+        if (view.buffer.?.data != null) return loadImageFromBufferView(image, view, texPath);
+    }
+
+    return std.mem.zeroes(Image);
+}
+
+fn loadImageFromDataUri(uri: [:0]const u8) Image {
+    const comma = std.mem.indexOfScalar(u8, uri, ',') orelse {
+        TraceLog(LOG_WARNING, "IMAGE: glTF data URI is not a valid image");
+        return std.mem.zeroes(Image);
+    };
+
+    // Ignore the optional padding: the encoded bytes are the whole 8-bit groups
+    const base64 = uri[comma + 1 ..];
+    const base64Size: c_int = @intCast(std.mem.trimEnd(u8, base64, "=").len);
+    const outSize = (base64Size * 6 - @rem(base64Size * 6, 8)) >> 3;
+
+    var data: ?*anyopaque = null;
+    const options = gltfOptions();
+    if (cgltf_load_buffer_base64(&options, @intCast(outSize), base64.ptr, &data) != cgltf_result_success) return std.mem.zeroes(Image);
+    defer cmem.free(data);
+
+    // NOTE: raylib decodes every data URI as PNG, whatever its media type
+    return LoadImageFromMemory(".png", @ptrCast(data), outSize);
+}
+
+fn loadImageFromBufferView(image: *const cgltf_image, view: *const cgltf_buffer_view, texPath: [*c]const u8) Image {
+    const gpa = std.heap.c_allocator;
+    const data = gpa.alloc(u8, view.size) catch {
+        TraceLog(LOG_WARNING, "IMAGE: Failed to allocate memory for glTF image data");
+        return std.mem.zeroes(Image);
+    };
+    defer gpa.free(data);
+
+    // Copy buffer data to memory for loading
+    const source: [*]const u8 = @ptrCast(view.buffer.?.data.?);
+    const stride = if (view.stride != 0) view.stride else 1;
+    for (data, 0..) |*byte, i| byte.* = source[view.offset + i * stride];
+
+    // NOTE: Some models give the mime_type as "image\/png"
+    const mime: []const u8 = if (image.mime_type) |mime| std.mem.span(mime) else "";
+    const size: c_int = @intCast(view.size);
+    if (std.mem.eql(u8, mime, "image\\/png") or std.mem.eql(u8, mime, "image/png")) return LoadImageFromMemory(".png", data.ptr, size);
+    if (std.mem.eql(u8, mime, "image\\/jpeg") or std.mem.eql(u8, mime, "image/jpeg")) return LoadImageFromMemory(".jpg", data.ptr, size);
+
+    // NOTE: raylib formats the image path as an unused extra argument (with a null uri)
+    TraceLog(LOG_WARNING, "MODEL: glTF image data MIME type not recognized", TextFormat("%s/%s", texPath, image.uri));
+    return std.mem.zeroes(Image);
+}
+
+/// The texture of a glTF texture view, if it has one and its image loads
+fn loadTextureFromView(view: cgltf_texture_view, texPath: [*c]const u8) ?Texture2D {
+    const texture = view.texture orelse return null;
+    const image = loadImageFromCgltfImage(texture.image, texPath);
+    if (image.data == null) return null;
+    defer UnloadImage(image);
+    return LoadTextureFromImage(image);
 }
 
 // Load bone info from GLTF skin data
-fn LoadBoneInfoGLTF(skin: cgltf_skin, boneCount: [*c]c_uint) [*c]BoneInfo {
-    boneCount.* = @truncate(skin.joints_count);
-    const bones: [*c]BoneInfo = @ptrCast(@alignCast(RL_CALLOC(skin.joints_count, @sizeOf(BoneInfo))));
+fn loadBoneInfoGltf(skin: cgltf_skin) error{OutOfMemory}![]BoneInfo {
+    const joints = cgltfItems(*cgltf_node, skin.joints, skin.joints_count);
+    const bones = try cmem.alloc(BoneInfo, joints.len);
 
-    var i: c_uint = 0;
-    while (i < skin.joints_count) : (i += 1) {
-        const node = skin.joints[i].*;
-        if (node.name != null) _ = strncpy(&bones[i].name, node.name, bones[i].name.len - 1);
+    for (bones, joints) |*bone, joint| {
+        if (joint.name) |name| _ = copyCString(&bone.name, name);
 
-        var parentIndex: c_int = -1;
-        var ancestor = node.parent;
-        while (ancestor != null and parentIndex == -1) {
-            var j: c_uint = 0;
-            while (j < skin.joints_count) : (j += 1) {
-                if (skin.joints[j] == ancestor) {
-                    parentIndex = @intCast(j);
-                    break;
-                }
+        // The parent bone is the nearest ancestor that is also a joint: some
+        // exporters put intermediate (non-joint) transform nodes in between
+        bone.parent = -1;
+        var ancestor = joint.parent;
+        while (ancestor) |node| : (ancestor = node.parent) {
+            if (std.mem.indexOfScalar(*cgltf_node, joints, node)) |index| {
+                bone.parent = @intCast(index);
+                break;
             }
-            if (parentIndex == -1) ancestor = ancestor.*.parent;
         }
-
-        bones[i].parent = parentIndex;
     }
 
     return bones;
 }
 
-fn matrixFromGLTF(t: *const [16]cgltf_float) Matrix {
-    return Matrix{
+/// A glTF column-major matrix as a raylib Matrix
+fn matrixFromGltf(t: [16]cgltf_float) Matrix {
+    return .{
         .m0 = t[0],
         .m4 = t[4],
         .m8 = t[8],
@@ -4834,589 +4876,585 @@ fn matrixFromGLTF(t: *const [16]cgltf_float) Matrix {
     };
 }
 
-// Load glTF file into model struct, .gltf and .glb supported
-fn LoadGLTF(fileName: [*c]const u8) Model {
-    var model = std.mem.zeroes(Model);
+fn nodeWorldMatrix(node: *const cgltf_node) Matrix {
+    var worldTransform = std.mem.zeroes([16]cgltf_float);
+    cgltf_node_transform_world(node, &worldTransform);
+    return matrixFromGltf(worldTransform);
+}
 
+/// Transforms the XYZ triples of `values` in place, normalizing the results if asked
+fn transformTriples(values: []f32, matrix: Matrix, normalize: bool) void {
+    for (vector3s(values)) |*v| {
+        const transformed = Vector3Transform(v.*, matrix);
+        v.* = if (normalize) Vector3Normalize(transformed) else transformed;
+    }
+}
+
+/// The triangle primitives of every node's mesh, in file order: each becomes one raylib mesh
+const TrianglePrimitives = struct {
+    nodes: []cgltf_node,
+    node: usize = 0,
+    primitive: usize = 0,
+
+    const Item = struct { node: *cgltf_node, primitive: *cgltf_primitive };
+
+    fn next(it: *TrianglePrimitives) ?Item {
+        while (it.node < it.nodes.len) {
+            const node = &it.nodes[it.node];
+            const primitives: []cgltf_primitive = if (node.mesh) |mesh| cgltfItems(cgltf_primitive, mesh.primitives, mesh.primitives_count) else &.{};
+            while (it.primitive < primitives.len) {
+                const primitive = &primitives[it.primitive];
+                it.primitive += 1;
+                if (primitive.type == cgltf_primitive_type_triangles) return .{ .node = node, .primitive = primitive };
+            }
+            it.node += 1;
+            it.primitive = 0;
+        }
+        return null;
+    }
+};
+
+/// glTF file data parsed by cgltf, with its buffers loaded
+const GltfFile = struct {
+    fileData: [*c]u8,
+    data: *cgltf_data,
+
+    fn deinit(file: GltfFile) void {
+        cgltf_free(file.data);
+        UnloadFileData(file.fileData);
+    }
+};
+
+// Load glTF file into model struct, .gltf and .glb supported
+// NOTE: Every triangle primitive of every node's mesh becomes a raylib Mesh, with the
+// node's world transform applied; scenes are ignored. Only PBR metallic/roughness
+// materials are read.
+fn loadGltf(fileName: [*c]const u8) Model {
     var dataSize: c_int = 0;
     const fileData = LoadFileData(fileName, &dataSize);
+    if (fileData == null) return empty_model;
 
-    if (fileData == null) return model;
+    const options = gltfOptions();
+    var parsed: ?*cgltf_data = null;
+    if (cgltf_parse(&options, fileData, @intCast(dataSize), &parsed) != cgltf_result_success) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
+        UnloadFileData(fileData);
+        return empty_model;
+    }
+    // NOTE: cgltf needs the file data alive while reading
+    const file: GltfFile = .{ .fileData = fileData, .data = parsed.? };
+    defer file.deinit();
+    const data = file.data;
 
-    var options = std.mem.zeroes(cgltf_options);
-    options.file.read = LoadFileGLTFCallback;
-    options.file.release = ReleaseFileGLTFCallback;
-    var data: [*c]cgltf_data = null;
-    var result = cgltf_parse(&options, fileData, @intCast(dataSize), &data);
+    if (data.file_type == cgltf_file_type_glb) {
+        TraceLog(LOG_INFO, "MODEL: [%s] Model basic data (glb) loaded successfully", fileName);
+    } else if (data.file_type == cgltf_file_type_gltf) {
+        TraceLog(LOG_INFO, "MODEL: [%s] Model basic data (glTF) loaded successfully", fileName);
+    } else TraceLog(LOG_WARNING, "MODEL: [%s] Model format not recognized", fileName);
 
-    if (result == cgltf_result_success) {
-        if (data.*.file_type == cgltf_file_type_glb) {
-            TraceLog(LOG_INFO, "MODEL: [%s] Model basic data (glb) loaded successfully", fileName);
-        } else if (data.*.file_type == cgltf_file_type_gltf) {
-            TraceLog(LOG_INFO, "MODEL: [%s] Model basic data (glTF) loaded successfully", fileName);
-        } else TraceLog(LOG_WARNING, "MODEL: [%s] Model format not recognized", fileName);
+    TraceLog(LOG_INFO, "    > Meshes count: %i", @as(c_int, @intCast(data.meshes_count)));
+    TraceLog(LOG_INFO, "    > Materials count: %i (+1 default)", @as(c_int, @intCast(data.materials_count)));
+    TraceLog(LOG_DEBUG, "    > Buffers count: %i", @as(c_int, @intCast(data.buffers_count)));
+    TraceLog(LOG_DEBUG, "    > Images count: %i", @as(c_int, @intCast(data.images_count)));
+    TraceLog(LOG_DEBUG, "    > Textures count: %i", @as(c_int, @intCast(data.textures_count)));
 
-        TraceLog(LOG_INFO, "    > Meshes count: %i", @as(c_int, @intCast(data.*.meshes_count)));
-        TraceLog(LOG_INFO, "    > Materials count: %i (+1 default)", @as(c_int, @intCast(data.*.materials_count)));
-        TraceLog(LOG_DEBUG, "    > Buffers count: %i", @as(c_int, @intCast(data.*.buffers_count)));
-        TraceLog(LOG_DEBUG, "    > Images count: %i", @as(c_int, @intCast(data.*.images_count)));
-        TraceLog(LOG_DEBUG, "    > Textures count: %i", @as(c_int, @intCast(data.*.textures_count)));
+    // Force reading data buffers (fills buffer_view->buffer->data)
+    // NOTE: A uri to base64 data or to an external file is loaded automatically
+    if (cgltf_load_buffers(&options, data, fileName) != cgltf_result_success) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load mesh/material buffers", fileName);
 
-        result = cgltf_load_buffers(&options, data, fileName);
-        if (result != cgltf_result_success) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load mesh/material buffers", fileName);
+    // Count the meshes needed, from the node hierarchy
+    var primitivesCount: c_int = 0;
+    var dracoCompression = false;
+    for (cgltfItems(cgltf_node, data.nodes, data.nodes_count)) |node| {
+        const mesh = node.mesh orelse continue;
+        for (cgltfItems(cgltf_primitive, mesh.primitives, mesh.primitives_count)) |primitive| {
+            if (primitive.has_draco_mesh_compression != 0) {
+                // NOTE: Logged once per node with a Draco primitive, as raylib does
+                dracoCompression = true;
+                TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load mesh data, Draco compression not supported", fileName);
+                break;
+            }
+            if (primitive.type == cgltf_primitive_type_triangles) primitivesCount += 1;
+        }
+    }
 
-        var primitivesCount: c_int = 0;
-        var dracoCompression = false;
+    if (dracoCompression) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
+        return empty_model;
+    }
 
-        var i: c_uint = 0;
-        while (i < data.*.nodes_count) : (i += 1) {
-            const node = &data.*.nodes[i];
-            const mesh = node.mesh;
-            if (mesh == null) continue;
+    TraceLog(LOG_DEBUG, "    > Primitives (triangles only) count based on hierarchy : %i", primitivesCount);
 
-            var p: c_uint = 0;
-            while (p < mesh.*.primitives_count) : (p += 1) {
-                if (mesh.*.primitives[p].has_draco_mesh_compression != 0) {
-                    dracoCompression = true;
-                    TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load mesh data, Draco compression not supported", fileName);
-                    break;
-                } else if (mesh.*.primitives[p].type == cgltf_primitive_type_triangles) primitivesCount += 1;
+    return gltfModel(fileName, data, count(primitivesCount)) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for glTF data", fileName);
+        return empty_model;
+    };
+}
+
+fn gltfModel(fileName: [*c]const u8, data: *cgltf_data, meshCount: usize) error{OutOfMemory}!Model {
+    var model = empty_model;
+    errdefer freeModelData(model);
+
+    model.meshCount = @intCast(meshCount);
+    model.meshes = (try cmem.alloc(Mesh, meshCount)).ptr;
+
+    // NOTE: An extra slot for the default material (index 0), for meshes without one
+    const gltfMaterials = cgltfItems(cgltf_material, data.materials, data.materials_count);
+    model.materialCount = @intCast(gltfMaterials.len + 1);
+    model.materials = (try cmem.alloc(Material, gltfMaterials.len + 1)).ptr;
+    model.materials[0] = LoadMaterialDefault();
+
+    // Every mesh uses material 0 unless its primitive names one
+    model.meshMaterial = (try cmem.alloc(c_int, meshCount)).ptr;
+
+    for (gltfMaterials, model.materials[1 .. gltfMaterials.len + 1]) |*gltfMaterial, *material| {
+        material.* = LoadMaterialDefault();
+        try loadGltfMaterial(gltfMaterial, material.maps, GetDirectoryPath(fileName));
+    }
+
+    // Mesh vertex data, transformed to world space
+    var primitives: TrianglePrimitives = .{ .nodes = cgltfItems(cgltf_node, data.nodes, data.nodes_count) };
+    for (modelMeshes(model), model.meshMaterial[0..meshCount]) |*mesh, *meshMaterial| {
+        const item = primitives.next().?;
+        const worldMatrix = nodeWorldMatrix(item.node);
+        try loadGltfPrimitive(fileName, item.primitive, mesh, worldMatrix);
+
+        // The primitive points at its material; raylib stores its index, skipping the default
+        for (gltfMaterials, 1..) |*gltfMaterial, index| {
+            if (item.primitive.material == gltfMaterial) {
+                meshMaterial.* = @intCast(index);
+                break;
+            }
+        }
+    }
+
+    // Skeleton
+    // NOTE: Only one skin (armature) per file, with linear interpolation, and
+    // translation/rotation/scale channels (no morph target weights)
+    const skins = cgltfItems(cgltf_skin, data.skins, data.skins_count);
+    if (skins.len > 0) {
+        try loadGltfSkeleton(&model, skins[0]);
+        if (skins.len > 1) TraceLog(LOG_WARNING, "MODEL: [%s] can only load one skin (armature) per model, but gltf skins_count == %i", fileName, skins.len);
+    }
+
+    // Skin (bone) vertex data
+    primitives = .{ .nodes = cgltfItems(cgltf_node, data.nodes, data.nodes_count) };
+    for (modelMeshes(model)) |*mesh| {
+        const item = primitives.next().?;
+        const hasJoints = try loadGltfSkinData(fileName, item.primitive, mesh);
+
+        // An animated mesh with no bone data of its own that is the child of a
+        // bone node: all its vertices follow that bone
+        if ((skins.len > 0) and !hasJoints) {
+            if (item.node.parent) |parent| {
+                if (parent.mesh == null) try attachToBone(mesh, skins[0], model.skeleton.boneCount, parent);
             }
         }
 
-        if (dracoCompression) {
-            TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
-            cgltf_free(data);
-            UnloadFileData(fileData);
-            return model;
-        }
+        mesh.boneCount = @bitCast(model.skeleton.boneCount);
+    }
 
-        TraceLog(LOG_DEBUG, "    > Primitives (triangles only) count based on hierarchy : %i", primitivesCount);
-
-        model.meshCount = primitivesCount;
-        model.meshes = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
-
-        model.materialCount = @as(c_int, @intCast(data.*.materials_count)) + 1;
-        model.materials = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.materialCount), @sizeOf(Material))));
-        model.materials[0] = LoadMaterialDefault();
-
-        model.meshMaterial = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
-
-        // Load materials data
-        {
-            var mi: c_uint = 0;
-            var j: usize = 1;
-            while (mi < data.*.materials_count) : ({
-                mi += 1;
-                j += 1;
-            }) {
-                model.materials[j] = LoadMaterialDefault();
-                const texPath = GetDirectoryPath(fileName);
-                const mat = &data.*.materials[mi];
-
-                if (mat.has_pbr_metallic_roughness != 0) {
-                    if (mat.pbr_metallic_roughness.base_color_texture.texture != null) {
-                        const imAlbedo = LoadImageFromCgltfImage(mat.pbr_metallic_roughness.base_color_texture.texture.*.image, texPath);
-                        if (imAlbedo.data != null) {
-                            model.materials[j].maps[MATERIAL_MAP_ALBEDO].texture = LoadTextureFromImage(imAlbedo);
-                            UnloadImage(imAlbedo);
-                        }
-                    }
-                    model.materials[j].maps[MATERIAL_MAP_ALBEDO].color.r = @intFromFloat(mat.pbr_metallic_roughness.base_color_factor[0] * 255);
-                    model.materials[j].maps[MATERIAL_MAP_ALBEDO].color.g = @intFromFloat(mat.pbr_metallic_roughness.base_color_factor[1] * 255);
-                    model.materials[j].maps[MATERIAL_MAP_ALBEDO].color.b = @intFromFloat(mat.pbr_metallic_roughness.base_color_factor[2] * 255);
-                    model.materials[j].maps[MATERIAL_MAP_ALBEDO].color.a = @intFromFloat(mat.pbr_metallic_roughness.base_color_factor[3] * 255);
-
-                    if (mat.pbr_metallic_roughness.metallic_roughness_texture.texture != null) {
-                        const imMetallicRoughness = LoadImageFromCgltfImage(mat.pbr_metallic_roughness.metallic_roughness_texture.texture.*.image, texPath);
-                        if (imMetallicRoughness.data != null) {
-                            var imMetallic = std.mem.zeroes(Image);
-                            var imRoughness = std.mem.zeroes(Image);
-
-                            imMetallic.data = RL_MALLOC(@intCast(imMetallicRoughness.width * imMetallicRoughness.height));
-                            imRoughness.data = RL_MALLOC(@intCast(imMetallicRoughness.width * imMetallicRoughness.height));
-
-                            imMetallic.width = imMetallicRoughness.width;
-                            imRoughness.width = imMetallicRoughness.width;
-                            imMetallic.height = imMetallicRoughness.height;
-                            imRoughness.height = imMetallicRoughness.height;
-
-                            imMetallic.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
-                            imRoughness.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
-                            imMetallic.mipmaps = 1;
-                            imRoughness.mipmaps = 1;
-
-                            var x: c_int = 0;
-                            while (x < imRoughness.width) : (x += 1) {
-                                var y: c_int = 0;
-                                while (y < imRoughness.height) : (y += 1) {
-                                    const col = GetImageColor(imMetallicRoughness, x, y);
-                                    const rdata: [*c]u8 = @ptrCast(imRoughness.data);
-                                    const mdata: [*c]u8 = @ptrCast(imMetallic.data);
-                                    rdata[@intCast(y * imRoughness.width + x)] = col.g;
-                                    mdata[@intCast(y * imMetallic.width + x)] = col.b;
-                                }
-                            }
-
-                            model.materials[j].maps[MATERIAL_MAP_ROUGHNESS].texture = LoadTextureFromImage(imRoughness);
-                            model.materials[j].maps[MATERIAL_MAP_METALNESS].texture = LoadTextureFromImage(imMetallic);
-
-                            UnloadImage(imRoughness);
-                            UnloadImage(imMetallic);
-                            UnloadImage(imMetallicRoughness);
-                        }
-
-                        model.materials[j].maps[MATERIAL_MAP_ROUGHNESS].value = mat.pbr_metallic_roughness.roughness_factor;
-                        model.materials[j].maps[MATERIAL_MAP_METALNESS].value = mat.pbr_metallic_roughness.metallic_factor;
-                    }
-
-                    if (mat.normal_texture.texture != null) {
-                        const imNormal = LoadImageFromCgltfImage(mat.normal_texture.texture.*.image, texPath);
-                        if (imNormal.data != null) {
-                            model.materials[j].maps[MATERIAL_MAP_NORMAL].texture = LoadTextureFromImage(imNormal);
-                            UnloadImage(imNormal);
-                        }
-                    }
-
-                    if (mat.occlusion_texture.texture != null) {
-                        const imOcclusion = LoadImageFromCgltfImage(mat.occlusion_texture.texture.*.image, texPath);
-                        if (imOcclusion.data != null) {
-                            model.materials[j].maps[MATERIAL_MAP_OCCLUSION].texture = LoadTextureFromImage(imOcclusion);
-                            UnloadImage(imOcclusion);
-                        }
-                    }
-
-                    if (mat.emissive_texture.texture != null) {
-                        const imEmissive = LoadImageFromCgltfImage(mat.emissive_texture.texture.*.image, texPath);
-                        if (imEmissive.data != null) {
-                            model.materials[j].maps[MATERIAL_MAP_EMISSION].texture = LoadTextureFromImage(imEmissive);
-                            UnloadImage(imEmissive);
-                        }
-
-                        model.materials[j].maps[MATERIAL_MAP_EMISSION].color.r = @intFromFloat(mat.emissive_factor[0] * 255);
-                        model.materials[j].maps[MATERIAL_MAP_EMISSION].color.g = @intFromFloat(mat.emissive_factor[1] * 255);
-                        model.materials[j].maps[MATERIAL_MAP_EMISSION].color.b = @intFromFloat(mat.emissive_factor[2] * 255);
-                        model.materials[j].maps[MATERIAL_MAP_EMISSION].color.a = 255;
-                    }
-                }
-            }
-        }
-
-        // Load meshes data
-        var meshIndex: usize = 0;
-        i = 0;
-        while (i < data.*.nodes_count) : (i += 1) {
-            const node = &data.*.nodes[i];
-            const mesh = node.mesh;
-            if (mesh == null) continue;
-
-            var worldTransform: [16]cgltf_float = undefined;
-            cgltf_node_transform_world(node, &worldTransform);
-
-            const worldMatrix = matrixFromGLTF(&worldTransform);
-            const worldMatrixNormals = MatrixTranspose(MatrixInvert(worldMatrix));
-
-            var p: c_uint = 0;
-            while (p < mesh.*.primitives_count) : (p += 1) {
-                if (mesh.*.primitives[p].type != cgltf_primitive_type_triangles) continue;
-
-                var j: c_uint = 0;
-                while (j < mesh.*.primitives[p].attributes_count) : (j += 1) {
-                    const attr = &mesh.*.primitives[p].attributes[j];
-                    if (attr.type == cgltf_attribute_type_position) {
-                        const attribute = attr.data;
-                        if (model.meshes[meshIndex].vertices != null) {
-                            TraceLog(LOG_WARNING, "MODEL: [%s] Vertices attribute data already loaded", fileName);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_32f)) {
-                            model.meshes[meshIndex].vertexCount = @intCast(attribute.*.count);
-                            model.meshes[meshIndex].vertices = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            loadAttribute(f32, f32, attribute, 3, model.meshes[meshIndex].vertices);
-                            transformVertices(model.meshes[meshIndex].vertices, attribute.*.count, worldMatrix, false);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_16u)) {
-                            model.meshes[meshIndex].vertexCount = @intCast(attribute.*.count);
-                            model.meshes[meshIndex].vertices = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            const temp: [*c]c_ushort = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(c_ushort))));
-                            loadAttribute(c_ushort, c_ushort, attribute, 3, temp);
-                            var t: usize = 0;
-                            while (t < attribute.*.count * 3) : (t += 1) model.meshes[meshIndex].vertices[t] = @floatFromInt(temp[t]);
-                            RL_FREE(temp);
-                            transformVertices(model.meshes[meshIndex].vertices, attribute.*.count, worldMatrix, false);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_16)) {
-                            model.meshes[meshIndex].vertexCount = @intCast(attribute.*.count);
-                            model.meshes[meshIndex].vertices = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            const temp: [*c]i16 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(i16))));
-                            loadAttribute(i16, i16, attribute, 3, temp);
-                            var t: usize = 0;
-                            while (t < attribute.*.count * 3) : (t += 1) model.meshes[meshIndex].vertices[t] = @floatFromInt(temp[t]);
-                            RL_FREE(temp);
-                            transformVertices(model.meshes[meshIndex].vertices, attribute.*.count, worldMatrix, false);
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Vertices attribute data format not supported, use vec3 float", fileName);
-                    } else if (attr.type == cgltf_attribute_type_normal) {
-                        const attribute = attr.data;
-                        if (model.meshes[meshIndex].normals != null) {
-                            TraceLog(LOG_WARNING, "MODEL: [%s] Normals attribute data already loaded", fileName);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_32f)) {
-                            model.meshes[meshIndex].normals = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            loadAttribute(f32, f32, attribute, 3, model.meshes[meshIndex].normals);
-                            transformVertices(model.meshes[meshIndex].normals, attribute.*.count, worldMatrixNormals, false);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_16)) {
-                            model.meshes[meshIndex].normals = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            const temp: [*c]i16 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(i16))));
-                            loadAttribute(i16, i16, attribute, 3, temp);
-                            var t: usize = 0;
-                            while (t < attribute.*.count * 3) : (t += 1) model.meshes[meshIndex].normals[t] = @floatFromInt(temp[t]);
-                            RL_FREE(temp);
-                            transformVertices(model.meshes[meshIndex].normals, attribute.*.count, worldMatrixNormals, true);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_8u)) {
-                            model.meshes[meshIndex].normals = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            const temp: [*c]u8 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(u8))));
-                            loadAttribute(u8, u8, attribute, 3, temp);
-                            var t: usize = 0;
-                            while (t < attribute.*.count * 3) : (t += 1) model.meshes[meshIndex].normals[t] = @floatFromInt(temp[t]);
-                            RL_FREE(temp);
-                            transformVertices(model.meshes[meshIndex].normals, attribute.*.count, worldMatrixNormals, true);
-                        } else if ((attribute.*.type == cgltf_type_vec3) and (attribute.*.component_type == cgltf_component_type_r_8)) {
-                            model.meshes[meshIndex].normals = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                            const temp: [*c]i8 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(i8))));
-                            loadAttribute(i8, i8, attribute, 3, temp);
-                            var t: usize = 0;
-                            while (t < attribute.*.count * 3) : (t += 1) model.meshes[meshIndex].normals[t] = @floatFromInt(temp[t]);
-                            RL_FREE(temp);
-                            transformVertices(model.meshes[meshIndex].normals, attribute.*.count, worldMatrixNormals, true);
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Normals attribute data format not supported, use vec3 float", fileName);
-                    } else if (attr.type == cgltf_attribute_type_tangent) {
-                        const attribute = attr.data;
-                        if (model.meshes[meshIndex].tangents != null) {
-                            TraceLog(LOG_WARNING, "MODEL: [%s] Tangents attribute data already loaded", fileName);
-                        } else if ((attribute.*.type == cgltf_type_vec4) and (attribute.*.component_type == cgltf_component_type_r_32f)) {
-                            model.meshes[meshIndex].tangents = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(f32))));
-                            loadAttribute(f32, f32, attribute, 4, model.meshes[meshIndex].tangents);
-                            const tangents = model.meshes[meshIndex].tangents;
-                            var k: usize = 0;
-                            while (k < attribute.*.count) : (k += 1) {
-                                const tt = Vector3Transform(.{ .x = tangents[4 * k], .y = tangents[4 * k + 1], .z = tangents[4 * k + 2] }, worldMatrix);
-                                tangents[4 * k] = tt.x;
-                                tangents[4 * k + 1] = tt.y;
-                                tangents[4 * k + 2] = tt.z;
-                            }
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Tangents attribute data format not supported, use vec4 float", fileName);
-                    } else if (attr.type == cgltf_attribute_type_texcoord) {
-                        var texcoordPtr: [*c]f32 = null;
-                        const attribute = attr.data;
-
-                        if (attribute.*.type == cgltf_type_vec2) {
-                            if (attribute.*.component_type == cgltf_component_type_r_32f) {
-                                texcoordPtr = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 2 * @sizeOf(f32))));
-                                loadAttribute(f32, f32, attribute, 2, texcoordPtr);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_8u) {
-                                texcoordPtr = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 2 * @sizeOf(f32))));
-                                const temp: [*c]u8 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 2 * @sizeOf(u8))));
-                                loadAttribute(u8, u8, attribute, 2, temp);
-                                var t: usize = 0;
-                                while (t < attribute.*.count * 2) : (t += 1) texcoordPtr[t] = @as(f32, @floatFromInt(temp[t])) / 255.0;
-                                RL_FREE(temp);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_16u) {
-                                texcoordPtr = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 2 * @sizeOf(f32))));
-                                const temp: [*c]c_ushort = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 2 * @sizeOf(c_ushort))));
-                                loadAttribute(c_ushort, c_ushort, attribute, 2, temp);
-                                var t: usize = 0;
-                                while (t < attribute.*.count * 2) : (t += 1) texcoordPtr[t] = @as(f32, @floatFromInt(temp[t])) / 65535.0;
-                                RL_FREE(temp);
-                            } else TraceLog(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported", fileName);
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported, use vec2 float", fileName);
-
-                        const index = attr.index;
-                        if (index == 0) {
-                            model.meshes[meshIndex].texcoords = texcoordPtr;
-                        } else if (index == 1) {
-                            model.meshes[meshIndex].texcoords2 = texcoordPtr;
-                        } else {
-                            TraceLog(LOG_WARNING, "MODEL: [%s] No more than 2 texture coordinates attributes supported", fileName);
-                            if (texcoordPtr != null) RL_FREE(texcoordPtr);
-                        }
-                    } else if (attr.type == cgltf_attribute_type_color) {
-                        const attribute = attr.data;
-                        if (model.meshes[meshIndex].colors != null) {
-                            TraceLog(LOG_WARNING, "MODEL: [%s] Colors attribute data already loaded", fileName);
-                        } else if (attribute.*.type == cgltf_type_vec3) {
-                            if (attribute.*.component_type == cgltf_component_type_r_8u) {
-                                model.meshes[meshIndex].colors = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                const temp: [*c]u8 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(u8))));
-                                loadAttribute(u8, u8, attribute, 3, temp);
-                                var c: usize = 0;
-                                var k: usize = 0;
-                                while (c < (attribute.*.count * 4 - 3)) : ({
-                                    c += 4;
-                                    k += 3;
-                                }) {
-                                    model.meshes[meshIndex].colors[c] = temp[k];
-                                    model.meshes[meshIndex].colors[c + 1] = temp[k + 1];
-                                    model.meshes[meshIndex].colors[c + 2] = temp[k + 2];
-                                    model.meshes[meshIndex].colors[c + 3] = 255;
-                                }
-                                RL_FREE(temp);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_16u) {
-                                model.meshes[meshIndex].colors = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                const temp: [*c]c_ushort = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(c_ushort))));
-                                loadAttribute(c_ushort, c_ushort, attribute, 3, temp);
-                                var c: usize = 0;
-                                var k: usize = 0;
-                                while (c < (attribute.*.count * 4 - 3)) : ({
-                                    c += 4;
-                                    k += 3;
-                                }) {
-                                    model.meshes[meshIndex].colors[c] = @intFromFloat((@as(f32, @floatFromInt(temp[k])) / 65535.0) * 255.0);
-                                    model.meshes[meshIndex].colors[c + 1] = @intFromFloat((@as(f32, @floatFromInt(temp[k + 1])) / 65535.0) * 255.0);
-                                    model.meshes[meshIndex].colors[c + 2] = @intFromFloat((@as(f32, @floatFromInt(temp[k + 2])) / 65535.0) * 255.0);
-                                    model.meshes[meshIndex].colors[c + 3] = 255;
-                                }
-                                RL_FREE(temp);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_32f) {
-                                model.meshes[meshIndex].colors = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                const temp: [*c]f32 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 3 * @sizeOf(f32))));
-                                loadAttribute(f32, f32, attribute, 3, temp);
-                                var c: usize = 0;
-                                var k: usize = 0;
-                                while (c < (attribute.*.count * 4 - 3)) : ({
-                                    c += 4;
-                                    k += 3;
-                                }) {
-                                    model.meshes[meshIndex].colors[c] = @intFromFloat(temp[k] * 255.0);
-                                    model.meshes[meshIndex].colors[c + 1] = @intFromFloat(temp[k + 1] * 255.0);
-                                    model.meshes[meshIndex].colors[c + 2] = @intFromFloat(temp[k + 2] * 255.0);
-                                    model.meshes[meshIndex].colors[c + 3] = 255;
-                                }
-                                RL_FREE(temp);
-                            } else TraceLog(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
-                        } else if (attribute.*.type == cgltf_type_vec4) {
-                            if (attribute.*.component_type == cgltf_component_type_r_8u) {
-                                model.meshes[meshIndex].colors = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                loadAttribute(u8, u8, attribute, 4, model.meshes[meshIndex].colors);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_16u) {
-                                model.meshes[meshIndex].colors = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                const temp: [*c]c_ushort = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(c_ushort))));
-                                loadAttribute(c_ushort, c_ushort, attribute, 4, temp);
-                                var c: usize = 0;
-                                while (c < attribute.*.count * 4) : (c += 1) model.meshes[meshIndex].colors[c] = @intFromFloat((@as(f32, @floatFromInt(temp[c])) / 65535.0) * 255.0);
-                                RL_FREE(temp);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_32f) {
-                                model.meshes[meshIndex].colors = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                const temp: [*c]f32 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(f32))));
-                                loadAttribute(f32, f32, attribute, 4, temp);
-                                var c: usize = 0;
-                                while (c < attribute.*.count * 4) : (c += 1) model.meshes[meshIndex].colors[c] = @intFromFloat(temp[c] * 255.0);
-                                RL_FREE(temp);
-                            } else TraceLog(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
-                    }
-                }
-
-                // Load primitive indices data (if provided)
-                if ((mesh.*.primitives[p].indices != null) and (mesh.*.primitives[p].indices.*.buffer_view != null)) {
-                    const attribute = mesh.*.primitives[p].indices;
-                    model.meshes[meshIndex].triangleCount = @intCast(attribute.*.count / 3);
-
-                    if (model.meshes[meshIndex].indices != null) {
-                        TraceLog(LOG_WARNING, "MODEL: [%s] Indices attribute data already loaded", fileName);
-                    } else if (attribute.*.component_type == cgltf_component_type_r_16u) {
-                        model.meshes[meshIndex].indices = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * @sizeOf(c_ushort))));
-                        loadAttribute(c_ushort, c_ushort, attribute, 1, model.meshes[meshIndex].indices);
-                    } else if (attribute.*.component_type == cgltf_component_type_r_8u) {
-                        model.meshes[meshIndex].indices = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * @sizeOf(c_ushort))));
-                        loadAttribute(u8, c_ushort, attribute, 1, model.meshes[meshIndex].indices);
-                    } else if (attribute.*.component_type == cgltf_component_type_r_32u) {
-                        model.meshes[meshIndex].indices = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * @sizeOf(c_ushort))));
-                        loadAttribute(c_uint, c_ushort, attribute, 1, model.meshes[meshIndex].indices);
-                        TraceLog(LOG_WARNING, "MODEL: [%s] Indices data converted from u32 to u16, possible loss of data", fileName);
-                    } else TraceLog(LOG_WARNING, "MODEL: [%s] Indices data format not supported, use u16", fileName);
-                } else model.meshes[meshIndex].triangleCount = @divTrunc(model.meshes[meshIndex].vertexCount, 3);
-
-                var m: c_uint = 0;
-                while (m < data.*.materials_count) : (m += 1) {
-                    if (&data.*.materials[m] == mesh.*.primitives[p].material) {
-                        model.meshMaterial[meshIndex] = @intCast(m + 1);
-                        break;
-                    }
-                }
-
-                meshIndex += 1;
-            }
-        }
-
-        // Load animation data (skins)
-        if (data.*.skins_count > 0) {
-            const skin = data.*.skins[0];
-            model.skeleton.bones = LoadBoneInfoGLTF(skin, &model.skeleton.boneCount);
-            model.skeleton.bindPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
-
-            var bi: c_int = 0;
-            while (bi < model.skeleton.boneCount) : (bi += 1) {
-                var bindMatrix = std.mem.zeroes(Matrix);
-                var inverseBindTransform = std.mem.zeroes([16]cgltf_float);
-
-                if ((skin.inverse_bind_matrices != null) and
-                    (skin.inverse_bind_matrices.*.count >= skin.joints_count) and
-                    (cgltf_accessor_read_float(skin.inverse_bind_matrices, @intCast(bi), &inverseBindTransform, 16) != 0))
-                {
-                    const inverseBindMatrix = matrixFromGLTF(&inverseBindTransform);
-                    bindMatrix = MatrixInvert(inverseBindMatrix);
-                } else {
-                    var worldTransform = std.mem.zeroes([16]cgltf_float);
-                    cgltf_node_transform_world(skin.joints[@intCast(bi)], &worldTransform);
-                    bindMatrix = matrixFromGLTF(&worldTransform);
-                }
-
-                MatrixDecompose(bindMatrix, &model.skeleton.bindPose[@intCast(bi)].translation, &model.skeleton.bindPose[@intCast(bi)].rotation, &model.skeleton.bindPose[@intCast(bi)].scale);
-            }
-
-            if (data.*.skins_count > 1) TraceLog(LOG_WARNING, "MODEL: [%s] can only load one skin (armature) per model, but gltf skins_count == %i", fileName, data.*.skins_count);
-        }
-
-        // Load skin/bone vertex data
-        meshIndex = 0;
-        i = 0;
-        while (i < data.*.nodes_count) : (i += 1) {
-            const node = &data.*.nodes[i];
-            const mesh = node.mesh;
-            if (mesh == null) continue;
-
-            var p: c_uint = 0;
-            while (p < mesh.*.primitives_count) : (p += 1) {
-                var hasJoints = false;
-
-                if (mesh.*.primitives[p].type != cgltf_primitive_type_triangles) continue;
-
-                var j: c_uint = 0;
-                while (j < mesh.*.primitives[p].attributes_count) : (j += 1) {
-                    const attr = &mesh.*.primitives[p].attributes[j];
-                    if (attr.type == cgltf_attribute_type_joints) {
-                        hasJoints = true;
-                        const attribute = attr.data;
-                        if (attribute.*.type == cgltf_type_vec4) {
-                            if (attribute.*.component_type == cgltf_component_type_r_8u) {
-                                model.meshes[meshIndex].boneIndices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(u8))));
-                                loadAttribute(u8, u8, attribute, 4, model.meshes[meshIndex].boneIndices);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_16u) {
-                                model.meshes[meshIndex].boneIndices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(u8))));
-                                const temp: [*c]c_ushort = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(c_ushort))));
-                                loadAttribute(c_ushort, c_ushort, attribute, 4, temp);
-                                var boneIdOverflowWarning = false;
-                                var b: c_int = 0;
-                                while (b < model.meshes[meshIndex].vertexCount * 4) : (b += 1) {
-                                    if ((temp[@intCast(b)] > 255) and !boneIdOverflowWarning) {
-                                        TraceLog(LOG_WARNING, "MODEL: [%s] Joint attribute data format (u16) overflow", fileName);
-                                        boneIdOverflowWarning = true;
-                                    }
-                                    model.meshes[meshIndex].boneIndices[@intCast(b)] = @truncate(temp[@intCast(b)]);
-                                }
-                                RL_FREE(temp);
-                            } else TraceLog(LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
-                    } else if (attr.type == cgltf_attribute_type_weights) {
-                        const attribute = attr.data;
-                        if (attribute.*.type == cgltf_type_vec4) {
-                            if (attribute.*.component_type == cgltf_component_type_r_8u) {
-                                model.meshes[meshIndex].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(f32))));
-                                const temp: [*c]u8 = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(u8))));
-                                loadAttribute(u8, u8, attribute, 4, temp);
-                                var b: usize = 0;
-                                while (b < attribute.*.count * 4) : (b += 1) model.meshes[meshIndex].boneWeights[b] = @as(f32, @floatFromInt(temp[b])) / 255.0;
-                                RL_FREE(temp);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_16u) {
-                                model.meshes[meshIndex].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(f32))));
-                                const temp: [*c]c_ushort = @ptrCast(@alignCast(RL_MALLOC(attribute.*.count * 4 * @sizeOf(c_ushort))));
-                                loadAttribute(c_ushort, c_ushort, attribute, 4, temp);
-                                var b: usize = 0;
-                                while (b < attribute.*.count * 4) : (b += 1) model.meshes[meshIndex].boneWeights[b] = @as(f32, @floatFromInt(temp[b])) / 65535.0;
-                                RL_FREE(temp);
-                            } else if (attribute.*.component_type == cgltf_component_type_r_32f) {
-                                model.meshes[meshIndex].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(f32))));
-                                loadAttribute(f32, f32, attribute, 4, model.meshes[meshIndex].boneWeights);
-                            } else TraceLog(LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
-                        } else TraceLog(LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
-                    }
-                }
-
-                if ((data.*.skins_count > 0) and !hasJoints and (node.parent != null) and (node.parent.*.mesh == null)) {
-                    var parentBoneId: c_int = -1;
-                    var joint: c_int = 0;
-                    while (joint < model.skeleton.boneCount) : (joint += 1) {
-                        if (data.*.skins[0].joints[@intCast(joint)] == node.parent) {
-                            parentBoneId = joint;
-                            break;
-                        }
-                    }
-
-                    if (parentBoneId >= 0) {
-                        model.meshes[meshIndex].boneIndices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(u8))));
-                        model.meshes[meshIndex].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[meshIndex].vertexCount * 4), @sizeOf(f32))));
-
-                        var vertexIndex: c_int = 0;
-                        while (vertexIndex < model.meshes[meshIndex].vertexCount * 4) : (vertexIndex += 4) {
-                            model.meshes[meshIndex].boneIndices[@intCast(vertexIndex)] = @intCast(parentBoneId);
-                            model.meshes[meshIndex].boneWeights[@intCast(vertexIndex)] = 1.0;
-                        }
-                    }
-                }
-
-                model.meshes[meshIndex].boneCount = @bitCast(model.skeleton.boneCount);
-
-                meshIndex += 1;
-            }
-        }
-
-        model.currentPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
-        model.boneMatrices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Matrix))));
-        {
-            var j: c_int = 0;
-            while (j < model.skeleton.boneCount) : (j += 1) model.boneMatrices[@intCast(j)] = MatrixIdentity();
-        }
-
-        if (model.skeleton.boneCount == 0) {
-            RL_FREE(model.currentPose);
-            RL_FREE(model.boneMatrices);
-            model.currentPose = null;
-            model.boneMatrices = null;
-        }
-
-        cgltf_free(data);
-    } else TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
-
-    UnloadFileData(fileData);
+    // Runtime animation data, unless there are no bones
+    if (model.skeleton.boneCount > 0) try initAnimationState(&model);
 
     return model;
 }
 
-// Transform vertices/normals in place by a matrix (normalize normals when requested)
-fn transformVertices(values: [*c]f32, valueCount: cgltf_size, mat: Matrix, normalize: bool) void {
-    var k: usize = 0;
-    while (k < valueCount) : (k += 1) {
-        var vt = Vector3Transform(.{ .x = values[3 * k], .y = values[3 * k + 1], .z = values[3 * k + 2] }, mat);
-        if (normalize) vt = Vector3Normalize(vt);
-        values[3 * k] = vt.x;
-        values[3 * k + 1] = vt.y;
-        values[3 * k + 2] = vt.z;
+fn loadGltfMaterial(gltfMaterial: *const cgltf_material, maps: [*c]MaterialMap, texPath: [*c]const u8) error{OutOfMemory}!void {
+    // Only the PBR metallic/roughness flow is supported: specular/glossiness,
+    // clearcoat, transmission, volume, ior, specular and sheen are not
+    if (gltfMaterial.has_pbr_metallic_roughness == 0) return;
+    const pbr = &gltfMaterial.pbr_metallic_roughness;
+
+    // Base color texture (albedo) and factor (tint)
+    if (loadTextureFromView(pbr.base_color_texture, texPath)) |texture| maps[MATERIAL_MAP_ALBEDO].texture = texture;
+    maps[MATERIAL_MAP_ALBEDO].color = .{
+        .r = cByte(pbr.base_color_factor[0] * 255),
+        .g = cByte(pbr.base_color_factor[1] * 255),
+        .b = cByte(pbr.base_color_factor[2] * 255),
+        .a = cByte(pbr.base_color_factor[3] * 255),
+    };
+
+    // Metallic/roughness texture: roughness is its green channel, metalness its blue
+    if (pbr.metallic_roughness_texture.texture) |texture| {
+        const image = loadImageFromCgltfImage(texture.image, texPath);
+        if (image.data != null) {
+            defer UnloadImage(image);
+            maps[MATERIAL_MAP_ROUGHNESS].texture, maps[MATERIAL_MAP_METALNESS].texture = try splitMetallicRoughness(image);
+        }
+
+        maps[MATERIAL_MAP_ROUGHNESS].value = pbr.roughness_factor;
+        maps[MATERIAL_MAP_METALNESS].value = pbr.metallic_factor;
+    }
+
+    if (loadTextureFromView(gltfMaterial.normal_texture, texPath)) |texture| maps[MATERIAL_MAP_NORMAL].texture = texture;
+    if (loadTextureFromView(gltfMaterial.occlusion_texture, texPath)) |texture| maps[MATERIAL_MAP_OCCLUSION].texture = texture;
+
+    // Emissive texture and color factor
+    if (gltfMaterial.emissive_texture.texture != null) {
+        if (loadTextureFromView(gltfMaterial.emissive_texture, texPath)) |texture| maps[MATERIAL_MAP_EMISSION].texture = texture;
+        maps[MATERIAL_MAP_EMISSION].color = .{
+            .r = cByte(gltfMaterial.emissive_factor[0] * 255),
+            .g = cByte(gltfMaterial.emissive_factor[1] * 255),
+            .b = cByte(gltfMaterial.emissive_factor[2] * 255),
+            .a = 255,
+        };
     }
 }
 
-// Get interpolated pose for bone sampler at a specific time. Returns true on success
-fn GetPoseAtTimeGLTF(interpolationType_in: cgltf_interpolation_type, input: [*c]cgltf_accessor, output: [*c]cgltf_accessor, time: f32, data: ?*anyopaque) bool {
-    var interpolationType = interpolationType_in;
-    if (interpolationType >= cgltf_interpolation_type_max_enum) return false;
+/// Roughness (green) and metalness (blue) textures from a metallic/roughness image
+fn splitMetallicRoughness(image: Image) error{OutOfMemory}!struct { Texture2D, Texture2D } {
+    const pixelCount = count(image.width * image.height);
+    // Grayscale images for UnloadImage, so on the C heap
+    var roughness: Image = .{ .data = null, .width = image.width, .height = image.height, .mipmaps = 1, .format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE };
+    var metallic = roughness;
+    const metallicData = try cmem.alloc(u8, pixelCount);
+    metallic.data = metallicData.ptr;
+    defer UnloadImage(metallic);
+    const roughnessData = try cmem.alloc(u8, pixelCount);
+    roughness.data = roughnessData.ptr;
+    defer UnloadImage(roughness);
 
+    var x: c_int = 0;
+    while (x < image.width) : (x += 1) {
+        var y: c_int = 0;
+        while (y < image.height) : (y += 1) {
+            const color = GetImageColor(image, x, y);
+            const i: usize = @intCast(y * image.width + x);
+            roughnessData[i] = color.g;
+            metallicData[i] = color.b;
+        }
+    }
+
+    return .{ LoadTextureFromImage(roughness), LoadTextureFromImage(metallic) };
+}
+
+/// Loads the vertex attributes and indices of one triangle primitive into `mesh`
+fn loadGltfPrimitive(fileName: [*c]const u8, primitive: *const cgltf_primitive, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
+    const worldMatrixNormals = MatrixTranspose(MatrixInvert(worldMatrix));
+
+    // NOTE: Attributes come in several data formats; only some are supported per
+    // attribute. Bone joints and weights are loaded after the skeleton.
+    for (cgltfItems(cgltf_attribute, primitive.attributes, primitive.attributes_count)) |attribute| {
+        const accessor = attribute.data;
+        switch (attribute.type) {
+            cgltf_attribute_type_position => try loadGltfPositions(fileName, accessor, mesh, worldMatrix),
+            cgltf_attribute_type_normal => try loadGltfNormals(fileName, accessor, mesh, worldMatrixNormals),
+            cgltf_attribute_type_tangent => try loadGltfTangents(fileName, accessor, mesh, worldMatrix),
+            cgltf_attribute_type_texcoord => try loadGltfTexcoords(fileName, accessor, attribute.index, mesh),
+            cgltf_attribute_type_color => try loadGltfColors(fileName, accessor, mesh),
+            else => {},
+        }
+    }
+
+    // Primitive indices (if provided)
+    const indices = primitive.indices orelse return unindexed(mesh);
+    if (indices.buffer_view == null) return unindexed(mesh);
+
+    mesh.triangleCount = @divTrunc(@as(c_int, @intCast(indices.count)), 3);
+
+    if (mesh.indices != null) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Indices attribute data already loaded", fileName);
+        return;
+    }
+
+    switch (indices.component_type) {
+        cgltf_component_type_r_16u => mesh.indices = (try accessorIndices(u16, indices)).ptr,
+        cgltf_component_type_r_8u => mesh.indices = (try accessorIndices(u8, indices)).ptr,
+        cgltf_component_type_r_32u => {
+            mesh.indices = (try accessorIndices(u32, indices)).ptr;
+            TraceLog(LOG_WARNING, "MODEL: [%s] Indices data converted from u32 to u16, possible loss of data", fileName);
+        },
+        else => TraceLog(LOG_WARNING, "MODEL: [%s] Indices data format not supported, use u16", fileName),
+    }
+}
+
+fn unindexed(mesh: *Mesh) void {
+    mesh.triangleCount = @divTrunc(mesh.vertexCount, 3);
+}
+
+/// An index accessor's values as 16-bit indices; wider ones are truncated, as C casts
+fn accessorIndices(comptime T: type, accessor: *const cgltf_accessor) error{OutOfMemory}![]c_ushort {
+    const indices = try cmem.alloc(c_ushort, accessor.count);
+    var values: AccessorValues(T) = .init(accessor, 1);
+    for (indices) |*index| index.* = @truncate(values.next().?);
+    return indices;
+}
+
+// POSITION: vec3 of float, u16 or i16, transformed to world space
+// NOTE: The glTF spec requires the POSITION accessor's min and max
+fn loadGltfPositions(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
+    if (mesh.vertices != null) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Vertices attribute data already loaded", fileName);
+        return;
+    }
+
+    const vertices = (if (accessor.type != cgltf_type_vec3) null else switch (accessor.component_type) {
+        cgltf_component_type_r_32f => try accessorFloats(f32, accessor, 3, null),
+        // The world matrix scales integer positions to their real size
+        cgltf_component_type_r_16u => try accessorFloats(u16, accessor, 3, null),
+        cgltf_component_type_r_16 => try accessorFloats(i16, accessor, 3, null),
+        else => null,
+    }) orelse {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Vertices attribute data format not supported, use vec3 float", fileName);
+        return;
+    };
+
+    mesh.vertexCount = @intCast(accessor.count);
+    mesh.vertices = vertices.ptr;
+    transformTriples(vertices, worldMatrix, false);
+}
+
+// NORMAL: vec3 of float, or of normalized integers (renormalized after transforming)
+fn loadGltfNormals(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrixNormals: Matrix) error{OutOfMemory}!void {
+    if (mesh.normals != null) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Normals attribute data already loaded", fileName);
+        return;
+    }
+
+    const normals = (if (accessor.type != cgltf_type_vec3) null else switch (accessor.component_type) {
+        cgltf_component_type_r_32f => try accessorFloats(f32, accessor, 3, null),
+        cgltf_component_type_r_16 => try accessorFloats(i16, accessor, 3, null),
+        cgltf_component_type_r_8u => try accessorFloats(u8, accessor, 3, null),
+        cgltf_component_type_r_8 => try accessorFloats(i8, accessor, 3, null),
+        else => null,
+    }) orelse {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Normals attribute data format not supported, use vec3 float", fileName);
+        return;
+    };
+
+    mesh.normals = normals.ptr;
+    transformTriples(normals, worldMatrixNormals, accessor.component_type != cgltf_component_type_r_32f);
+}
+
+// TANGENT: vec4 of float, w is the tangent basis sign
+fn loadGltfTangents(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh, worldMatrix: Matrix) error{OutOfMemory}!void {
+    if (mesh.tangents != null) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Tangents attribute data already loaded", fileName);
+        return;
+    }
+    if ((accessor.type != cgltf_type_vec4) or (accessor.component_type != cgltf_component_type_r_32f)) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Tangents attribute data format not supported, use vec4 float", fileName);
+        return;
+    }
+
+    const tangents = try accessorFloats(f32, accessor, 4, null);
+    mesh.tangents = tangents.ptr;
+    for (std.mem.bytesAsSlice(Vector4, std.mem.sliceAsBytes(tangents))) |*tangent| {
+        const t = Vector3Transform(.{ .x = tangent.x, .y = tangent.y, .z = tangent.z }, worldMatrix);
+        tangent.x = t.x;
+        tangent.y = t.y;
+        tangent.z = t.z;
+    }
+}
+
+// TEXCOORD_n: vec2 of float, u8n or u16n; up to two sets
+fn loadGltfTexcoords(fileName: [*c]const u8, accessor: *const cgltf_accessor, index: c_int, mesh: *Mesh) error{OutOfMemory}!void {
+    var texcoords: ?[]f32 = null;
+    if (accessor.type == cgltf_type_vec2) {
+        texcoords = switch (accessor.component_type) {
+            cgltf_component_type_r_32f => try accessorFloats(f32, accessor, 2, null),
+            cgltf_component_type_r_8u => try accessorFloats(u8, accessor, 2, 255.0),
+            cgltf_component_type_r_16u => try accessorFloats(u16, accessor, 2, 65535.0),
+            else => null,
+        };
+        if (texcoords == null) TraceLog(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported", fileName);
+    } else TraceLog(LOG_WARNING, "MODEL: [%s] Texcoords attribute data format not supported, use vec2 float", fileName);
+
+    const ptr: [*c]f32 = if (texcoords) |t| t.ptr else null;
+    switch (index) {
+        0 => mesh.texcoords = ptr,
+        1 => mesh.texcoords2 = ptr,
+        else => {
+            TraceLog(LOG_WARNING, "MODEL: [%s] No more than 2 texture coordinates attributes supported", fileName);
+            cmem.free(ptr);
+        },
+    }
+}
+
+// COLOR_n: vec3 (RGB) or vec4 (RGBA) of u8n, u16n or float, to 8-bit RGBA
+// NOTE: The glTF spec requires colors clamped to [0.0, 1.0]
+fn loadGltfColors(fileName: [*c]const u8, accessor: *const cgltf_accessor, mesh: *Mesh) error{OutOfMemory}!void {
+    if (mesh.colors != null) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Colors attribute data already loaded", fileName);
+        return;
+    }
+
+    const components: usize = switch (accessor.type) {
+        cgltf_type_vec3 => 3,
+        cgltf_type_vec4 => 4,
+        else => {
+            TraceLog(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
+            return;
+        },
+    };
+
+    const colors = switch (accessor.component_type) {
+        cgltf_component_type_r_8u => try accessorColors(u8, accessor, components),
+        cgltf_component_type_r_16u => try accessorColors(u16, accessor, components),
+        cgltf_component_type_r_32f => try accessorColors(f32, accessor, components),
+        else => {
+            TraceLog(LOG_WARNING, "MODEL: [%s] Color attribute data format not supported", fileName);
+            return;
+        },
+    };
+    mesh.colors = colors.ptr;
+}
+
+/// A color accessor's values as RGBA bytes; RGB colors get an opaque alpha
+fn accessorColors(comptime T: type, accessor: *const cgltf_accessor, components: usize) error{OutOfMemory}![]u8 {
+    const colors = try cmem.alloc(u8, accessor.count * 4);
+    var values: AccessorValues(T) = .init(accessor, components);
+    for (0..accessor.count) |i| {
+        const color = colors[i * 4 ..][0..4];
+        for (color[0..components]) |*channel| channel.* = colorChannel(T, values.next().?);
+        if (components == 3) color[3] = 255;
+    }
+    return colors;
+}
+
+fn colorChannel(comptime T: type, value: T) u8 {
+    return switch (T) {
+        u8 => value,
+        u16 => cByte((@as(f32, @floatFromInt(value)) / 65535.0) * 255.0),
+        f32 => cByte(value * 255.0),
+        else => @compileError("unsupported color component type"),
+    };
+}
+
+/// Loads a primitive's bone joints and weights into `mesh`; whether it has joints
+fn loadGltfSkinData(fileName: [*c]const u8, primitive: *const cgltf_primitive, mesh: *Mesh) error{OutOfMemory}!bool {
+    var hasJoints = false;
+    const valueCount = count(mesh.vertexCount) * 4;
+
+    // NOTE: JOINTS_1 + WEIGHTS_1 (more than 4 bones per vertex) are not supported
+    for (cgltfItems(cgltf_attribute, primitive.attributes, primitive.attributes_count)) |attribute| {
+        const accessor = attribute.data;
+        switch (attribute.type) {
+            // JOINTS_n: vec4 of u8 or u16. raylib stores u8 bone indices: wider
+            // ones are truncated, with a warning
+            cgltf_attribute_type_joints => {
+                hasJoints = true;
+                if (accessor.type != cgltf_type_vec4) {
+                    TraceLog(LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName);
+                    continue;
+                }
+                switch (accessor.component_type) {
+                    cgltf_component_type_r_8u => {
+                        const boneIndices = try cmem.alloc(u8, valueCount);
+                        mesh.boneIndices = boneIndices.ptr;
+                        var values: AccessorValues(u8) = .init(accessor, 4);
+                        values.read(boneIndices);
+                    },
+                    cgltf_component_type_r_16u => {
+                        const boneIndices = try cmem.alloc(u8, valueCount);
+                        mesh.boneIndices = boneIndices.ptr;
+                        var values: AccessorValues(u16) = .init(accessor, 4);
+                        var overflowWarned = false;
+                        for (boneIndices) |*boneIndex| {
+                            // NOTE: C reads a zeroed scratch buffer: missing values are 0
+                            const value = values.next() orelse 0;
+                            if ((value > 255) and !overflowWarned) {
+                                TraceLog(LOG_WARNING, "MODEL: [%s] Joint attribute data format (u16) overflow", fileName);
+                                overflowWarned = true;
+                            }
+                            // Despite the possible overflow, convert to unsigned char
+                            boneIndex.* = @truncate(value);
+                        }
+                    },
+                    else => TraceLog(LOG_WARNING, "MODEL: [%s] Joint attribute data format not supported", fileName),
+                }
+            },
+            // WEIGHTS_n: vec4 of u8n, u16n or float
+            cgltf_attribute_type_weights => {
+                const supported = switch (accessor.component_type) {
+                    cgltf_component_type_r_8u, cgltf_component_type_r_16u, cgltf_component_type_r_32f => true,
+                    else => false,
+                };
+                if ((accessor.type != cgltf_type_vec4) or !supported) {
+                    TraceLog(LOG_WARNING, "MODEL: [%s] Joint weight attribute data format not supported, use vec4 float", fileName);
+                    continue;
+                }
+
+                const boneWeights = try cmem.alloc(f32, valueCount);
+                mesh.boneWeights = boneWeights.ptr;
+                switch (accessor.component_type) {
+                    cgltf_component_type_r_8u => readAccessorFloats(u8, accessor, 4, boneWeights, 255.0),
+                    cgltf_component_type_r_16u => readAccessorFloats(u16, accessor, 4, boneWeights, 65535.0),
+                    else => readAccessorFloats(f32, accessor, 4, boneWeights, null),
+                }
+            },
+            else => {},
+        }
+    }
+
+    return hasJoints;
+}
+
+/// Binds every vertex of `mesh` fully to the skin joint `node`, if it is one
+fn attachToBone(mesh: *Mesh, skin: cgltf_skin, boneCount: c_uint, node: *cgltf_node) error{OutOfMemory}!void {
+    const joints = cgltfItems(*cgltf_node, skin.joints, skin.joints_count)[0..boneCount];
+    const bone = std.mem.indexOfScalar(*cgltf_node, joints, node) orelse return;
+
+    // Replaces any bone weights the primitive had without joints
+    const valueCount = count(mesh.vertexCount) * 4;
+    const boneIndices = try cmem.alloc(u8, valueCount);
+    cmem.free(mesh.boneIndices);
+    mesh.boneIndices = boneIndices.ptr;
+    const boneWeights = try cmem.alloc(f32, valueCount);
+    cmem.free(mesh.boneWeights);
+    mesh.boneWeights = boneWeights.ptr;
+
+    var i: usize = 0;
+    while (i < valueCount) : (i += 4) {
+        boneIndices[i] = @truncate(bone);
+        boneWeights[i] = 1.0;
+    }
+}
+
+/// The bones of the skin, and their bind pose from the inverse bind matrices
+/// (or the joints' world transforms when there are none)
+fn loadGltfSkeleton(model: *Model, skin: cgltf_skin) error{OutOfMemory}!void {
+    const bones = try loadBoneInfoGltf(skin);
+    model.skeleton.bones = bones.ptr;
+    model.skeleton.boneCount = @intCast(bones.len);
+    const bindPose = try cmem.alloc(Transform, bones.len);
+    model.skeleton.bindPose = bindPose.ptr;
+
+    const joints = cgltfItems(*cgltf_node, skin.joints, skin.joints_count);
+    for (bindPose, joints, 0..) |*pose, joint, i| {
+        var inverseBindTransform = std.mem.zeroes([16]cgltf_float);
+        const bindMatrix = if ((skin.inverse_bind_matrices != null) and
+            (skin.inverse_bind_matrices.?.count >= skin.joints_count) and
+            (cgltf_accessor_read_float(skin.inverse_bind_matrices.?, i, &inverseBindTransform, 16) != 0))
+            MatrixInvert(matrixFromGltf(inverseBindTransform))
+        else
+            nodeWorldMatrix(joint);
+
+        MatrixDecompose(bindMatrix, &pose.translation, &pose.rotation, &pose.scale);
+    }
+}
+
+/// Samples an animation sampler at `time` into `out` (3 floats for vec3
+/// outputs, 4 for quaternions). Returns false if the sampler can't be read.
+fn getPoseAtTimeGltf(sampler: *const cgltf_animation_sampler, time: f32, out: []f32) bool {
+    var interpolation = sampler.interpolation;
+    if (interpolation >= cgltf_interpolation_type_max_enum) return false;
+
+    const input = sampler.input;
+    const output = sampler.output;
+
+    // Find the keyframe interval containing `time` (input and output have the same count)
     var tstart: f32 = 0.0;
     var tend: f32 = 0.0;
-    var keyframe: c_int = 0; // Defaults to first pose
+    var keyframe: usize = 0; // Defaults to the first pose
     var found = false;
 
-    const keyCount: c_int = @intCast(input.*.count);
-    var i: c_int = 0;
-    while (i < keyCount - 1) : (i += 1) {
-        const r1 = cgltf_accessor_read_float(input, @intCast(i), &tstart, 1);
-        if (r1 == 0) return false;
-
-        const r2 = cgltf_accessor_read_float(input, @intCast(i + 1), &tend, 1);
-        if (r2 == 0) return false;
+    const keyCount: c_int = @intCast(input.count);
+    var i: usize = 0;
+    while (@as(c_int, @intCast(i)) < keyCount - 1) : (i += 1) {
+        if (cgltf_accessor_read_float(input, i, (&tstart)[0..1], 1) == 0) return false;
+        if (cgltf_accessor_read_float(input, i + 1, (&tend)[0..1], 1) == 0) return false;
 
         if ((tstart <= time) and (time < tend)) {
             keyframe = i;
@@ -5425,302 +5463,250 @@ fn GetPoseAtTimeGLTF(interpolationType_in: cgltf_interpolation_type, input: [*c]
         }
     }
 
-    // No interval contains a time at (or past) the last keyframe, because the search
-    // above requires time < tend: clamp to the edge interval instead of falling back
-    // to keyframe 0, which would return a pose from the start
+    // No interval contains a time at (or past) the last keyframe, because the
+    // search requires time < tend: clamp to the edge interval instead of falling
+    // back to keyframe 0, which would return a pose from the start
     if (!found and (keyCount >= 2)) {
-        keyframe = keyCount - 2;
+        keyframe = @intCast(keyCount - 2);
 
         var tfirst: f32 = 0.0;
-        if (cgltf_accessor_read_float(input, 0, &tfirst, 1) == 0) return false;
+        if (cgltf_accessor_read_float(input, 0, (&tfirst)[0..1], 1) == 0) return false;
         if (time < tfirst) keyframe = 0;
 
-        if (cgltf_accessor_read_float(input, @intCast(keyframe), &tstart, 1) == 0) return false;
-        if (cgltf_accessor_read_float(input, @intCast(keyframe + 1), &tend, 1) == 0) return false;
+        if (cgltf_accessor_read_float(input, keyframe, (&tstart)[0..1], 1) == 0) return false;
+        if (cgltf_accessor_read_float(input, keyframe + 1, (&tend)[0..1], 1) == 0) return false;
     }
 
-    if (FloatEquals(tend, tstart) != 0) {
-        interpolationType = cgltf_interpolation_type_step;
-    }
+    // Constant animation, no need to interpolate
+    if (FloatEquals(tend, tstart) != 0) interpolation = cgltf_interpolation_type_step;
 
-    const duration = fmaxf((tend - tstart), EPSILON);
+    // C's fmaxf is LLVM maxnum, as @max is
+    const duration = @max(tend - tstart, EPSILON);
     var t = (time - tstart) / duration;
     t = if (t < 0.0) 0.0 else t;
     t = if (t > 1.0) 1.0 else t;
 
-    if (output.*.component_type != cgltf_component_type_r_32f) return false;
+    if (output.component_type != cgltf_component_type_r_32f) return false;
 
-    if (output.*.type == cgltf_type_vec3) {
-        const r: *Vector3 = @ptrCast(@alignCast(data));
-        switch (interpolationType) {
-            cgltf_interpolation_type_step => {
-                var tmp = std.mem.zeroes([3]f32);
-                _ = cgltf_accessor_read_float(output, @intCast(keyframe), &tmp, 3);
-                r.* = .{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
+    if (output.type == cgltf_type_vec3) {
+        const read = struct {
+            fn at(accessor: *const cgltf_accessor, index: usize) Vector3 {
+                var tmp = [3]f32{ 0, 0, 0 };
+                _ = cgltf_accessor_read_float(accessor, index, &tmp, 3);
+                return .{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
+            }
+        }.at;
+        const result: ?Vector3 = switch (interpolation) {
+            cgltf_interpolation_type_step => read(output, keyframe),
+            cgltf_interpolation_type_linear => Vector3Lerp(read(output, keyframe), read(output, keyframe + 1), t),
+            cgltf_interpolation_type_cubic_spline => blk: {
+                // Cubic spline outputs are (in-tangent, value, out-tangent) triples
+                const v1 = read(output, 3 * keyframe + 1);
+                const tangent1 = read(output, 3 * keyframe + 2);
+                const v2 = read(output, 3 * (keyframe + 1) + 1);
+                const tangent2 = read(output, 3 * (keyframe + 1));
+                break :blk Vector3CubicHermite(v1, tangent1, v2, tangent2, t);
             },
-            cgltf_interpolation_type_linear => {
-                var tmp = std.mem.zeroes([3]f32);
-                _ = cgltf_accessor_read_float(output, @intCast(keyframe), &tmp, 3);
-                const v1 = Vector3{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
-                _ = cgltf_accessor_read_float(output, @intCast(keyframe + 1), &tmp, 3);
-                const v2 = Vector3{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
-                r.* = Vector3Lerp(v1, v2, t);
-            },
-            cgltf_interpolation_type_cubic_spline => {
-                var tmp = std.mem.zeroes([3]f32);
-                _ = cgltf_accessor_read_float(output, @intCast(3 * keyframe + 1), &tmp, 3);
-                const v1 = Vector3{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
-                _ = cgltf_accessor_read_float(output, @intCast(3 * keyframe + 2), &tmp, 3);
-                const tangent1 = Vector3{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
-                _ = cgltf_accessor_read_float(output, @intCast(3 * (keyframe + 1) + 1), &tmp, 3);
-                const v2 = Vector3{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
-                _ = cgltf_accessor_read_float(output, @intCast(3 * (keyframe + 1)), &tmp, 3);
-                const tangent2 = Vector3{ .x = tmp[0], .y = tmp[1], .z = tmp[2] };
-                r.* = Vector3CubicHermite(v1, tangent1, v2, tangent2, t);
-            },
-            else => {},
-        }
-    } else if (output.*.type == cgltf_type_vec4) {
-        const r: *Vector4 = @ptrCast(@alignCast(data));
-        switch (interpolationType) {
-            cgltf_interpolation_type_step => {
-                var tmp = std.mem.zeroes([4]f32);
-                _ = cgltf_accessor_read_float(output, @intCast(keyframe), &tmp, 4);
-                r.* = .{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = tmp[3] };
-            },
-            cgltf_interpolation_type_linear => {
-                var tmp = std.mem.zeroes([4]f32);
-                _ = cgltf_accessor_read_float(output, @intCast(keyframe), &tmp, 4);
-                const v1 = Vector4{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = tmp[3] };
-                _ = cgltf_accessor_read_float(output, @intCast(keyframe + 1), &tmp, 4);
-                const v2 = Vector4{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = tmp[3] };
-                r.* = QuaternionSlerp(v1, v2, t);
-            },
-            cgltf_interpolation_type_cubic_spline => {
-                var tmp = std.mem.zeroes([4]f32);
-                _ = cgltf_accessor_read_float(output, @intCast(3 * keyframe + 1), &tmp, 4);
-                var v1 = Vector4{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = tmp[3] };
-                _ = cgltf_accessor_read_float(output, @intCast(3 * keyframe + 2), &tmp, 4);
-                var outTangent1 = Vector4{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = 0.0 };
-                _ = cgltf_accessor_read_float(output, @intCast(3 * (keyframe + 1) + 1), &tmp, 4);
-                var v2 = Vector4{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = tmp[3] };
-                _ = cgltf_accessor_read_float(output, @intCast(3 * (keyframe + 1)), &tmp, 4);
-                var inTangent2 = Vector4{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = 0.0 };
+            else => null,
+        };
+        if (result) |r| out[0..3].* = .{ r.x, r.y, r.z };
+    } else if (output.type == cgltf_type_vec4) {
+        // Only rotations are vec4: quaternions
+        const read = struct {
+            fn at(accessor: *const cgltf_accessor, index: usize) Vector4 {
+                var tmp = [4]f32{ 0, 0, 0, 0 };
+                _ = cgltf_accessor_read_float(accessor, index, &tmp, 4);
+                return .{ .x = tmp[0], .y = tmp[1], .z = tmp[2], .w = tmp[3] };
+            }
+        }.at;
+        const result: ?Vector4 = switch (interpolation) {
+            cgltf_interpolation_type_step => read(output, keyframe),
+            cgltf_interpolation_type_linear => QuaternionSlerp(read(output, keyframe), read(output, keyframe + 1), t),
+            cgltf_interpolation_type_cubic_spline => blk: {
+                var v1 = read(output, 3 * keyframe + 1);
+                var outTangent1 = read(output, 3 * keyframe + 2);
+                outTangent1.w = 0.0;
+                var v2 = read(output, 3 * (keyframe + 1) + 1);
+                var inTangent2 = read(output, 3 * (keyframe + 1));
+                inTangent2.w = 0.0;
 
                 v1 = QuaternionNormalize(v1);
                 v2 = QuaternionNormalize(v2);
-
-                if (Vector4DotProduct(v1, v2) < 0.0) {
-                    v2 = Vector4Negate(v2);
-                }
+                if (Vector4DotProduct(v1, v2) < 0.0) v2 = Vector4Negate(v2);
 
                 outTangent1 = Vector4Scale(outTangent1, duration);
                 inTangent2 = Vector4Scale(inTangent2, duration);
 
-                r.* = QuaternionCubicHermiteSpline(v1, outTangent1, v2, inTangent2, t);
+                break :blk QuaternionCubicHermiteSpline(v1, outTangent1, v2, inTangent2, t);
             },
-            else => {},
-        }
+            else => null,
+        };
+        if (result) |r| out[0..4].* = .{ r.x, r.y, r.z, r.w };
     }
 
     return true;
 }
 
-const GLTF_FRAMERATE: f32 = 60.0;
+/// The floats of a vector or quaternion, for getPoseAtTimeGltf to write into
+fn floatsOf(value: anytype) []f32 {
+    return std.mem.bytesAsSlice(f32, std.mem.asBytes(value));
+}
 
-const ChannelsGLTF = extern struct {
-    translate: [*c]cgltf_animation_channel,
-    rotate: [*c]cgltf_animation_channel,
-    scale: [*c]cgltf_animation_channel,
+const GLTF_FRAMERATE: f32 = 60.0; // glTF animation framerate (frames per second)
+
+/// The animation channels driving one bone
+const BoneChannels = struct {
+    translate: ?*cgltf_animation_channel = null,
+    rotate: ?*cgltf_animation_channel = null,
+    scale: ?*cgltf_animation_channel = null,
 };
 
-fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
+// Load glTF animation data
+fn loadModelAnimationsGltf(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
     var dataSize: c_int = 0;
     const fileData = LoadFileData(fileName, &dataSize);
 
-    var animations: [*c]ModelAnimation = null;
-
-    var options = std.mem.zeroes(cgltf_options);
-    options.file.read = LoadFileGLTFCallback;
-    options.file.release = ReleaseFileGLTFCallback;
-    var data: [*c]cgltf_data = null;
-    var result = cgltf_parse(&options, fileData, @intCast(dataSize), &data);
-
-    if (result != cgltf_result_success) {
+    const options = gltfOptions();
+    var parsed: ?*cgltf_data = null;
+    if (cgltf_parse(&options, fileData, @intCast(dataSize), &parsed) != cgltf_result_success) {
+        // NOTE: Deliberately as raylib: the file data is not released here
         TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load glTF data", fileName);
         animCount.* = 0;
         return null;
     }
+    const data = parsed.?;
+    defer UnloadFileData(fileData);
 
-    result = cgltf_load_buffers(&options, data, fileName);
-    if (result != cgltf_result_success) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load animation buffers", fileName);
+    if (cgltf_load_buffers(&options, data, fileName) != cgltf_result_success) {
+        // NOTE: Deliberately as raylib: animCount is left untouched, cgltf data not freed
+        TraceLog(LOG_INFO, "MODEL: [%s] Failed to load animation buffers", fileName);
+        return null;
+    }
+    defer cgltf_free(data);
 
-    if (result == cgltf_result_success) {
-        if (data.*.skins_count > 0) {
-            const skin = data.*.skins[0];
-
-            const jointCount: c_int = @intCast(skin.joints_count);
-            const extOffset: [*c]Matrix = @ptrCast(@alignCast(RL_MALLOC(@as(usize, @intCast(jointCount)) * @sizeOf(Matrix))));
-
-            if (extOffset == null) {
-                TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate joint offset buffer", fileName);
-                cgltf_free(data);
-                UnloadFileData(fileData);
-                animCount.* = 0;
-                return null;
+    // NOTE: Without a skin animCount is left untouched, as in raylib
+    var animations: [*c]ModelAnimation = null;
+    const skins = cgltfItems(cgltf_skin, data.skins, data.skins_count);
+    if (skins.len > 0) {
+        if (gltfAnimations(fileName, data, skins[0], animCount)) |loaded| {
+            animations = loaded.ptr;
+        } else |err| {
+            switch (err) {
+                error.JointOffsetBuffer => TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate joint offset buffer", fileName),
+                error.OutOfMemory => TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for glTF animations", fileName),
             }
-
-            animCount.* = @intCast(data.*.animations_count);
-            animations = @ptrCast(@alignCast(RL_CALLOC(data.*.animations_count, @sizeOf(ModelAnimation))));
-
-            var k: c_int = 0;
-            while (k < jointCount) : (k += 1) {
-                extOffset[@intCast(k)] = MatrixIdentity();
-                var n = skin.joints[@intCast(k)].*.parent;
-
-                while (n != null) {
-                    var isJoint = false;
-                    var jj: c_int = 0;
-                    while (jj < jointCount) : (jj += 1) {
-                        if (skin.joints[@intCast(jj)] == n) {
-                            isJoint = true;
-                            break;
-                        }
-                    }
-
-                    if (isJoint) break;
-
-                    const nsc = n.*.scale;
-                    const nro = n.*.rotation;
-                    const ntr = n.*.translation;
-                    const nodeScale = MatrixScale(nsc[0], nsc[1], nsc[2]);
-                    const nodeRotation = QuaternionToMatrix(.{ .x = nro[0], .y = nro[1], .z = nro[2], .w = nro[3] });
-                    const nodeTranslation = MatrixTranslate(ntr[0], ntr[1], ntr[2]);
-                    const nodeTransform = MatrixMultiply(MatrixMultiply(nodeScale, nodeRotation), nodeTranslation);
-
-                    extOffset[@intCast(k)] = MatrixMultiply(extOffset[@intCast(k)], nodeTransform);
-                    n = n.*.parent;
-                }
-            }
-
-            var a: c_uint = 0;
-            while (a < data.*.animations_count) : (a += 1) {
-                const bones = LoadBoneInfoGLTF(skin, &animations[a].boneCount);
-
-                const animData = data.*.animations[a];
-
-                const boneChannels: [*c]ChannelsGLTF = @ptrCast(@alignCast(RL_CALLOC(@intCast(animations[a].boneCount), @sizeOf(ChannelsGLTF))));
-                var animDuration: f32 = 0.0;
-
-                var j: c_uint = 0;
-                while (j < animData.channels_count) : (j += 1) {
-                    const channel = animData.channels[j];
-                    var boneIndex: c_int = -1;
-
-                    var kk: c_uint = 0;
-                    while (kk < skin.joints_count) : (kk += 1) {
-                        if (animData.channels[j].target_node == skin.joints[kk]) {
-                            boneIndex = @intCast(kk);
-                            break;
-                        }
-                    }
-
-                    if (boneIndex == -1) continue;
-
-                    const ubi: usize = @intCast(boneIndex);
-
-                    if (animData.channels[j].sampler.*.interpolation != cgltf_interpolation_type_max_enum) {
-                        if (channel.target_path == cgltf_animation_path_type_translation) {
-                            boneChannels[ubi].translate = &animData.channels[j];
-                        } else if (channel.target_path == cgltf_animation_path_type_rotation) {
-                            boneChannels[ubi].rotate = &animData.channels[j];
-                        } else if (channel.target_path == cgltf_animation_path_type_scale) {
-                            boneChannels[ubi].scale = &animData.channels[j];
-                        } else {
-                            TraceLog(LOG_WARNING, "MODEL: [%s] Unsupported target_path on channel %d's sampler for animation %d. Skipping.", fileName, j, a);
-                        }
-                    } else TraceLog(LOG_WARNING, "MODEL: [%s] Invalid interpolation curve encountered for GLTF animation.", fileName);
-
-                    var time: f32 = 0.0;
-                    const r = cgltf_accessor_read_float(channel.sampler.*.input, channel.sampler.*.input.*.count - 1, &time, 1);
-
-                    if (r == 0) {
-                        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load input time", fileName);
-                        continue;
-                    }
-
-                    animDuration = if (time > animDuration) time else animDuration;
-                }
-
-                if (animData.name != null) _ = strncpy(&animations[a].name, animData.name, animations[a].name.len - 1);
-
-                animations[a].keyframeCount = @as(c_int, @intFromFloat(animDuration * GLTF_FRAMERATE)) + 1;
-                animations[a].keyframePoses = @ptrCast(@alignCast(RL_CALLOC(@intCast(animations[a].keyframeCount), @sizeOf(ModelAnimPose))));
-
-                var jf: c_int = 0;
-                while (jf < animations[a].keyframeCount) : (jf += 1) {
-                    const ujf: usize = @intCast(jf);
-                    animations[a].keyframePoses[ujf] = @ptrCast(@alignCast(RL_CALLOC(@intCast(animations[a].boneCount), @sizeOf(Transform))));
-                    const time = @as(f32, @floatFromInt(jf)) / GLTF_FRAMERATE;
-
-                    var kb: c_int = 0;
-                    while (kb < animations[a].boneCount) : (kb += 1) {
-                        const ukb: usize = @intCast(kb);
-                        const jtr = skin.joints[ukb].*.translation;
-                        const jro = skin.joints[ukb].*.rotation;
-                        const jsc = skin.joints[ukb].*.scale;
-                        var translation = Vector3{ .x = jtr[0], .y = jtr[1], .z = jtr[2] };
-                        var rotation = Quaternion{ .x = jro[0], .y = jro[1], .z = jro[2], .w = jro[3] };
-                        var scale = Vector3{ .x = jsc[0], .y = jsc[1], .z = jsc[2] };
-
-                        if (boneChannels[ukb].translate != null) {
-                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].translate.*.sampler.*.interpolation, boneChannels[ukb].translate.*.sampler.*.input, boneChannels[ukb].translate.*.sampler.*.output, time, &translation)) {
-                                TraceLog(LOG_INFO, "MODEL: [%s] Failed to load translate pose data for bone %s", fileName, &bones[ukb].name);
-                            }
-                        }
-
-                        if (boneChannels[ukb].rotate != null) {
-                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].rotate.*.sampler.*.interpolation, boneChannels[ukb].rotate.*.sampler.*.input, boneChannels[ukb].rotate.*.sampler.*.output, time, &rotation)) {
-                                TraceLog(LOG_INFO, "MODEL: [%s] Failed to load rotate pose data for bone %s", fileName, &bones[ukb].name);
-                            }
-                        }
-
-                        if (boneChannels[ukb].scale != null) {
-                            if (!GetPoseAtTimeGLTF(boneChannels[ukb].scale.*.sampler.*.interpolation, boneChannels[ukb].scale.*.sampler.*.input, boneChannels[ukb].scale.*.sampler.*.output, time, &scale)) {
-                                TraceLog(LOG_INFO, "MODEL: [%s] Failed to load scale pose data for bone %s", fileName, &bones[ukb].name);
-                            }
-                        }
-
-                        const S = MatrixScale(scale.x, scale.y, scale.z);
-                        const R = QuaternionToMatrix(rotation);
-                        const T = MatrixTranslate(translation.x, translation.y, translation.z);
-                        const jointLocal = MatrixMultiply(MatrixMultiply(S, R), T);
-                        const combined = MatrixMultiply(jointLocal, extOffset[ukb]);
-
-                        var tr: Transform = undefined;
-                        MatrixDecompose(combined, &tr.translation, &tr.rotation, &tr.scale);
-                        animations[a].keyframePoses[ujf][ukb] = tr;
-                    }
-
-                    buildPoseFromParentJoints(bones[0..animations[a].boneCount], animations[a].keyframePoses[ujf][0..animations[a].boneCount]);
-                }
-
-                TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Duration: %fs", fileName, if (animData.name != null) @as([*c]const u8, animData.name) else @as([*c]const u8, "NULL"), animations[a].keyframeCount, animDuration);
-                RL_FREE(boneChannels);
-                RL_FREE(bones);
-            }
-
-            RL_FREE(extOffset);
+            animCount.* = 0;
         }
-
-        if (data.*.skins_count > 1) {
-            TraceLog(LOG_WARNING, "MODEL: [%s] Expected one unique skin to load animation data from, but found %i", fileName, data.*.skins_count);
-        }
-
-        cgltf_free(data);
     }
 
-    UnloadFileData(fileData);
+    if (skins.len > 1) TraceLog(LOG_WARNING, "MODEL: [%s] Expected one unique skin to load animation data from, but found %i", fileName, skins.len);
+
+    return animations;
+}
+
+fn gltfAnimations(fileName: [*c]const u8, data: *cgltf_data, skin: cgltf_skin, animCount: [*c]c_int) error{ JointOffsetBuffer, OutOfMemory }![]ModelAnimation {
+    const gpa = std.heap.c_allocator;
+    const joints = cgltfItems(*cgltf_node, skin.joints, skin.joints_count);
+
+    // Per joint, the static transform of any intermediate non-joint nodes
+    // between the joint and its nearest joint ancestor: some exporters store
+    // bone offsets on dummy parent nodes. Depends only on the skin.
+    const extOffset = gpa.alloc(Matrix, joints.len) catch return error.JointOffsetBuffer;
+    defer gpa.free(extOffset);
+    for (extOffset, joints) |*offset, joint| {
+        offset.* = MatrixIdentity();
+        var ancestor = joint.parent;
+        while (ancestor) |node| : (ancestor = node.parent) {
+            if (std.mem.indexOfScalar(*cgltf_node, joints, node) != null) break;
+
+            // The intermediate node's local TRS: scale, then rotation, then translation
+            const nodeTransform = transformMatrix(.{
+                .translation = .{ .x = node.translation[0], .y = node.translation[1], .z = node.translation[2] },
+                .rotation = .{ .x = node.rotation[0], .y = node.rotation[1], .z = node.rotation[2], .w = node.rotation[3] },
+                .scale = .{ .x = node.scale[0], .y = node.scale[1], .z = node.scale[2] },
+            });
+            offset.* = MatrixMultiply(offset.*, nodeTransform);
+        }
+    }
+
+    const gltfAnims = cgltfItems(cgltf_animation, data.animations, data.animations_count);
+    animCount.* = @intCast(gltfAnims.len);
+    const animations = try cmem.alloc(ModelAnimation, gltfAnims.len);
+    errdefer UnloadModelAnimations(animations.ptr, @intCast(animations.len));
+
+    for (animations, gltfAnims, 0..) |*animation, *animData, a| {
+        const bones = try loadBoneInfoGltf(skin);
+        defer cmem.free(bones.ptr);
+        animation.boneCount = @intCast(bones.len);
+
+        const boneChannels = try gpa.alloc(BoneChannels, bones.len);
+        defer gpa.free(boneChannels);
+        @memset(boneChannels, .{});
+
+        var animDuration: f32 = 0.0;
+        for (cgltfItems(cgltf_animation_channel, animData.channels, animData.channels_count), 0..) |*channel, j| {
+            // Skip channels for nodes not in the skeleton
+            const boneIndex = std.mem.indexOfScalar(*cgltf_node, joints, channel.target_node orelse continue) orelse continue;
+
+            if (channel.sampler.interpolation != cgltf_interpolation_type_max_enum) {
+                switch (channel.target_path) {
+                    cgltf_animation_path_type_translation => boneChannels[boneIndex].translate = channel,
+                    cgltf_animation_path_type_rotation => boneChannels[boneIndex].rotate = channel,
+                    cgltf_animation_path_type_scale => boneChannels[boneIndex].scale = channel,
+                    else => TraceLog(LOG_WARNING, "MODEL: [%s] Unsupported target_path on channel %d's sampler for animation %d. Skipping.", fileName, @as(c_uint, @intCast(j)), @as(c_uint, @intCast(a))),
+                }
+            } else TraceLog(LOG_WARNING, "MODEL: [%s] Invalid interpolation curve encountered for GLTF animation.", fileName);
+
+            // The animation lasts until its latest keyframe
+            var time: f32 = 0.0;
+            const input = channel.sampler.input;
+            if (cgltf_accessor_read_float(input, input.count -% 1, (&time)[0..1], 1) == 0) {
+                TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load input time", fileName);
+                continue;
+            }
+            animDuration = if (time > animDuration) time else animDuration;
+        }
+
+        if (animData.name) |name| _ = copyCString(&animation.name, name);
+
+        const keyframeCount = cInt(animDuration * GLTF_FRAMERATE) + 1;
+        const keyframePoses = try cmem.alloc(ModelAnimPose, count(keyframeCount));
+        animation.keyframePoses = keyframePoses.ptr;
+        animation.keyframeCount = keyframeCount;
+
+        for (keyframePoses, 0..) |*keyframePose, frame| {
+            const poses = try cmem.alloc(Transform, bones.len);
+            keyframePose.* = poses.ptr;
+            const time = @as(f32, @floatFromInt(frame)) / GLTF_FRAMERATE;
+
+            for (poses, joints[0..bones.len], boneChannels, bones, extOffset[0..bones.len]) |*pose, joint, channels, bone, offset| {
+                var translation = Vector3{ .x = joint.translation[0], .y = joint.translation[1], .z = joint.translation[2] };
+                var rotation = Quaternion{ .x = joint.rotation[0], .y = joint.rotation[1], .z = joint.rotation[2], .w = joint.rotation[3] };
+                var scale = Vector3{ .x = joint.scale[0], .y = joint.scale[1], .z = joint.scale[2] };
+
+                if (channels.translate) |channel| {
+                    if (!getPoseAtTimeGltf(channel.sampler, time, floatsOf(&translation))) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load translate pose data for bone %s", fileName, &bone.name);
+                }
+                if (channels.rotate) |channel| {
+                    if (!getPoseAtTimeGltf(channel.sampler, time, floatsOf(&rotation))) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load rotate pose data for bone %s", fileName, &bone.name);
+                }
+                if (channels.scale) |channel| {
+                    if (!getPoseAtTimeGltf(channel.sampler, time, floatsOf(&scale))) TraceLog(LOG_INFO, "MODEL: [%s] Failed to load scale pose data for bone %s", fileName, &bone.name);
+                }
+
+                // The joint's local TRS, then the static intermediate offsets, so the
+                // pose is relative to the joint's skeleton parent
+                const jointLocal = transformMatrix(.{ .translation = translation, .rotation = rotation, .scale = scale });
+                const combined = MatrixMultiply(jointLocal, offset);
+                MatrixDecompose(combined, &pose.translation, &pose.rotation, &pose.scale);
+            }
+
+            buildPoseFromParentJoints(bones, poses);
+        }
+
+        const name: [*:0]const u8 = animData.name orelse "NULL";
+        TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Duration: %fs", fileName, name, animation.keyframeCount, @as(f64, animDuration));
+    }
 
     return animations;
 }
@@ -5730,89 +5716,77 @@ fn LoadModelAnimationsGLTF(fileName: [*c]const u8, animCount: [*c]c_int) [*c]Mod
 //----------------------------------------------------------------------------------
 
 // Load VOX (MagicaVoxel) mesh data
-fn LoadVOX(fileName: [*c]const u8) Model {
-    var model = std.mem.zeroes(Model);
-
-    var nbvertices: c_int = 0;
-    var meshescount: c_int = 0;
-
+fn loadVox(fileName: [*c]const u8) Model {
     var dataSize: c_int = 0;
     const fileData = LoadFileData(fileName, &dataSize);
-
     if (fileData == null) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load VOX file", fileName);
-        return model;
+        return empty_model;
     }
+    defer UnloadFileData(fileData);
 
     var voxarray = std.mem.zeroes(VoxArray3D);
-    const ret = Vox_LoadFromMemory(fileData, @intCast(dataSize), &voxarray);
-
-    if (ret != VOX_SUCCESS) {
-        UnloadFileData(fileData);
+    if (Vox_LoadFromMemory(fileData, @intCast(dataSize), &voxarray) != VOX_SUCCESS) {
         TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load VOX data", fileName);
-        return model;
-    } else {
-        nbvertices = voxarray.vertices.used;
-        meshescount = 1 + @divTrunc(nbvertices, 65536);
-        TraceLog(LOG_INFO, "MODEL: [%s] VOX data loaded successfully : %i vertices/%i meshes", fileName, nbvertices, meshescount);
+        return empty_model;
     }
+    defer Vox_FreeArrays(&voxarray);
 
+    // NOTE: Deliberately as raylib: one mesh per 65536 vertices, although
+    // each mesh holds at most 65532 (see voxModel)
+    const vertexCount = voxarray.vertices.used;
+    const meshCount = 1 + @divTrunc(vertexCount, 65536);
+    TraceLog(LOG_INFO, "MODEL: [%s] VOX data loaded successfully : %i vertices/%i meshes", fileName, vertexCount, meshCount);
+
+    return voxModel(voxarray, count(meshCount)) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for VOX data", fileName);
+        return empty_model;
+    };
+}
+
+fn voxModel(voxarray: VoxArray3D, meshCount: usize) error{OutOfMemory}!Model {
+    var model = empty_model;
+    errdefer freeModelData(model);
     model.transform = MatrixIdentity();
 
-    model.meshCount = meshescount;
-    model.meshes = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
-
-    model.meshMaterial = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
+    model.meshCount = @intCast(meshCount);
+    model.meshes = (try cmem.alloc(Mesh, meshCount)).ptr;
+    model.meshMaterial = (try cmem.alloc(c_int, meshCount)).ptr; // All use the first material
 
     model.materialCount = 1;
-    model.materials = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.materialCount), @sizeOf(Material))));
+    model.materials = (try cmem.alloc(Material, 1)).ptr;
     model.materials[0] = LoadMaterialDefault();
 
-    var verticesRemain: c_int = voxarray.vertices.used;
-    const verticesMax: c_int = 65532;
+    // 5461 voxels x 12 vertices per voxel -> 65532 (must be less than 65536)
+    const verticesMax = 65532;
+    const vertices = voxarray.vertices.array.?[0..count(voxarray.vertices.used)];
+    const normals = voxarray.normals.array.?;
+    const colors = voxarray.colors.array.?;
+    // NOTE: Deliberately as raylib: every mesh gets all the indices (at most 5461*6*6)
+    const indices = voxarray.indices.array.?[0..count(voxarray.indices.used)];
 
-    var pvertices: [*c]VoxVector3 = voxarray.vertices.array;
-    var pnormals: [*c]VoxVector3 = voxarray.normals.array;
-    var pcolors: [*c]VoxColor = voxarray.colors.array;
+    for (modelMeshes(model), 0..) |*mesh, i| {
+        const first = i * verticesMax;
+        const vertexCount: usize = @min(verticesMax, vertices.len - first);
+        mesh.vertexCount = @intCast(vertexCount);
+        mesh.triangleCount = @intCast(vertexCount / 4 * 2);
 
-    const pindices: [*c]c_ushort = voxarray.indices.array;
+        const meshVertices = try cmem.alloc(f32, vertexCount * 3);
+        mesh.vertices = meshVertices.ptr;
+        @memcpy(std.mem.sliceAsBytes(meshVertices), std.mem.sliceAsBytes(vertices[first..][0..vertexCount]));
 
-    var size: c_int = 0;
+        const meshNormals = try cmem.alloc(f32, vertexCount * 3);
+        mesh.normals = meshNormals.ptr;
+        @memcpy(std.mem.sliceAsBytes(meshNormals), std.mem.sliceAsBytes(normals[first..][0..vertexCount]));
 
-    var i: c_int = 0;
-    while (i < meshescount) : (i += 1) {
-        const pmesh = &model.meshes[@intCast(i)];
-        _ = memset(pmesh, 0, @sizeOf(Mesh));
+        const meshIndices = try cmem.alloc(c_ushort, indices.len);
+        mesh.indices = meshIndices.ptr;
+        @memcpy(meshIndices, indices);
 
-        pmesh.vertexCount = @intFromFloat(fmin(@floatFromInt(verticesMax), @floatFromInt(verticesRemain)));
-
-        size = pmesh.vertexCount * @sizeOf(f32) * 3;
-        pmesh.vertices = @ptrCast(@alignCast(RL_MALLOC(@intCast(size))));
-        _ = memcpy(pmesh.vertices, pvertices, @intCast(size));
-
-        pmesh.normals = @ptrCast(@alignCast(RL_MALLOC(@intCast(size))));
-        _ = memcpy(pmesh.normals, pnormals, @intCast(size));
-
-        size = voxarray.indices.used * @sizeOf(c_ushort);
-        pmesh.indices = @ptrCast(@alignCast(RL_MALLOC(@intCast(size))));
-        _ = memcpy(pmesh.indices, pindices, @intCast(size));
-
-        pmesh.triangleCount = @divTrunc(pmesh.vertexCount, 4) * 2;
-
-        size = pmesh.vertexCount * @sizeOf(Color);
-        pmesh.colors = @ptrCast(@alignCast(RL_MALLOC(@intCast(size))));
-        _ = memcpy(pmesh.colors, pcolors, @intCast(size));
-
-        model.meshMaterial[@intCast(i)] = 0;
-
-        verticesRemain -= verticesMax;
-        pvertices += @intCast(verticesMax);
-        pnormals += @intCast(verticesMax);
-        pcolors += @intCast(verticesMax);
+        const meshColors = try cmem.alloc(u8, vertexCount * 4);
+        mesh.colors = meshColors.ptr;
+        @memcpy(meshColors, std.mem.sliceAsBytes(colors[first..][0..vertexCount]));
     }
-
-    Vox_FreeArrays(&voxarray);
-    UnloadFileData(fileData);
 
     return model;
 }
@@ -5822,428 +5796,393 @@ fn LoadVOX(fileName: [*c]const u8) Model {
 //----------------------------------------------------------------------------------
 
 // Hook LoadFileData()/UnloadFileData() calls to M3D loaders
-fn m3d_loaderhook(fn_: [*c]u8, len: [*c]c_uint) callconv(.c) [*c]u8 {
-    return LoadFileData(fn_, @ptrCast(len));
+fn m3dLoaderHook(fileName: [*:0]u8, len: *c_uint) callconv(.c) ?[*]u8 {
+    return LoadFileData(fileName, @ptrCast(len));
 }
-fn m3d_freehook(data: ?*anyopaque) callconv(.c) void {
+fn m3dFreeHook(data: ?*anyopaque) callconv(.c) void {
     UnloadFileData(@ptrCast(data));
 }
 
-const M3D_ANIMDELAY: u32 = 17;
+/// m3d's model data, with the file data it was loaded from
+const M3dFile = struct {
+    fileData: [*c]u8,
+    m3d: *m3d_t,
 
-// Load M3D mesh data
-fn LoadM3D(fileName: [*c]const u8) Model {
-    var model = std.mem.zeroes(Model);
+    fn deinit(file: M3dFile) void {
+        m3d_free(file.m3d);
+        UnloadFileData(file.fileData);
+    }
+};
 
-    var m3d: [*c]m3d_t = null;
-    var prop: [*c]m3dp_t = null;
-    var i: c_int = 0;
-    var j: c_int = 0;
-    var k: c_int = -1;
-    var l: c_int = 0;
-    var n: c_int = 0;
-    var mi: c_int = -2;
-    var vcolor: c_int = 0;
-
+/// Loads and parses an M3D file, logging why it can't be used
+fn openM3d(fileName: [*c]const u8) ?M3dFile {
     var dataSize: c_int = 0;
     const fileData = LoadFileData(fileName, &dataSize);
+    if (fileData == null) return null;
 
-    if (fileData != null) {
-        m3d = m3d_load(fileData, m3d_loaderhook, m3d_freehook, null);
-
-        if ((m3d == null) or M3D_ERR_ISFATAL(m3d.*.errcode)) {
-            TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, if (m3d != null) @as(c_int, m3d.*.errcode) else -2);
-            if (m3d != null) m3d_free(m3d);
-            UnloadFileData(fileData);
-            return model;
-        } else TraceLog(LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i faces/%i materials", fileName, m3d.*.numface, m3d.*.nummaterial);
-
-        if (m3d.*.numface == 0) {
-            m3d_free(m3d);
-            UnloadFileData(fileData);
-            return model;
-        }
-
-        if (m3d.*.nummaterial > 0) {
-            model.meshCount = @intCast(m3d.*.nummaterial);
-            model.materialCount = @intCast(m3d.*.nummaterial);
-            TraceLog(LOG_INFO, "MODEL: model has %i material meshes", model.materialCount);
-        } else {
-            model.meshCount = 1;
-            model.materialCount = 0;
-            TraceLog(LOG_INFO, "MODEL: No materials, putting all meshes in a default material");
-        }
-
-        model.materialCount += 1;
-
-        model.meshes = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
-        model.meshMaterial = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
-        model.materials = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.materialCount + 1), @sizeOf(Material))));
-
-        model.materials[0] = LoadMaterialDefault();
-
-        i = 0;
-        l = 0;
-        k = -1;
-        while (i < @as(c_int, @intCast(m3d.*.numface))) : ({
-            i += 1;
-            l += 1;
-        }) {
-            if (mi != @as(c_int, @bitCast(m3d.*.face[@intCast(i)].materialid))) {
-                if (k + 1 >= model.meshCount) {
-                    model.meshCount += 1;
-
-                    const tempMeshes: [*c]Mesh = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(Mesh))));
-                    _ = memcpy(tempMeshes, model.meshes, @intCast((model.meshCount - 1) * @sizeOf(Mesh)));
-                    RL_FREE(model.meshes);
-                    model.meshes = tempMeshes;
-
-                    const tempMeshMaterial: [*c]c_int = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshCount), @sizeOf(c_int))));
-                    _ = memcpy(tempMeshMaterial, model.meshMaterial, @intCast((model.meshCount - 1) * @sizeOf(c_int)));
-                    RL_FREE(model.meshMaterial);
-                    model.meshMaterial = tempMeshMaterial;
-                }
-
-                k += 1;
-                mi = @bitCast(m3d.*.face[@intCast(i)].materialid);
-
-                j = i;
-                l = 0;
-                vcolor = 0;
-                while ((j < @as(c_int, @intCast(m3d.*.numface))) and (mi == @as(c_int, @bitCast(m3d.*.face[@intCast(j)].materialid)))) : ({
-                    j += 1;
-                    l += 1;
-                }) {
-                    if ((m3d.*.vertex[m3d.*.face[@intCast(j)].vertex[0]].color == 0) or
-                        (m3d.*.vertex[m3d.*.face[@intCast(j)].vertex[1]].color == 0) or
-                        (m3d.*.vertex[m3d.*.face[@intCast(j)].vertex[2]].color == 0)) vcolor = 1;
-                }
-
-                const uk: usize = @intCast(k);
-                model.meshes[uk].vertexCount = l * 3;
-                model.meshes[uk].triangleCount = l;
-                model.meshes[uk].vertices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 3), @sizeOf(f32))));
-                model.meshes[uk].texcoords = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 2), @sizeOf(f32))));
-                model.meshes[uk].normals = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 3), @sizeOf(f32))));
-
-                if ((mi == @as(c_int, @bitCast(M3D_UNDEF))) or (vcolor != 0)) model.meshes[uk].colors = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 4), @sizeOf(u8))));
-
-                if ((mi == @as(c_int, @bitCast(M3D_UNDEF))) and (model.meshes[uk].colors != null)) {
-                    var c: c_int = 0;
-                    while (c < model.meshes[uk].vertexCount * 4) : (c += 1) model.meshes[uk].colors[@intCast(c)] = 255;
-                }
-
-                if ((m3d.*.numbone != 0) and (m3d.*.numskin != 0)) {
-                    model.meshes[uk].boneIndices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 4), @sizeOf(u8))));
-                    model.meshes[uk].boneWeights = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.meshes[uk].vertexCount * 4), @sizeOf(f32))));
-                }
-
-                model.meshMaterial[uk] = mi + 1;
-                l = 0;
-            }
-
-            const uk: usize = @intCast(k);
-            const ul: usize = @intCast(l);
-            const ui: usize = @intCast(i);
-            const scale = m3d.*.scale;
-
-            model.meshes[uk].vertices[ul * 9 + 0] = m3d.*.vertex[m3d.*.face[ui].vertex[0]].x * scale;
-            model.meshes[uk].vertices[ul * 9 + 1] = m3d.*.vertex[m3d.*.face[ui].vertex[0]].y * scale;
-            model.meshes[uk].vertices[ul * 9 + 2] = m3d.*.vertex[m3d.*.face[ui].vertex[0]].z * scale;
-            model.meshes[uk].vertices[ul * 9 + 3] = m3d.*.vertex[m3d.*.face[ui].vertex[1]].x * scale;
-            model.meshes[uk].vertices[ul * 9 + 4] = m3d.*.vertex[m3d.*.face[ui].vertex[1]].y * scale;
-            model.meshes[uk].vertices[ul * 9 + 5] = m3d.*.vertex[m3d.*.face[ui].vertex[1]].z * scale;
-            model.meshes[uk].vertices[ul * 9 + 6] = m3d.*.vertex[m3d.*.face[ui].vertex[2]].x * scale;
-            model.meshes[uk].vertices[ul * 9 + 7] = m3d.*.vertex[m3d.*.face[ui].vertex[2]].y * scale;
-            model.meshes[uk].vertices[ul * 9 + 8] = m3d.*.vertex[m3d.*.face[ui].vertex[2]].z * scale;
-
-            if (model.meshes[uk].colors != null) {
-                if (m3d.*.vertex[m3d.*.face[ui].vertex[0]].color & 0xff000000 != 0)
-                    _ = memcpy(&model.meshes[uk].colors[ul * 12 + 0], &m3d.*.vertex[m3d.*.face[ui].vertex[0]].color, 4);
-                if (m3d.*.vertex[m3d.*.face[ui].vertex[1]].color & 0xff000000 != 0)
-                    _ = memcpy(&model.meshes[uk].colors[ul * 12 + 4], &m3d.*.vertex[m3d.*.face[ui].vertex[1]].color, 4);
-                if (m3d.*.vertex[m3d.*.face[ui].vertex[2]].color & 0xff000000 != 0)
-                    _ = memcpy(&model.meshes[uk].colors[ul * 12 + 8], &m3d.*.vertex[m3d.*.face[ui].vertex[2]].color, 4);
-            }
-
-            if (m3d.*.face[ui].texcoord[0] != M3D_UNDEF) {
-                model.meshes[uk].texcoords[ul * 6 + 0] = m3d.*.tmap[m3d.*.face[ui].texcoord[0]].u;
-                model.meshes[uk].texcoords[ul * 6 + 1] = 1.0 - m3d.*.tmap[m3d.*.face[ui].texcoord[0]].v;
-                model.meshes[uk].texcoords[ul * 6 + 2] = m3d.*.tmap[m3d.*.face[ui].texcoord[1]].u;
-                model.meshes[uk].texcoords[ul * 6 + 3] = 1.0 - m3d.*.tmap[m3d.*.face[ui].texcoord[1]].v;
-                model.meshes[uk].texcoords[ul * 6 + 4] = m3d.*.tmap[m3d.*.face[ui].texcoord[2]].u;
-                model.meshes[uk].texcoords[ul * 6 + 5] = 1.0 - m3d.*.tmap[m3d.*.face[ui].texcoord[2]].v;
-            }
-
-            if (m3d.*.face[ui].normal[0] != M3D_UNDEF) {
-                model.meshes[uk].normals[ul * 9 + 0] = m3d.*.vertex[m3d.*.face[ui].normal[0]].x;
-                model.meshes[uk].normals[ul * 9 + 1] = m3d.*.vertex[m3d.*.face[ui].normal[0]].y;
-                model.meshes[uk].normals[ul * 9 + 2] = m3d.*.vertex[m3d.*.face[ui].normal[0]].z;
-                model.meshes[uk].normals[ul * 9 + 3] = m3d.*.vertex[m3d.*.face[ui].normal[1]].x;
-                model.meshes[uk].normals[ul * 9 + 4] = m3d.*.vertex[m3d.*.face[ui].normal[1]].y;
-                model.meshes[uk].normals[ul * 9 + 5] = m3d.*.vertex[m3d.*.face[ui].normal[1]].z;
-                model.meshes[uk].normals[ul * 9 + 6] = m3d.*.vertex[m3d.*.face[ui].normal[2]].x;
-                model.meshes[uk].normals[ul * 9 + 7] = m3d.*.vertex[m3d.*.face[ui].normal[2]].y;
-                model.meshes[uk].normals[ul * 9 + 8] = m3d.*.vertex[m3d.*.face[ui].normal[2]].z;
-            }
-
-            if ((m3d.*.numbone != 0) and (m3d.*.numskin != 0)) {
-                n = 0;
-                while (n < 3) : (n += 1) {
-                    const skinid = m3d.*.vertex[m3d.*.face[ui].vertex[@intCast(n)]].skinid;
-
-                    if ((skinid != M3D_UNDEF) and (skinid < m3d.*.numskin)) {
-                        var jj: c_int = 0;
-                        while (jj < 4) : (jj += 1) {
-                            // C truncates: unused slots of the 4-bone skin hold
-                            // M3D_UNDEF (0xFFFFFFFF) -> 255 in the u8 bone array.
-                            model.meshes[uk].boneIndices[ul * 12 + @as(usize, @intCast(n)) * 4 + @as(usize, @intCast(jj))] = @truncate(m3d.*.skin[skinid].boneid[@intCast(jj)]);
-                            model.meshes[uk].boneWeights[ul * 12 + @as(usize, @intCast(n)) * 4 + @as(usize, @intCast(jj))] = m3d.*.skin[skinid].weight[@intCast(jj)];
-                        }
-                    } else {
-                        model.meshes[uk].boneIndices[ul * 12 + @as(usize, @intCast(n)) * 4] = @truncate(m3d.*.numbone);
-                        model.meshes[uk].boneWeights[ul * 12 + @as(usize, @intCast(n)) * 4] = 1.0;
-                    }
-                }
-            }
-        }
-
-        // Load materials
-        i = 0;
-        while (i < @as(c_int, @intCast(m3d.*.nummaterial))) : (i += 1) {
-            const ui: usize = @intCast(i);
-            model.materials[ui + 1] = LoadMaterialDefault();
-
-            j = 0;
-            while (j < m3d.*.material[ui].numprop) : (j += 1) {
-                prop = &m3d.*.material[ui].prop[@intCast(j)];
-
-                switch (prop.*.type) {
-                    m3dp_Kd => {
-                        _ = memcpy(&model.materials[ui + 1].maps[MATERIAL_MAP_DIFFUSE].color, &prop.*.value.color, 4);
-                        model.materials[ui + 1].maps[MATERIAL_MAP_DIFFUSE].value = 0.0;
-                    },
-                    m3dp_Ks => {
-                        _ = memcpy(&model.materials[ui + 1].maps[MATERIAL_MAP_SPECULAR].color, &prop.*.value.color, 4);
-                    },
-                    m3dp_Ns => {
-                        model.materials[ui + 1].maps[MATERIAL_MAP_SPECULAR].value = prop.*.value.fnum;
-                    },
-                    m3dp_Ke => {
-                        _ = memcpy(&model.materials[ui + 1].maps[MATERIAL_MAP_EMISSION].color, &prop.*.value.color, 4);
-                        model.materials[ui + 1].maps[MATERIAL_MAP_EMISSION].value = 0.0;
-                    },
-                    m3dp_Pm => {
-                        model.materials[ui + 1].maps[MATERIAL_MAP_METALNESS].value = prop.*.value.fnum;
-                    },
-                    m3dp_Pr => {
-                        model.materials[ui + 1].maps[MATERIAL_MAP_ROUGHNESS].value = prop.*.value.fnum;
-                    },
-                    m3dp_Ps => {
-                        model.materials[ui + 1].maps[MATERIAL_MAP_NORMAL].color = WHITE;
-                        model.materials[ui + 1].maps[MATERIAL_MAP_NORMAL].value = prop.*.value.fnum;
-                    },
-                    else => {
-                        if (prop.*.type >= 128) {
-                            var image = std.mem.zeroes(Image);
-                            const tex = &m3d.*.texture[prop.*.value.textureid];
-                            image.data = tex.d;
-                            image.width = tex.w;
-                            image.height = tex.h;
-                            image.mipmaps = 1;
-                            image.format = if (tex.f == 4) PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 else if (tex.f == 3) PIXELFORMAT_UNCOMPRESSED_R8G8B8 else if (tex.f == 2) PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA else PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
-
-                            switch (prop.*.type) {
-                                m3dp_map_Kd => model.materials[ui + 1].maps[MATERIAL_MAP_DIFFUSE].texture = LoadTextureFromImage(image),
-                                m3dp_map_Ks => model.materials[ui + 1].maps[MATERIAL_MAP_SPECULAR].texture = LoadTextureFromImage(image),
-                                m3dp_map_Ke => model.materials[ui + 1].maps[MATERIAL_MAP_EMISSION].texture = LoadTextureFromImage(image),
-                                m3dp_map_Km => model.materials[ui + 1].maps[MATERIAL_MAP_NORMAL].texture = LoadTextureFromImage(image),
-                                m3dp_map_Ka => model.materials[ui + 1].maps[MATERIAL_MAP_OCCLUSION].texture = LoadTextureFromImage(image),
-                                m3dp_map_Pm => model.materials[ui + 1].maps[MATERIAL_MAP_ROUGHNESS].texture = LoadTextureFromImage(image),
-                                else => {},
-                            }
-                        }
-                    },
-                }
-            }
-        }
-
-        // Load bones
-        if (m3d.*.numbone != 0) {
-            model.skeleton.boneCount = m3d.*.numbone +% 1;
-            model.skeleton.bones = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(BoneInfo))));
-            model.skeleton.bindPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
-
-            i = 0;
-            while (i < @as(c_int, @intCast(m3d.*.numbone))) : (i += 1) {
-                const ui: usize = @intCast(i);
-                model.skeleton.bones[ui].parent = @bitCast(m3d.*.bone[ui].parent);
-                _ = strncpy(&model.skeleton.bones[ui].name, m3d.*.bone[ui].name, model.skeleton.bones[ui].name.len - 1);
-                model.skeleton.bindPose[ui].translation.x = m3d.*.vertex[m3d.*.bone[ui].pos].x * m3d.*.scale;
-                model.skeleton.bindPose[ui].translation.y = m3d.*.vertex[m3d.*.bone[ui].pos].y * m3d.*.scale;
-                model.skeleton.bindPose[ui].translation.z = m3d.*.vertex[m3d.*.bone[ui].pos].z * m3d.*.scale;
-                model.skeleton.bindPose[ui].rotation.x = m3d.*.vertex[m3d.*.bone[ui].ori].x;
-                model.skeleton.bindPose[ui].rotation.y = m3d.*.vertex[m3d.*.bone[ui].ori].y;
-                model.skeleton.bindPose[ui].rotation.z = m3d.*.vertex[m3d.*.bone[ui].ori].z;
-                model.skeleton.bindPose[ui].rotation.w = m3d.*.vertex[m3d.*.bone[ui].ori].w;
-
-                model.skeleton.bindPose[ui].rotation = QuaternionNormalize(model.skeleton.bindPose[ui].rotation);
-                model.skeleton.bindPose[ui].scale.x = 1.0;
-                model.skeleton.bindPose[ui].scale.y = 1.0;
-                model.skeleton.bindPose[ui].scale.z = 1.0;
-
-                if (model.skeleton.bones[ui].parent >= 0) {
-                    const pp: usize = @intCast(model.skeleton.bones[ui].parent);
-                    model.skeleton.bindPose[ui].rotation = QuaternionMultiply(model.skeleton.bindPose[pp].rotation, model.skeleton.bindPose[ui].rotation);
-                    model.skeleton.bindPose[ui].translation = Vector3RotateByQuaternion(model.skeleton.bindPose[ui].translation, model.skeleton.bindPose[pp].rotation);
-                    model.skeleton.bindPose[ui].translation = Vector3Add(model.skeleton.bindPose[ui].translation, model.skeleton.bindPose[pp].translation);
-                    model.skeleton.bindPose[ui].scale = Vector3Multiply(model.skeleton.bindPose[ui].scale, model.skeleton.bindPose[pp].scale);
-                }
-            }
-
-            // Add a special "no bone" bone
-            const uin: usize = @intCast(i);
-            model.skeleton.bones[uin].parent = -1;
-            _ = memcpy(&model.skeleton.bones[uin].name, "NO BONE", 7);
-            model.skeleton.bindPose[uin].translation.x = 0.0;
-            model.skeleton.bindPose[uin].translation.y = 0.0;
-            model.skeleton.bindPose[uin].translation.z = 0.0;
-            model.skeleton.bindPose[uin].rotation.x = 0.0;
-            model.skeleton.bindPose[uin].rotation.y = 0.0;
-            model.skeleton.bindPose[uin].rotation.z = 0.0;
-            model.skeleton.bindPose[uin].rotation.w = 1.0;
-            model.skeleton.bindPose[uin].scale.x = 1.0;
-            model.skeleton.bindPose[uin].scale.y = 1.0;
-            model.skeleton.bindPose[uin].scale.z = 1.0;
-        }
-
-        if ((m3d.*.numbone != 0) and (m3d.*.numskin != 0)) {
-            i = 0;
-            while (i < model.meshCount) : (i += 1) {
-                const ui: usize = @intCast(i);
-                model.meshes[ui].boneCount = @bitCast(model.skeleton.boneCount);
-            }
-
-            model.currentPose = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Transform))));
-            model.boneMatrices = @ptrCast(@alignCast(RL_CALLOC(@intCast(model.skeleton.boneCount), @sizeOf(Matrix))));
-            j = 0;
-            while (j < model.skeleton.boneCount) : (j += 1) model.boneMatrices[@intCast(j)] = MatrixIdentity();
-        }
-
-        m3d_free(m3d);
+    const m3d = m3d_load(fileData, m3dLoaderHook, m3dFreeHook, null);
+    if ((m3d == null) or M3D_ERR_ISFATAL(m3d.?.errcode)) {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, if (m3d) |model| @as(c_int, model.errcode) else -2);
+        if (m3d) |model| m3d_free(model);
         UnloadFileData(fileData);
+        return null;
+    }
+    return .{ .fileData = fileData, .m3d = m3d.? };
+}
+
+// Load M3D mesh data
+fn loadM3d(fileName: [*c]const u8) Model {
+    const file = openM3d(fileName) orelse return empty_model;
+    defer file.deinit();
+    const m3d = file.m3d;
+
+    TraceLog(LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i faces/%i materials", fileName, m3d.numface, m3d.nummaterial);
+
+    // No faces: probably just a material library
+    if (m3d.numface == 0) return empty_model;
+
+    return m3dModel(m3d) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for M3D data", fileName);
+        return empty_model;
+    };
+}
+
+fn m3dModel(m3d: *const m3d_t) error{OutOfMemory}!Model {
+    var model = empty_model;
+    errdefer freeModelData(model);
+
+    // One mesh per material, or one in the default material
+    if (m3d.nummaterial > 0) {
+        model.meshCount = @intCast(m3d.nummaterial);
+        model.materialCount = model.meshCount;
+        TraceLog(LOG_INFO, "MODEL: model has %i material meshes", model.materialCount);
+    } else {
+        model.meshCount = 1;
+        model.materialCount = 0;
+        TraceLog(LOG_INFO, "MODEL: No materials, putting all meshes in a default material");
+    }
+
+    // A default material is always required, so adding +1
+    model.materialCount += 1;
+
+    // NOTE: Faces must be sorted by material id, as valid M3D files are
+    model.meshes = (try cmem.alloc(Mesh, count(model.meshCount))).ptr;
+    model.meshMaterial = (try cmem.alloc(c_int, count(model.meshCount))).ptr;
+    // NOTE: Deliberately as raylib: one slot more than materialCount
+    model.materials = (try cmem.alloc(Material, count(model.materialCount) + 1)).ptr;
+
+    // Map no material to index 0 with default shader, everything else materialid + 1
+    model.materials[0] = LoadMaterialDefault();
+
+    const faces = m3d.face.?[0..m3d.numface];
+    const vertices = m3d.vertex.?;
+    const skinned = (m3d.numbone != 0) and (m3d.numskin != 0);
+
+    var materialId: M3D_INDEX = @bitCast(@as(i32, -2)); // No material read yet
+    var meshIndex: usize = 0;
+    var start: usize = 0;
+    while (start < faces.len) {
+        // A run of faces with the same material makes one mesh
+        materialId = faces[start].materialid;
+        var end = start;
+        var vcolor = false;
+        while ((end < faces.len) and (faces[end].materialid == materialId)) : (end += 1) {
+            // Vertex colors only if some vertex isn't fully transparent black
+            for (faces[end].vertex) |v| {
+                if (vertices[v].color == 0) vcolor = true;
+            }
+        }
+
+        // There should be one run per material, but be bulletproof for non-optimal files
+        if (meshIndex >= count(model.meshCount)) try growMeshes(&model);
+
+        try fillM3dMesh(&modelMeshes(model)[meshIndex], m3d, faces[start..end], materialId, vcolor, skinned);
+        // NOTE: M3D_UNDEF + 1 wraps to 0, the default material
+        model.meshMaterial[meshIndex] = @as(c_int, @bitCast(materialId)) +% 1;
+
+        meshIndex += 1;
+        start = end;
+    }
+
+    for (cgltfItems(m3dm_t, m3d.material, m3d.nummaterial), model.materials[1 .. m3d.nummaterial + 1]) |m3dMaterial, *material| {
+        material.* = LoadMaterialDefault();
+        loadM3dMaterial(m3d, m3dMaterial, material.maps);
+    }
+
+    if (m3d.numbone != 0) try loadM3dSkeleton(&model, m3d);
+
+    // Bone-pose data, updated by UpdateModelAnimation
+    if (skinned) {
+        for (modelMeshes(model)) |*mesh| mesh.boneCount = @bitCast(model.skeleton.boneCount);
+        try initAnimationState(&model);
     }
 
     return model;
 }
 
-// Load M3D animation data
-fn LoadModelAnimationsM3D(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
-    var animations: [*c]ModelAnimation = null;
+/// One more mesh (and mesh material), zeroed
+fn growMeshes(model: *Model) error{OutOfMemory}!void {
+    const meshCount = count(model.meshCount) + 1;
+    const grownMeshes = try cmem.realloc(Mesh, model.meshes, meshCount);
+    model.meshes = grownMeshes.ptr;
+    grownMeshes[meshCount - 1] = empty_mesh;
+    const meshMaterial = try cmem.realloc(c_int, model.meshMaterial, meshCount);
+    model.meshMaterial = meshMaterial.ptr;
+    meshMaterial[meshCount - 1] = 0;
+    model.meshCount = @intCast(meshCount);
+}
 
-    var m3d: [*c]m3d_t = null;
-    var i: c_int = 0;
-    var j: c_int = 0;
-    animCount.* = 0;
+/// Builds the mesh for a run of faces sharing one material
+fn fillM3dMesh(mesh: *Mesh, m3d: *const m3d_t, faces: []const m3df_t, materialId: M3D_INDEX, vcolor: bool, skinned: bool) error{OutOfMemory}!void {
+    const vertices = m3d.vertex.?;
+    const scale = m3d.scale;
+    const vertexCount = faces.len * 3;
 
-    var dataSize: c_int = 0;
-    const fileData = LoadFileData(fileName, &dataSize);
+    mesh.vertexCount = @intCast(vertexCount);
+    mesh.triangleCount = @intCast(faces.len);
+    const meshVertices = try cmem.alloc(f32, vertexCount * 3);
+    mesh.vertices = meshVertices.ptr;
+    const texcoords = try cmem.alloc(f32, vertexCount * 2);
+    mesh.texcoords = texcoords.ptr;
+    const normals = try cmem.alloc(f32, vertexCount * 3);
+    mesh.normals = normals.ptr;
 
-    if (fileData != null) {
-        m3d = m3d_load(fileData, m3d_loaderhook, m3d_freehook, null);
+    // M3D only uses vertex colors when there is no material; raylib uses both
+    // and mixes the colors. Without a material they start white.
+    const colors: ?[]u8 = if ((materialId == M3D_UNDEF) or vcolor) try cmem.alloc(u8, vertexCount * 4) else null;
+    if (colors) |c| {
+        mesh.colors = c.ptr;
+        if (materialId == M3D_UNDEF) @memset(c, 255);
+    }
 
-        if ((m3d == null) or M3D_ERR_ISFATAL(m3d.*.errcode)) {
-            TraceLog(LOG_WARNING, "MODEL: [%s] Failed to load M3D data, error code %d", fileName, if (m3d != null) @as(c_int, m3d.*.errcode) else -2);
-            UnloadFileData(fileData);
-            return null;
-        } else TraceLog(LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i animations, %i bones, %i skins", fileName, m3d.*.numaction, m3d.*.numbone, m3d.*.numskin);
+    if (skinned) {
+        mesh.boneIndices = (try cmem.alloc(u8, vertexCount * 4)).ptr;
+        mesh.boneWeights = (try cmem.alloc(f32, vertexCount * 4)).ptr;
+    }
 
-        if ((m3d.*.numaction == 0) or (m3d.*.numbone == 0)) {
-            m3d_free(m3d);
-            UnloadFileData(fileData);
-            return null;
+    for (faces, 0..) |face, l| {
+        for (face.vertex, 0..) |v, n| {
+            const vertex = vertices[v];
+            meshVertices[l * 9 + n * 3 ..][0..3].* = .{ vertex.x * scale, vertex.y * scale, vertex.z * scale };
+
+            // A fully transparent vertex color keeps the default
+            if (colors) |c| {
+                if (vertex.color & 0xff000000 != 0) c[l * 12 + n * 4 ..][0..4].* = @bitCast(vertex.color);
+            }
         }
 
-        animations = @ptrCast(@alignCast(RL_CALLOC(m3d.*.numaction, @sizeOf(ModelAnimation))));
-        animCount.* = @intCast(m3d.*.numaction);
-
-        var a: c_uint = 0;
-        while (a < m3d.*.numaction) : (a += 1) {
-            animations[a].boneCount = m3d.*.numbone +% 1;
-            const bones: [*c]BoneInfo = @ptrCast(@alignCast(RL_CALLOC(m3d.*.numbone + 1, @sizeOf(BoneInfo))));
-
-            animations[a].keyframeCount = @intCast(m3d.*.action[a].durationmsec / M3D_ANIMDELAY);
-            animations[a].keyframePoses = @ptrCast(@alignCast(RL_CALLOC(@intCast(animations[a].keyframeCount), @sizeOf(ModelAnimPose))));
-            _ = strncpy(&animations[a].name, m3d.*.action[a].name, animations[a].name.len - 1);
-
-            TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Duration: %fs", fileName, &animations[a].name, animations[a].keyframeCount, m3d.*.action[a].durationmsec);
-
-            i = 0;
-            while (i < @as(c_int, @intCast(m3d.*.numbone))) : (i += 1) {
-                const ui: usize = @intCast(i);
-                bones[ui].parent = @bitCast(m3d.*.bone[ui].parent);
-                _ = strncpy(&bones[ui].name, m3d.*.bone[ui].name, bones[ui].name.len - 1);
+        if (face.texcoord[0] != M3D_UNDEF) {
+            for (face.texcoord, 0..) |t, n| {
+                const uv = m3d.tmap.?[t];
+                texcoords[l * 6 + n * 2 ..][0..2].* = .{ uv.u, 1.0 - uv.v };
             }
+        }
 
-            const uin: usize = @intCast(i);
-            bones[uin].parent = -1;
-            _ = memcpy(&bones[uin].name, "NO BONE", 7);
+        if (face.normal[0] != M3D_UNDEF) {
+            for (face.normal, 0..) |index, n| {
+                const normal = vertices[index];
+                normals[l * 9 + n * 3 ..][0..3].* = .{ normal.x, normal.y, normal.z };
+            }
+        }
 
-            i = 0;
-            while (i < animations[a].keyframeCount) : (i += 1) {
-                const ui: usize = @intCast(i);
-                animations[a].keyframePoses[ui] = @ptrCast(@alignCast(RL_CALLOC(@intCast(m3d.*.numbone + 1), @sizeOf(Transform))));
-
-                const pose = m3d_pose(m3d, a, @as(u32, @intCast(i)) * M3D_ANIMDELAY);
-
-                if (pose != null) {
-                    j = 0;
-                    while (j < @as(c_int, @intCast(m3d.*.numbone))) : (j += 1) {
-                        const uj: usize = @intCast(j);
-                        const kp = &animations[a].keyframePoses[ui][uj];
-                        kp.translation.x = m3d.*.vertex[pose[uj].pos].x * m3d.*.scale;
-                        kp.translation.y = m3d.*.vertex[pose[uj].pos].y * m3d.*.scale;
-                        kp.translation.z = m3d.*.vertex[pose[uj].pos].z * m3d.*.scale;
-                        kp.rotation.x = m3d.*.vertex[pose[uj].ori].x;
-                        kp.rotation.y = m3d.*.vertex[pose[uj].ori].y;
-                        kp.rotation.z = m3d.*.vertex[pose[uj].ori].z;
-                        kp.rotation.w = m3d.*.vertex[pose[uj].ori].w;
-                        kp.rotation = QuaternionNormalize(kp.rotation);
-                        kp.scale.x = 1.0;
-                        kp.scale.y = 1.0;
-                        kp.scale.z = 1.0;
-
-                        if (bones[uj].parent >= 0) {
-                            const pp: usize = @intCast(bones[uj].parent);
-                            kp.rotation = QuaternionMultiply(animations[a].keyframePoses[ui][pp].rotation, kp.rotation);
-                            kp.translation = Vector3RotateByQuaternion(kp.translation, animations[a].keyframePoses[ui][pp].rotation);
-                            kp.translation = Vector3Add(kp.translation, animations[a].keyframePoses[ui][pp].translation);
-                            kp.scale = Vector3Multiply(kp.scale, animations[a].keyframePoses[ui][pp].scale);
-                        }
-                    }
-
-                    const uj: usize = @intCast(j);
-                    const kp = &animations[a].keyframePoses[ui][uj];
-                    kp.translation.x = 0.0;
-                    kp.translation.y = 0.0;
-                    kp.translation.z = 0.0;
-                    kp.rotation.x = 0.0;
-                    kp.rotation.y = 0.0;
-                    kp.rotation.z = 0.0;
-                    kp.rotation.w = 1.0;
-                    kp.scale.x = 1.0;
-                    kp.scale.y = 1.0;
-                    kp.scale.z = 1.0;
-
-                    RL_FREE(pose);
+        // Skin: vertex / bone weight pairs
+        if (skinned) {
+            for (face.vertex, 0..) |v, n| {
+                const first = l * 12 + n * 4;
+                const skinid = vertices[v].skinid;
+                if ((skinid != M3D_UNDEF) and (@as(i32, @bitCast(skinid)) < @as(i32, @bitCast(m3d.numskin)))) {
+                    const skin = m3d.skin.?[skinid];
+                    // NOTE: C stores the 32-bit bone ids into bytes: unused slots
+                    // (M3D_UNDEF) become 255
+                    for (mesh.boneIndices[first..][0..4], skin.boneid) |*boneIndex, boneId| boneIndex.* = @truncate(boneId);
+                    @memcpy(mesh.boneWeights[first..][0..4], &skin.weight);
+                } else {
+                    // Boneless vertices with skeletal animations are not supported:
+                    // they go to a special "no bone" bone
+                    mesh.boneIndices[first] = @truncate(m3d.numbone);
+                    mesh.boneWeights[first] = 1.0;
                 }
             }
-
-            RL_FREE(bones);
         }
+    }
+}
 
-        m3d_free(m3d);
-        UnloadFileData(fileData);
+/// An m3d color (RGBA bytes in a native-endian u32), as raylib memcpy's it into a Color
+fn m3dColor(value: u32) Color {
+    return std.mem.bytesToValue(Color, std.mem.asBytes(&value));
+}
+
+fn loadM3dMaterial(m3d: *const m3d_t, m3dMaterial: m3dm_t, maps: [*c]MaterialMap) void {
+    for (cgltfItems(m3dp_t, m3dMaterial.prop, m3dMaterial.numprop)) |prop| {
+        switch (prop.type) {
+            m3dp_Kd => {
+                maps[MATERIAL_MAP_DIFFUSE].color = m3dColor(prop.value.color);
+                maps[MATERIAL_MAP_DIFFUSE].value = 0.0;
+            },
+            m3dp_Ks => maps[MATERIAL_MAP_SPECULAR].color = m3dColor(prop.value.color),
+            m3dp_Ns => maps[MATERIAL_MAP_SPECULAR].value = prop.value.fnum,
+            m3dp_Ke => {
+                maps[MATERIAL_MAP_EMISSION].color = m3dColor(prop.value.color);
+                maps[MATERIAL_MAP_EMISSION].value = 0.0;
+            },
+            m3dp_Pm => maps[MATERIAL_MAP_METALNESS].value = prop.value.fnum,
+            m3dp_Pr => maps[MATERIAL_MAP_ROUGHNESS].value = prop.value.fnum,
+            m3dp_Ps => {
+                maps[MATERIAL_MAP_NORMAL].color = WHITE;
+                maps[MATERIAL_MAP_NORMAL].value = prop.value.fnum;
+            },
+            else => {
+                // Texture maps
+                if (prop.type < 128) continue;
+                const map: usize = switch (prop.type) {
+                    m3dp_map_Kd => MATERIAL_MAP_DIFFUSE,
+                    m3dp_map_Ks => MATERIAL_MAP_SPECULAR,
+                    m3dp_map_Ke => MATERIAL_MAP_EMISSION,
+                    m3dp_map_Km => MATERIAL_MAP_NORMAL,
+                    m3dp_map_Ka => MATERIAL_MAP_OCCLUSION,
+                    m3dp_map_Pm => MATERIAL_MAP_ROUGHNESS,
+                    else => continue,
+                };
+                const texture = m3d.texture.?[prop.value.textureid];
+                const image: Image = .{
+                    .data = texture.d,
+                    .width = texture.w,
+                    .height = texture.h,
+                    .mipmaps = 1,
+                    .format = switch (texture.f) {
+                        4 => PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+                        3 => PIXELFORMAT_UNCOMPRESSED_R8G8B8,
+                        2 => PIXELFORMAT_UNCOMPRESSED_GRAY_ALPHA,
+                        else => PIXELFORMAT_UNCOMPRESSED_GRAYSCALE,
+                    },
+                };
+                maps[map].texture = LoadTextureFromImage(image);
+            },
+        }
+    }
+}
+
+/// An m3d name as raylib's snprintf("%s") formats it: glibc prints a null string as "(null)"
+fn m3dCString(name: ?[*:0]const u8) [*:0]const u8 {
+    return name orelse "(null)";
+}
+
+/// An M3D bone pose in model space: positions and orientations are vertices,
+/// and child bones are relative to their parent
+fn m3dBoneTransform(m3d: *const m3d_t, pos: M3D_INDEX, ori: M3D_INDEX) Transform {
+    const vertices = m3d.vertex.?;
+    const position = vertices[pos];
+    const orientation = vertices[ori];
+    return .{
+        .translation = .{ .x = position.x * m3d.scale, .y = position.y * m3d.scale, .z = position.z * m3d.scale },
+        // NOTE: A non-normalized orientation quaternion encodes scaling
+        .rotation = QuaternionNormalize(.{ .x = orientation.x, .y = orientation.y, .z = orientation.z, .w = orientation.w }),
+        .scale = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
+    };
+}
+
+/// Child bones are stored relative to their parent: converts `pose[bone]` to model space
+fn m3dToModelSpace(pose: []Transform, bone: usize, parent: c_int) void {
+    if (parent < 0) return;
+    const transform = &pose[bone];
+    const parentTransform = &pose[@intCast(parent)];
+    transform.rotation = QuaternionMultiply(parentTransform.rotation, transform.rotation);
+    transform.translation = Vector3RotateByQuaternion(transform.translation, parentTransform.rotation);
+    transform.translation = Vector3Add(transform.translation, parentTransform.translation);
+    transform.scale = Vector3Multiply(transform.scale, parentTransform.scale);
+}
+
+const no_bone_transform: Transform = .{
+    .translation = .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+    .rotation = .{ .x = 0.0, .y = 0.0, .z = 0.0, .w = 1.0 },
+    .scale = .{ .x = 1.0, .y = 1.0, .z = 1.0 },
+};
+
+/// The model's bones, plus a final "no bone" bone for boneless vertices
+fn m3dBones(m3d: *const m3d_t) error{OutOfMemory}![]BoneInfo {
+    const bones = try cmem.alloc(BoneInfo, m3d.numbone + 1);
+    for (bones[0..m3d.numbone], m3d.bone.?) |*bone, m3dBone| {
+        bone.parent = @bitCast(m3dBone.parent);
+        _ = copyCString(&bone.name, m3dCString(m3dBone.name));
+    }
+    const noBone = &bones[m3d.numbone];
+    noBone.parent = -1;
+    @memcpy(noBone.name[0..7], "NO BONE");
+    return bones;
+}
+
+fn loadM3dSkeleton(model: *Model, m3d: *const m3d_t) error{OutOfMemory}!void {
+    const bones = try m3dBones(m3d);
+    model.skeleton.bones = bones.ptr;
+    model.skeleton.boneCount = @intCast(bones.len);
+    const bindPose = try cmem.alloc(Transform, bones.len);
+    model.skeleton.bindPose = bindPose.ptr;
+
+    for (m3d.bone.?[0..m3d.numbone], bones[0..m3d.numbone], 0..) |m3dBone, bone, i| {
+        bindPose[i] = m3dBoneTransform(m3d, m3dBone.pos, m3dBone.ori);
+        m3dToModelSpace(bindPose, i, bone.parent);
+    }
+    bindPose[m3d.numbone] = no_bone_transform;
+}
+
+const M3D_ANIMDELAY: u32 = 17; // Animation frames delay, (~1000 ms/60 FPS = 16.666666 ms)
+
+// Load M3D animation data
+fn loadModelAnimationsM3d(fileName: [*c]const u8, animCount: [*c]c_int) [*c]ModelAnimation {
+    animCount.* = 0;
+
+    const file = openM3d(fileName) orelse return null;
+    defer file.deinit();
+    const m3d = file.m3d;
+
+    TraceLog(LOG_INFO, "MODEL: [%s] M3D data loaded successfully: %i animations, %i bones, %i skins", fileName, m3d.numaction, m3d.numbone, m3d.numskin);
+
+    // No animation or bones: skins are not required, some use one animation for N models
+    if ((m3d.numaction == 0) or (m3d.numbone == 0)) return null;
+
+    const animations = m3dAnimations(fileName, m3d, animCount) catch {
+        TraceLog(LOG_WARNING, "MODEL: [%s] Failed to allocate memory for M3D animations", fileName);
+        animCount.* = 0;
+        return null;
+    };
+    return animations.ptr;
+}
+
+fn m3dAnimations(fileName: [*c]const u8, m3d: *m3d_t, animCount: [*c]c_int) error{OutOfMemory}![]ModelAnimation {
+    const animations = try cmem.alloc(ModelAnimation, m3d.numaction);
+    errdefer UnloadModelAnimations(animations.ptr, @intCast(animations.len));
+    animCount.* = @intCast(m3d.numaction);
+
+    for (animations, m3d.action.?[0..m3d.numaction], 0..) |*animation, action, a| {
+        animation.boneCount = m3d.numbone + 1;
+        const bones = try m3dBones(m3d);
+        defer cmem.free(bones.ptr);
+
+        const keyframePoses = try cmem.alloc(ModelAnimPose, action.durationmsec / M3D_ANIMDELAY);
+        animation.keyframePoses = keyframePoses.ptr;
+        animation.keyframeCount = @intCast(keyframePoses.len);
+        _ = copyCString(&animation.name, m3dCString(action.name));
+
+        // NOTE: Upstream bug kept: the duration is an unsigned int printed with
+        // "%f", so the logged value is undefined
+        TraceLog(LOG_INFO, "MODEL: [%s] Loaded animation: %s | Frames: %d | Duration: %fs", fileName, &animation.name, animation.keyframeCount, action.durationmsec);
+
+        // M3D stores sparse skeletons at arbitrary times; raylib needs full ones
+        // at regular intervals, so the M3D SDK interpolates the bones
+        for (keyframePoses, 0..) |*keyframePose, frame| {
+            const pose = try cmem.alloc(Transform, bones.len);
+            keyframePose.* = pose.ptr;
+
+            const m3dPose = m3d_pose(m3d, @intCast(a), @as(u32, @intCast(frame)) * M3D_ANIMDELAY) orelse continue;
+            defer cmem.free(m3dPose);
+
+            for (m3dPose[0..m3d.numbone], bones[0..m3d.numbone], 0..) |m3dBone, bone, j| {
+                pose[j] = m3dBoneTransform(m3d, m3dBone.pos, m3dBone.ori);
+                m3dToModelSpace(pose, j, bone.parent);
+            }
+            // The "no bone" bone is never transformed
+            pose[m3d.numbone] = no_bone_transform;
+        }
     }
 
     return animations;
