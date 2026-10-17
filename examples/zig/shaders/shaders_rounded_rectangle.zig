@@ -8,7 +8,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const glsl_version = 330;
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const screen_width = 800;
 const screen_height = 450;

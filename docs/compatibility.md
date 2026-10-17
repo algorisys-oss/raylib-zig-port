@@ -20,7 +20,7 @@ that configuration, compatibility is not claimed.
 | OS / arch | Linux x86-64 | others untested |
 | Platform backend | `PLATFORM_DESKTOP_GLFW` (GLFW 3, X11) | SDL, RGFW, Win32, DRM, Android (see [not-migrated.md](not-migrated.md)) |
 | Graphics API | `GRAPHICS_API_OPENGL_33` | OpenGL 1.1 / 2.1 / 4.3, ES2, rlsw |
-| Web (in progress) | `PLATFORM_WEB` + `GRAPHICS_API_OPENGL_ES3` (WebGL 2) on `wasm32-emscripten`: ported; the browser gate covers **78** examples so far (core_basic_window, shapes, textures; exclusions in web.md) (see [web.md](web.md)) | claims above do not yet extend to the web |
+| Web (in progress) | `PLATFORM_WEB` + `GRAPHICS_API_OPENGL_ES3` (WebGL 2) on `wasm32-emscripten`: ported; the browser gate covers **159** examples so far (core_basic_window, shapes, textures, text, shaders, models; exclusions in web.md) (see [web.md](web.md)) | claims above do not yet extend to the web |
 | Feature config | raylib's **default `config.h`** | any non-default `SUPPORT_*` flag (see §5) |
 | Library form | static `libraylib.a` | shared `libraylib.so` (not built) |
 | Optimization | Debug and ReleaseFast (both gated, §3) | — |

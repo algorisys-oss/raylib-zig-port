@@ -11,7 +11,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const gui = @import("raygui");
 
-const glsl_version = 330; // Desktop GLSL version
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 /// Interaction mode
 const InteractionMode = enum(i32) { run = 0, pause, draw };

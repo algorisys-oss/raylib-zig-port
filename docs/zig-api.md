@@ -135,6 +135,15 @@ internal buffers — valid until the next call, as in C.
 - `tools/gen_api.py` — the generator; its `OVERRIDES` table holds the few
   hand-written wrappers (varargs, callbacks, multi-out-param functions).
 
+## Data for the documentation site
+
+`python3 tools/gen_api.py --json` writes `src/api/api.json`: for every
+function, its module and header group, C and Zig names, both signatures,
+raylib's comment, and any doc lines the Zig wrapper adds. Signatures are read
+from the checked-in `src/api/raylib.zig`, so the file describes the code that
+is compiled. raylib-zig-web builds its API reference and cheatsheet from it.
+Run it after any change to the API.
+
 ## Gate
 
 The API is checked the same way as the port: Zig-API translations of upstream

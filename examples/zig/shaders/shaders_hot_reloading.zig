@@ -7,7 +7,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const glsl_version = 330; // Desktop GLSL version
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const frag_shader_file_name = std.fmt.comptimePrint("resources/shaders/glsl{d}/reload.fs", .{glsl_version});
 

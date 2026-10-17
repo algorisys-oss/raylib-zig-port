@@ -11,7 +11,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const glsl_version = 330; // Desktop GLSL version
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const letter_boundry_size = 0.25;
 const text_max_layers = 32;

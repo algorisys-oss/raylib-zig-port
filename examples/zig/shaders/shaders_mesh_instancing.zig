@@ -9,7 +9,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const rlights = @import("rlights");
 
-const glsl_version = 330;
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const max_instances = 10000;
 

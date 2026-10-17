@@ -12,7 +12,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const gui = @import("raygui");
 
-const glsl_version = 330;
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const texture_paths = [_][:0]const u8{
     "resources/parrots.png",

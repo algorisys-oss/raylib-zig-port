@@ -440,6 +440,9 @@ Web target (docs/web.md; needs emsdk, and `npm install` in tools/webdiff once):
 ```bash
 zig build web -Demsdk=$HOME/emsdk           # wasm32-emscripten libraylib.a + rcore_web.js
 zig build webexamples -Demsdk=$HOME/emsdk   # browser gate: C vs Zig in headless Chrome
+zig build webresources -Demsdk=$HOME/emsdk  # rewrite test/web_resources.list (after adding web examples)
+zig build webdemos -Demsdk=$HOME/emsdk      # the site's demos (zig-out/web/examples)
+python3 tools/gen_api.py --json             # src/api/api.json for the site's API reference
 ```
 
 The oracle archive lives in the zig cache:

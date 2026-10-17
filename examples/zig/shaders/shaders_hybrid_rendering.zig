@@ -7,7 +7,7 @@
 
 const rl = @import("raylib");
 
-const glsl_version = 330; // Desktop GLSL version
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 /// Ray march shader uniform locations
 const RayLocs = struct {

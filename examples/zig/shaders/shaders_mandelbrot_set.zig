@@ -10,7 +10,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const glsl_version = 330;
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 // A few good interesting places: offset x, offset y, zoom
 const points_of_interest = [_][3]f32{

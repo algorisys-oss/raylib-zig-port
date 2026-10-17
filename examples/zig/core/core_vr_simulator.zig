@@ -6,7 +6,7 @@
 
 const rl = @import("raylib");
 
-const glsl_version = 330; // Desktop GLSL (PLATFORM_ANDROID, PLATFORM_WEB use 100)
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 pub fn main() !void {
     // Initialization

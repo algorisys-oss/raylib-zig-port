@@ -26,7 +26,9 @@
 
   const params = new URLSearchParams(location.search);
   const name = params.get('ex');
-  window.webdiff = { done: false, error: null, log: [] };
+  // `opened`: every path the program opens once its main() starts, for
+  // tools/webdiff/resources.mjs (which files an example's .data needs).
+  window.webdiff = { done: false, error: null, log: [], opened: new Set() };
 
   const script = document.createElement('script');
   script.src = name + '.js';
@@ -38,6 +40,14 @@
       preRun: [(module) => {
         module.ENV.EXDIFF_FRAMES = params.get('frames') || '240';
         module.ENV.EXDIFF_SHOT = '/exdiff.png';
+        // Unpacking the .data bundle opens files too; record from main() on.
+        let recording = false;
+        module.onRuntimeInitialized = () => { recording = true; };
+        const open = module.FS.open;
+        module.FS.open = function (path, ...rest) {
+          if (recording) window.webdiff.opened.add(String(path));
+          return open.call(this, path, ...rest);
+        };
       }],
     }).then((module) => {
       window.webdiff.module = module;

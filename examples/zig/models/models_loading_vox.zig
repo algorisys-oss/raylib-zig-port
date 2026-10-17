@@ -9,7 +9,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const rlights = @import("rlights");
 
-const glsl_version = 330;
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const vox_file_names = [_][:0]const u8{
     "resources/models/vox/chr_knight.vox",

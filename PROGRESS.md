@@ -46,8 +46,8 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   `src/platforms/rcore_desktop_glfw.zig` (216 exports before and after).
 - `zig build webexamples`: browser gate, C oracle vs Zig-API translation in
   headless Chrome (SwiftShader), byte-compared. C-vs-C deterministic; negative
-  control fails. **78/78** (`core_basic_window` + 45 shapes + 32/33 textures;
-  textures_to_image excluded, docs/web.md), Debug and
+  control fails. **159/159** (`core_basic_window` + shapes 45 + textures 32/33
+  + text 17 + shaders 32/36 + models 32; 5 exclusions in docs/web.md), Debug and
   ReleaseFast.
 - `zig build webdemos`: the same examples without the shim, for the site.
 - Two port bugs found (hidden by x86-64): libc `time_t`/`timespec`/`stat`/
@@ -60,6 +60,14 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   cannot read back an RGB texture, in C or Zig). Port bug found by the web
   link: rmodels declared par_shapes_set_epsilon_degenerate_sphere(f64) for a C
   float (a trap on wasm). Fixed; web links now use `-Wl,--fatal-warnings`.
+- Text, shaders, models (2026-10-17): GLSL version from one comptime constant
+  (examples/zig/common/platform.zig); per-example .data from
+  test/web_resources.list (`zig build webresources`); 3 shaders excluded
+  (their glsl100 shaders need WebGL 1 extensions) plus rlgl_compute.
+- raylib-zig builds as another project's dependency (was broken: a
+  cwd-relative `-includesrc/c/rlgl_impl_defs.h`); checked by
+  raylib-zig-web's tools/check-getting-started.sh. `tools/gen_api.py --json`
+  writes src/api/api.json (940 functions) for the site's API reference.
 - Desktop gates after all of this: pixel 12/12, exdiff 217/217, apiexamples
   217/217, cdiff 4/4, audio 43/43, data, math/cam/gest, apitest, constaudit 0.
 

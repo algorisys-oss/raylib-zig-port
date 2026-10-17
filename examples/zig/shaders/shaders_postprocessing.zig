@@ -9,7 +9,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const glsl_version = 330;
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 /// A postprocessing effect: its display name and fragment shader file.
 const Postpro = struct {

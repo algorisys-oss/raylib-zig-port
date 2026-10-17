@@ -7,7 +7,7 @@
 
 const rl = @import("raylib");
 
-const glsl_version = 330; // Desktop GLSL version
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 const max_lights = 8;
 

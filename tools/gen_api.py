@@ -4,6 +4,8 @@
 Outputs:
   src/api/c.zig       exact-C `extern fn` declarations (the only C-shaped code)
   src/api/raylib.zig  idiomatic layer: types, enums, flags, colors, wrappers
+  src/api/api.json    every function's Zig and C signature and doc comment
+                      (read by raylib-zig-web for its API reference)
 
 Every RLAPI function is mapped by the mechanical rules in docs/zig-api.md. A
 function the rules cannot map cleanly (out-params, varargs, owned buffers,
@@ -11,13 +13,15 @@ callbacks) must appear in OVERRIDES with a hand-written wrapper, or the run
 fails and names it — nothing falls through as a raw C type.
 
 Usage: python3 tools/gen_api.py [raylib.h]
+       python3 tools/gen_api.py --json     (only src/api/api.json)
 """
 import keyword  # noqa: F401  (Zig keywords listed below)
 import pathlib
 import re
 import sys
 
-HEADER = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "vendor/raylib/src/raylib.h")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+HEADER = pathlib.Path(ARGS[0] if ARGS else "vendor/raylib/src/raylib.h")
 RAYMATH = HEADER.with_name("raymath.h")
 RLGL = HEADER.with_name("rlgl.h")
 RCAMERA = HEADER.with_name("rcamera.h")
@@ -1507,8 +1511,121 @@ fn memFreeFn(_: *anyopaque, memory: []u8, _: std.mem.Alignment, _: usize) void {
 '''
 
 
+def c_decls(src, prefix):
+    """{name: (module, group, C declaration)} from a header's prototypes, with
+    raylib.h's section comments: `// ... (Module: shapes)` names the module and
+    the last plain `// ... functions` comment above a prototype its group."""
+    decls, module, group = {}, None, None
+    for line in src.splitlines():
+        m = re.match(r"//\s*(.*?)\s*\(Module: (\w+)\)", line)
+        if m:
+            module, group = m.group(2), None
+            continue
+        if line.startswith("// ") and not line.startswith("// NOTE") and not line.startswith("// WARNING"):
+            group = line[3:].strip()
+            continue
+        if line.startswith(prefix):
+            decl = line.split("//", 1)[0].strip()[len(prefix):].strip()
+            name = re.match(r".*?(\w+)\s*\(", decl).group(1)
+            decls[name] = (module, group, decl)
+    return decls
+
+
+def fn_signature(text, start):
+    """`fn name(params) ret` for the `pub fn` at text[start:], joining lines
+    and matching parentheses (types such as `?fn (x: T) void` nest)."""
+    i = text.index("(", start)
+    name = text[start + len("pub fn "):i]
+    depth, j = 0, i
+    while True:
+        depth += {"(": 1, ")": -1}.get(text[j], 0)
+        if depth == 0:
+            break
+        j += 1
+    ret = text[j + 1:text.index("{\n", j)]
+    params = " ".join(text[i:j + 1].split()).replace("( ", "(").replace(", )", ")")
+    return name, f"fn {name}{params} {' '.join(ret.split())}"
+
+
+def committed_signatures(path):
+    """{"rl.name" / "rl.math.name" / "rl.gl.name": signature} as the checked-in
+    raylib.zig has them (what is compiled and gated, even where it has been
+    edited since generation)."""
+    text = path.read_text()
+    sigs, namespace = {}, "rl"
+    for m in re.finditer(r"^(pub const (math|gl) = struct \{|\};|( *)pub fn )", text, re.M):
+        if m.group(2):
+            namespace = f"rl.{m.group(2)}"
+        elif m.group(1) == "};":
+            namespace = "rl"
+        elif m.group(3) == "" or namespace != "rl":
+            name, sig = fn_signature(text, m.start() + len(m.group(3)))
+            sigs[f"{namespace if m.group(3) else 'rl'}.{name}"] = sig
+    return sigs
+
+
+
+def emit_json(gen):
+    """src/api/api.json: one record per function of the Zig API, for
+    raylib-zig-web's API reference and cheatsheet. Written from the same
+    wrappers the .zig files are, so the two cannot disagree."""
+    import json
+
+    raylib = c_decls(gen.src, "RLAPI ")
+    cam_src = RCAMERA.read_text()
+    camera = c_decls(cam_src[: cam_src.index("#if defined(RCAMERA_IMPLEMENTATION)")], "RLAPI ")
+    math = c_decls(gen.math_src, "RMAPI ")
+    gl = c_decls(gen.gl_src, "RLAPI ")
+    committed = committed_signatures(OUT_DIR / "raylib.zig")
+    records, drift = [], []
+
+    def add(module, namespace, fname, comment, body, group=None, cdecl=None):
+        start = body.index("pub fn ")
+        name, generated = fn_signature(body + "\n", start)
+        zig = f"{namespace}.{name}"
+        if zig not in committed:
+            raise ValueError(f"{fname}: {zig} is not in {OUT_DIR}/raylib.zig")
+        if committed[zig] != generated:
+            drift.append(zig)
+        notes = [l.strip()[4:] for l in body[:start].splitlines() if l.strip().startswith("///")]
+        records.append({
+            "module": module,
+            "group": group,
+            "c": fname,
+            "zig": zig,
+            "zigSignature": committed[zig],
+            "cSignature": cdecl,
+            "doc": comment,
+            # The Zig wrapper's own doc lines, when they say more than C's comment.
+            "zigDoc": [n for n in notes if n != comment],
+        })
+
+    for fname, ret, params, comment in gen.funcs:
+        if fname in raylib:
+            module, group, cdecl = raylib[fname]
+        else:
+            module, group, cdecl = "rcamera", None, camera[fname][2]
+        add(module, "rl", fname, comment, gen.wrap_function(fname, ret, params, comment), group, cdecl)
+    for fname, ret, params, comment in gen.math_funcs:
+        body = MATH_OVERRIDES.get(fname) or gen.wrap_function(fname, ret, params, comment)
+        add("raymath", "rl.math", fname, comment, body, None, math[fname][2])
+    for fname, ret, params, comment in gen.gl_funcs:
+        body = GL_OVERRIDES.get(fname) or gen.wrap_function(fname, ret, params, comment, mode="gl")
+        add("rlgl", "rl.gl", fname, comment, body, gl[fname][1], gl[fname][2])
+    if drift:
+        print(f"note: {len(drift)} signature(s) in {OUT_DIR}/raylib.zig differ from what the rules "
+              f"generate (api.json uses the file's): {', '.join(drift[:8])}{' ...' if len(drift) > 8 else ''}")
+    return json.dumps({"raylib": "6.2", "functions": records}, indent=1) + "\n"
+
+
 def main():
     gen = Gen(HEADER.read_text())
+    if "--json" in sys.argv:
+        # Only src/api/api.json, from the checked-in raylib.zig (which may have
+        # been edited by hand since it was generated; regenerating would undo that).
+        (OUT_DIR / "api.json").write_text(emit_json(gen))
+        print(f"OK  {OUT_DIR}/api.json")
+        return
     api = gen.emit_api()
     if gen.errors:
         print("Functions the rules cannot map (add to OVERRIDES):")
@@ -1520,6 +1637,7 @@ def main():
     (OUT_DIR / "c.zig").write_text(gen.emit_c())
     (OUT_DIR / "c_exdiff.zig").write_text(gen.emit_c(shim=True))
     (OUT_DIR / "raylib.zig").write_text(api)
+    (OUT_DIR / "api.json").write_text(emit_json(gen))
     print(f"OK  {len(gen.funcs)} raylib + {len(gen.math_funcs)} raymath functions, "
           f"{len(gen.structs)} structs, {len(gen.enums)} enums -> {OUT_DIR}/")
 

@@ -414,8 +414,93 @@ const web_examples = [_][]const u8{
     "textures/textures_srcrec_dstrec",
     "textures/textures_textured_curve",
     "textures/textures_tiled_drawing",
+    "text/text_3d_drawing",
+    "text/text_animations",
+    "text/text_codepoints_loading",
+    "text/text_font_filters",
+    "text/text_font_loading",
+    "text/text_font_sdf",
+    "text/text_font_spritefont",
+    "text/text_format_text",
+    "text/text_inline_styling",
+    "text/text_input_box",
+    "text/text_rectangle_bounds",
+    "text/text_sprite_fonts",
+    "text/text_strings_management",
+    "text/text_unicode_emojis",
+    "text/text_unicode_ranges",
+    "text/text_words_alignment",
+    "text/text_writing_anim",
+    "shaders/shaders_ascii_rendering",
+    "shaders/shaders_basic_lighting",
+    "shaders/shaders_basic_pbr",
+    "shaders/shaders_cel_shading",
+    "shaders/shaders_color_correction",
+    "shaders/shaders_custom_uniform",
+    "shaders/shaders_deferred_rendering",
+    "shaders/shaders_depth_rendering",
+    "shaders/shaders_eratosthenes_sieve",
+    "shaders/shaders_fog_rendering",
+    "shaders/shaders_game_of_life",
+    "shaders/shaders_hot_reloading",
+    "shaders/shaders_julia_set",
+    "shaders/shaders_lightmap_rendering",
+    "shaders/shaders_lights_bloom",
+    "shaders/shaders_mandelbrot_set",
+    "shaders/shaders_mesh_instancing",
+    "shaders/shaders_model_shader",
+    "shaders/shaders_multi_sample2d",
+    "shaders/shaders_normalmap_rendering",
+    "shaders/shaders_palette_switch",
+    "shaders/shaders_postprocessing",
+    "shaders/shaders_rounded_rectangle",
+    "shaders/shaders_shadowmap_rendering",
+    "shaders/shaders_shapes_textures",
+    "shaders/shaders_simple_mask",
+    "shaders/shaders_spotlight_rendering",
+    "shaders/shaders_texture_outline",
+    "shaders/shaders_texture_rendering",
+    "shaders/shaders_texture_tiling",
+    "shaders/shaders_texture_waves",
+    "shaders/shaders_vertex_displacement",
+    "models/models_animation_blend_custom",
+    "models/models_animation_blending",
+    "models/models_animation_gpu_skinning",
+    "models/models_animation_timing",
+    "models/models_basic_voxel",
+    "models/models_billboard_rendering",
+    "models/models_bone_socket",
+    "models/models_box_collisions",
+    "models/models_cubicmap_rendering",
+    "models/models_decals",
+    "models/models_directional_billboard",
+    "models/models_first_person_maze",
+    "models/models_geometric_shapes",
+    "models/models_heightmap_rendering",
+    "models/models_loading",
+    "models/models_loading_gltf",
+    "models/models_loading_iqm",
+    "models/models_loading_m3d",
+    "models/models_loading_vox",
+    "models/models_mesh_generation",
+    "models/models_mesh_picking",
+    "models/models_mesh_uv_painting",
+    "models/models_orthographic_projection",
+    "models/models_point_rendering",
+    "models/models_procedural_decals",
+    "models/models_rlgl_solar_system",
+    "models/models_rotating_cube",
+    "models/models_skybox_rendering",
+    "models/models_tesseract_view",
+    "models/models_textured_cube",
+    "models/models_waving_cubes",
+    "models/models_yaw_pitch_roll",
     // Browser exclusions, one per line as `// <entry>: <reason>` (docs/web.md):
     // textures/textures_to_image: WebGL 2 cannot glReadPixels an RGB texture (GL_INVALID_OPERATION); C and Zig both draw an unwritten buffer
+    // shaders/shaders_rlgl_compute: compute shaders need desktop OpenGL 4.3; WebGL 2 has none
+    // shaders/shaders_depth_writing: its GLSL 100 shader needs GL_EXT_frag_depth, which WebGL 2 does not offer to GLSL ES 1.00 shaders
+    // shaders/shaders_hybrid_rendering: its GLSL 100 shader needs GL_EXT_frag_depth and GL_OES_standard_derivatives, which WebGL 2 does not offer to GLSL ES 1.00 shaders
+    // shaders/shaders_raymarching_rendering: its GLSL 100 shader needs GL_OES_standard_derivatives (fwidth), which WebGL 2 does not offer to GLSL ES 1.00 shaders
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
@@ -466,6 +551,7 @@ fn raylibLib(
     const mod = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
     mod.addIncludePath(b.path("vendor/raylib/src"));
     mod.addIncludePath(b.path("vendor/raylib/src/external/glfw/include"));
+    mod.addIncludePath(b.path("src/c")); // rlgl_impl_defs.h
     if (lt.sysroot_include) |dir| {
         mod.addSystemIncludePath(.{ .cwd_relative = dir });
     } else mod.addSystemIncludePath(.{ .cwd_relative = "/usr/include" });
@@ -478,8 +564,10 @@ fn raylibLib(
     const no_rlgl_impl = [_][]const u8{
         "-DRAYLIB_ZIG_NO_RLGL_IMPL",
         // RL_DEFAULT_SHADER_* name constants live in rlgl.h's (now-disabled)
-        // IMPLEMENTATION block; rcore.c/rmodels.c still use them.
-        "-includesrc/c/rlgl_impl_defs.h",
+        // IMPLEMENTATION block; rcore.c/rmodels.c still use them. Found through
+        // the src/c include path (below), not a path relative to the working
+        // directory, so the library also builds as another project's dependency.
+        "-includerlgl_impl_defs.h",
     };
     const rlgl_flags = c_defines ++ no_rlgl_impl;
     // The oracle compiles WITHOUT UBSan: its job is producing upstream C's
@@ -636,6 +724,11 @@ fn rayguiModule(b: *std.Build, api: *std.Build.Module, platform: Platform) *std.
     return mod;
 }
 
+/// Shared modules the Zig-API examples import, from examples/zig/common/
+/// (rlights and reasings are ported from upstream's example headers; platform
+/// holds what upstream picks per platform, such as the GLSL version).
+const example_helpers = [_][]const u8{ "rlights", "reasings", "platform" };
+
 /// What every gated Zig-API example links against.
 const ApiGate = struct {
     api: *std.Build.Module,
@@ -760,8 +853,8 @@ pub fn build(b: *std.Build) void {
         gate_api.addImport("raylib_c", gate_c);
         // Shared helper modules ported from the raylib-authored headers that
         // sit next to the upstream examples (rlights.h, reasings.h).
-        var helpers: [2]std.Build.Module.Import = undefined;
-        for (&helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
+        var helpers: [example_helpers.len]std.Build.Module.Import = undefined;
+        for (&helpers, example_helpers) |*helper, helper_name| {
             const helper_mod = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/zig/common/{s}.zig", .{helper_name})) });
             helper_mod.addImport("raylib", gate_api);
             helper.* = .{ .name = helper_name, .module = helper_mod };
@@ -1043,8 +1136,9 @@ const emcc_flags = [_][]const u8{
     "-Wl,--fatal-warnings",
 };
 
-/// One example linked by emcc into <name>.js + .wasm (+ .data when the example's
-/// category has a resources/ directory). Returns the directory holding them.
+/// One example linked by emcc into <name>.js + .wasm (+ .data). The .data
+/// bundle holds `files` (paths under the category's resources/), or the whole
+/// resources/ directory when `files` is null. Returns the directory holding them.
 fn emccLink(
     b: *std.Build,
     emcc_path: []const u8,
@@ -1052,6 +1146,7 @@ fn emccLink(
     category: []const u8,
     inputs: []const *std.Build.Step.Compile,
     js_library: ?std.Build.LazyPath,
+    files: ?[]const []const u8,
 ) std.Build.LazyPath {
     const emcc = b.addSystemCommand(&.{emcc_path});
     for (inputs) |input| emcc.addArtifactArg(input);
@@ -1063,7 +1158,9 @@ fn emccLink(
     // Examples load "resources/..." relative to the working directory, which is
     // MEMFS's root on the web.
     const resources = b.fmt("{s}/{s}/resources", .{ raylib_examples, category });
-    if (std.Io.Dir.cwd().access(b.graph.io, resources, .{})) |_| {
+    if (files) |list| {
+        for (list) |file| emcc.addArgs(&.{ "--preload-file", b.fmt("{s}/{s}@resources/{s}", .{ resources, file, file }) });
+    } else if (std.Io.Dir.cwd().access(b.graph.io, resources, .{})) |_| {
         emcc.addArgs(&.{ "--preload-file", b.fmt("{s}@resources", .{resources}) });
     } else |_| {}
     emcc.addArg("-o");
@@ -1071,6 +1168,23 @@ fn emccLink(
 }
 
 const raylib_examples = "/home/rajesh/opensource/graphics/raylib-6.2/examples";
+
+/// test/web_resources.list (written by `zig build webresources`): for each web
+/// example, the resource files it loads. Lines are `<category>/<name>: <file>...`.
+fn webResources(b: *std.Build) std.StringHashMapUnmanaged([]const []const u8) {
+    var map: std.StringHashMapUnmanaged([]const []const u8) = .empty;
+    const text = std.Io.Dir.cwd().readFileAlloc(b.graph.io, "test/web_resources.list", b.allocator, .limited(1 << 20)) catch return map;
+    var lines = std.mem.tokenizeScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        if (line[0] == '#') continue;
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+        var files: std.ArrayList([]const u8) = .empty;
+        var it = std.mem.tokenizeScalar(u8, line[colon + 1 ..], ' ');
+        while (it.next()) |file| files.append(b.allocator, file) catch @panic("OOM");
+        map.put(b.allocator, line[0..colon], files.items) catch @panic("OOM");
+    }
+    return map;
+}
 
 /// `zig build web` and `zig build webexamples`: the port's web target.
 ///
@@ -1085,6 +1199,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     const web_step = b.step("web", "Build the Zig raylib for the browser (wasm32-emscripten)");
     const demos_step = b.step("webdemos", "Browser builds of the web examples for the site (zig-out/web/examples)");
     const gate_step = b.step("webexamples", "Browser gate: web examples, C vs Zig, in headless Chrome");
+    const resources_step = b.step("webresources", "Record the resource files each web example loads (test/web_resources.list)");
 
     const emsdk = b.option([]const u8, "emsdk", "Path to the Emscripten SDK (default: $EMSDK)") orelse
         b.graph.environ_map.get("EMSDK") orelse {
@@ -1092,6 +1207,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         web_step.dependOn(&fail.step);
         gate_step.dependOn(&fail.step);
         demos_step.dependOn(&fail.step);
+        resources_step.dependOn(&fail.step);
         return;
     };
     const emcc_path = b.pathJoin(&.{ emsdk, "upstream", "emscripten", "emcc" });
@@ -1132,8 +1248,8 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     gate_api.addImport("raylib_c", gate_c);
     const raygui = rayguiModule(b, gate_api, .web);
     raygui.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
-    var helpers: [2]std.Build.Module.Import = undefined;
-    for (&helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
+    var helpers: [example_helpers.len]std.Build.Module.Import = undefined;
+    for (&helpers, example_helpers) |*helper, helper_name| {
         const helper_mod = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/zig/common/{s}.zig", .{helper_name})) });
         helper_mod.addImport("raylib", gate_api);
         helper.* = .{ .name = helper_name, .module = helper_mod };
@@ -1151,8 +1267,8 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     demo_api.addImport("raylib_c", demo_c);
     const demo_raygui = rayguiModule(b, demo_api, .web);
     demo_raygui.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
-    var demo_helpers: [2]std.Build.Module.Import = undefined;
-    for (&demo_helpers, [_][]const u8{ "rlights", "reasings" }) |*helper, helper_name| {
+    var demo_helpers: [example_helpers.len]std.Build.Module.Import = undefined;
+    for (&demo_helpers, example_helpers) |*helper, helper_name| {
         const helper_mod = b.createModule(.{ .root_source_file = b.path(b.fmt("examples/zig/common/{s}.zig", .{helper_name})) });
         helper_mod.addImport("raylib", demo_api);
         helper.* = .{ .name = helper_name, .module = helper_mod };
@@ -1163,10 +1279,21 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     const c_dirs = b.addWriteFiles();
     const zig_dirs = b.addWriteFiles();
     var list_text: std.ArrayList(u8) = .empty;
+    var entries_text: std.ArrayList(u8) = .empty;
+    // The C oracle always gets its category's whole resources/; the Zig builds
+    // get only the files listed, so the gate proves the list is enough.
+    const resources = webResources(b);
     for (web_examples) |entry| {
         const category = entry[0..std.mem.indexOfScalar(u8, entry, '/').?];
         const name = entry[category.len + 1 ..];
         list_text.appendSlice(b.allocator, b.fmt("{s}\n", .{name})) catch @panic("OOM");
+        entries_text.appendSlice(b.allocator, b.fmt("{s}\n", .{entry})) catch @panic("OOM");
+        const files = resources.get(entry) orelse files: {
+            const fail = b.addFail(b.fmt("{s} is not in test/web_resources.list: run zig build webresources -Demsdk=...", .{entry}));
+            gate_step.dependOn(&fail.step);
+            demos_step.dependOn(&fail.step);
+            break :files null;
+        };
 
         // C oracle: the unmodified upstream example, shimmed for determinism.
         const c_mod = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true });
@@ -1179,7 +1306,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         });
         c_mod.addCSourceFiles(.{ .files = &.{ "tools/exdiff/driver.c", "tools/exdiff/hooks.c" }, .flags = &c_flags });
         const c_lib = b.addLibrary(.{ .name = b.fmt("{s}_c", .{name}), .linkage = .static, .root_module = c_mod });
-        const c_out = emccLink(b, emcc_path, name, category, &.{ c_lib, oracle }, null);
+        const c_out = emccLink(b, emcc_path, name, category, &.{ c_lib, oracle }, null, null);
         _ = c_dirs.addCopyDirectory(c_out, name, .{});
 
         // Zig: the Zig-API translation on the Zig library.
@@ -1197,7 +1324,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         z_mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &c_flags });
         const z_lib = b.addLibrary(.{ .name = name, .linkage = .static, .root_module = z_mod });
         z_lib.use_llvm = true;
-        const z_out = emccLink(b, emcc_path, name, category, &.{ z_lib, lib }, js_library);
+        const z_out = emccLink(b, emcc_path, name, category, &.{ z_lib, lib }, js_library, files);
         _ = zig_dirs.addCopyDirectory(z_out, name, .{});
 
         // The same translation for the site: the real API, the real main loop.
@@ -1212,7 +1339,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         for (demo_helpers) |helper| d_mod.addImport(helper.name, helper.module);
         const d_lib = b.addLibrary(.{ .name = b.fmt("{s}_demo", .{name}), .linkage = .static, .root_module = d_mod });
         d_lib.use_llvm = true;
-        const d_out = emccLink(b, emcc_path, name, category, &.{ d_lib, lib }, js_library);
+        const d_out = emccLink(b, emcc_path, name, category, &.{ d_lib, lib }, js_library, files);
         demos_step.dependOn(&b.addInstallDirectory(.{
             .source_dir = d_out,
             .install_dir = .{ .custom = "web/examples" },
@@ -1226,6 +1353,16 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     diff.addDirectoryArg(zig_dirs.getDirectory());
     diff.addFileArg(list);
     diff.addArg(b.option([]const u8, "web-filter", "webexamples: only diff examples whose name contains this") orelse "");
+    // Each passing example's final frame, for the site's gallery thumbnails.
+    diff.addArg("zig-out/web/frames"); // from the project root, as the script itself
     diff.has_side_effects = true;
     gate_step.dependOn(&diff.step);
+
+    const record = b.addSystemCommand(&.{ "node", "tools/webdiff/resources.mjs" });
+    record.addDirectoryArg(c_dirs.getDirectory());
+    record.addFileArg(b.addWriteFiles().add("webentries.list", entries_text.items));
+    record.addArg(raylib_examples);
+    record.addArg("test/web_resources.list"); // run from the project root, as webdiff.sh
+    record.has_side_effects = true;
+    resources_step.dependOn(&record.step);
 }

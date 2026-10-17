@@ -77,6 +77,18 @@ try {
   log = log.concat(await page.evaluate(() => window.webdiff.log));
   if (result.error) throw new Error(result.error);
 
+  // WEBDIFF_FILES=<path>: also write the resource files the program opened,
+  // as paths under resources/ that exist (tools/webdiff/resources.mjs).
+  if (process.env.WEBDIFF_FILES) {
+    const files = await page.evaluate(() => {
+      const fs = window.webdiff.module.FS;
+      return [...window.webdiff.opened]
+        .map((p) => p.replace(/^\/+/, '').replace(/^(\.\/)+/, ''))
+        .filter((p) => p.startsWith('resources/') && fs.analyzePath('/' + p).exists && !fs.isDir(fs.stat('/' + p).mode))
+        .map((p) => p.slice('resources/'.length));
+    });
+    await writeFile(process.env.WEBDIFF_FILES, JSON.stringify([...new Set(files)].sort()));
+  }
   const bytes = await page.evaluate(() => Array.from(window.webdiff.module.FS.readFile('/exdiff.png')));
   await writeFile(outPath, Buffer.from(bytes));
   status = 0;

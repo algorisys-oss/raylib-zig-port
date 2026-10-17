@@ -7,7 +7,7 @@
 const std = @import("std");
 const rl = @import("raylib");
 
-const glsl_version = 330; // Desktop GLSL version
+const glsl_version = @import("platform").glsl_version; // GLSL 330 on desktop, 100 on the web
 
 // Set this to true to use an HDR Texture
 // NOTE: raylib must be built with HDR Support for this to work: SUPPORT_FILEFORMAT_HDR

@@ -1,0 +1,163 @@
+# web_resources.list: the resource files each web example loads, relative to
+# its category's resources/ directory. Written by `zig build webresources`
+# (tools/webdiff/resources.mjs); do not edit by hand. build.zig preloads only
+# these into the Zig builds; the browser gate proves they are enough.
+core/core_basic_window:
+shapes/shapes_ball_physics:
+shapes/shapes_basic_shapes:
+shapes/shapes_bouncing_ball:
+shapes/shapes_bullet_hell:
+shapes/shapes_circle_sector_drawing:
+shapes/shapes_clock_of_clocks:
+shapes/shapes_collision_area:
+shapes/shapes_colors_palette:
+shapes/shapes_dashed_line:
+shapes/shapes_digital_clock:
+shapes/shapes_double_pendulum:
+shapes/shapes_drag_puzzle:
+shapes/shapes_easings_ball:
+shapes/shapes_easings_box:
+shapes/shapes_easings_rectangles:
+shapes/shapes_easings_testbed:
+shapes/shapes_ellipse_collision:
+shapes/shapes_following_eyes:
+shapes/shapes_hilbert_curve:
+shapes/shapes_kaleidoscope:
+shapes/shapes_lines_bezier:
+shapes/shapes_lines_drawing:
+shapes/shapes_logo_raylib:
+shapes/shapes_logo_raylib_anim:
+shapes/shapes_math_angle_rotation:
+shapes/shapes_math_sine_cosine:
+shapes/shapes_mouse_trail:
+shapes/shapes_outlines_testbed:
+shapes/shapes_outlines_thickness:
+shapes/shapes_penrose_tile:
+shapes/shapes_pie_chart:
+shapes/shapes_polygon_lines:
+shapes/shapes_rectangle_advanced:
+shapes/shapes_rectangle_scaling:
+shapes/shapes_recursive_tree:
+shapes/shapes_ring_drawing:
+shapes/shapes_rlgl_color_wheel:
+shapes/shapes_rlgl_triangle:
+shapes/shapes_rounded_rectangle_drawing:
+shapes/shapes_simple_particles:
+shapes/shapes_splines_drawing:
+shapes/shapes_starfield_effect:
+shapes/shapes_top_down_lights:
+shapes/shapes_triangle_strip:
+shapes/shapes_vector_angle:
+textures/textures_background_scrolling: cyberpunk_street_background.png cyberpunk_street_foreground.png cyberpunk_street_midground.png
+textures/textures_blend_modes: cyberpunk_street_background.png cyberpunk_street_foreground.png
+textures/textures_bunnymark: raybunny.png
+textures/textures_cellular_automata:
+textures/textures_clipboard_image:
+textures/textures_fog_of_war:
+textures/textures_framebuffer_rendering:
+textures/textures_gif_player: scarfy_run.gif
+textures/textures_image_channel: fudesumi.png
+textures/textures_image_drawing: cat.png custom_jupiter_crash.png parrots.png
+textures/textures_image_generation:
+textures/textures_image_kernel: cat.png
+textures/textures_image_loading: raylib_logo.png
+textures/textures_image_processing: parrots.png
+textures/textures_image_rotate: raylib_logo.png
+textures/textures_image_text: KAISG.ttf parrots.png
+textures/textures_logo_raylib: raylib_logo.png
+textures/textures_magnifying_glass: parrots.png raybunny.png
+textures/textures_mouse_painting:
+textures/textures_npatch_drawing: ninepatch_button.png
+textures/textures_particles_blending: spark_flame.png
+textures/textures_polygon_drawing: cat.png
+textures/textures_portal_window:
+textures/textures_raw_data: fudesumi.raw
+textures/textures_screen_buffer:
+textures/textures_sprite_animation: scarfy.png
+textures/textures_sprite_button: button.png buttonfx.wav
+textures/textures_sprite_explosion: boom.wav explosion.png
+textures/textures_sprite_stacking: booth.png
+textures/textures_srcrec_dstrec: scarfy.png
+textures/textures_textured_curve: road.png
+textures/textures_tiled_drawing: patterns.png
+text/text_3d_drawing: shaders/glsl100/alpha_discard.fs
+text/text_animations:
+text/text_codepoints_loading: DotGothic16-Regular.ttf
+text/text_font_filters: KAISG.ttf
+text/text_font_loading: pixantiqua.fnt pixantiqua.png pixantiqua.ttf
+text/text_font_sdf: anonymous_pro_bold.ttf shaders/glsl100/sdf.fs
+text/text_font_spritefont: custom_alagard.png custom_jupiter_crash.png custom_mecha.png
+text/text_format_text:
+text/text_inline_styling:
+text/text_input_box:
+text/text_rectangle_bounds:
+text/text_sprite_fonts: sprite_fonts/alagard.png sprite_fonts/alpha_beta.png sprite_fonts/jupiter_crash.png sprite_fonts/mecha.png sprite_fonts/pixantiqua.png sprite_fonts/pixelplay.png sprite_fonts/romulus.png sprite_fonts/setback.png
+text/text_strings_management:
+text/text_unicode_emojis: dejavu.fnt dejavu.png noto_cjk.fnt noto_cjk.png symbola.fnt symbola.png
+text/text_unicode_ranges: NotoSansTC-Regular.ttf
+text/text_words_alignment:
+text/text_writing_anim:
+shaders/shaders_ascii_rendering: fudesumi.png raysan.png shaders/glsl100/ascii.fs
+shaders/shaders_basic_lighting: shaders/glsl100/lighting.fs shaders/glsl100/lighting.vs
+shaders/shaders_basic_pbr: models/old_car_new.glb models/plane.glb old_car_d.png old_car_e.png old_car_mra.png old_car_n.png road_a.png road_mra.png road_n.png shaders/glsl100/pbr.fs shaders/glsl100/pbr.vs
+shaders/shaders_cel_shading: models/old_car_new.glb shaders/glsl100/cel.fs shaders/glsl100/cel.vs shaders/glsl100/outline_hull.fs shaders/glsl100/outline_hull.vs
+shaders/shaders_color_correction: cat.png fudesumi.png mandrill.png parrots.png shaders/glsl100/color_correction.fs
+shaders/shaders_custom_uniform: models/barracks.obj models/barracks_diffuse.png shaders/glsl100/swirl.fs
+shaders/shaders_deferred_rendering: shaders/glsl100/deferred_shading.fs shaders/glsl100/deferred_shading.vs shaders/glsl100/gbuffer.fs shaders/glsl100/gbuffer.vs
+shaders/shaders_depth_rendering: shaders/glsl100/depth_render.fs
+shaders/shaders_eratosthenes_sieve: shaders/glsl100/eratosthenes.fs
+shaders/shaders_fog_rendering: shaders/glsl100/fog.fs shaders/glsl100/lighting.vs texel_checker.png
+shaders/shaders_game_of_life: game_of_life/acorn.png game_of_life/breeder.png game_of_life/glider.png game_of_life/glider_gun.png game_of_life/oscillators.png game_of_life/puffer_train.png game_of_life/r_pentomino.png game_of_life/spaceships.png game_of_life/still_lifes.png shaders/glsl100/game_of_life.fs
+shaders/shaders_hot_reloading: shaders/glsl100/reload.fs
+shaders/shaders_julia_set: shaders/glsl100/julia_set.fs
+shaders/shaders_lightmap_rendering: cubicmap_atlas.png shaders/glsl100/lightmap.fs shaders/glsl100/lightmap.vs spark_flame.png
+shaders/shaders_lights_bloom: shaders/glsl100/lights_bloom.fs shaders/glsl100/lights_bloom.vs shaders/glsl100/lights_bloom_post.fs
+shaders/shaders_mandelbrot_set: shaders/glsl100/mandelbrot_set.fs
+shaders/shaders_mesh_instancing: shaders/glsl100/lighting.fs shaders/glsl100/lighting_instancing.vs
+shaders/shaders_model_shader: models/watermill.obj models/watermill_diffuse.png shaders/glsl100/grayscale.fs
+shaders/shaders_multi_sample2d: shaders/glsl100/color_mix.fs
+shaders/shaders_normalmap_rendering: models/plane.glb shaders/glsl100/normalmap.fs shaders/glsl100/normalmap.vs tiles_diffuse.png tiles_normal.png
+shaders/shaders_palette_switch: shaders/glsl100/palette_switch.fs
+shaders/shaders_postprocessing: models/church.obj models/church_diffuse.png shaders/glsl100/bloom.fs shaders/glsl100/blur.fs shaders/glsl100/cross_hatching.fs shaders/glsl100/cross_stitching.fs shaders/glsl100/dream_vision.fs shaders/glsl100/fisheye.fs shaders/glsl100/grayscale.fs shaders/glsl100/pixelizer.fs shaders/glsl100/posterization.fs shaders/glsl100/predator.fs shaders/glsl100/scanlines.fs shaders/glsl100/sobel.fs
+shaders/shaders_rounded_rectangle: shaders/glsl100/base.vs shaders/glsl100/rounded_rectangle.fs
+shaders/shaders_shadowmap_rendering: models/robot.glb shaders/glsl100/shadowmap.fs shaders/glsl100/shadowmap.vs
+shaders/shaders_shapes_textures: fudesumi.png shaders/glsl100/grayscale.fs
+shaders/shaders_simple_mask: mask.png plasma.png shaders/glsl100/mask.fs
+shaders/shaders_spotlight_rendering: raysan.png shaders/glsl100/spotlight.fs
+shaders/shaders_texture_outline: fudesumi.png shaders/glsl100/outline.fs
+shaders/shaders_texture_rendering: shaders/glsl100/cubes_panning.fs
+shaders/shaders_texture_tiling: cubicmap_atlas.png shaders/glsl100/tiling.fs
+shaders/shaders_texture_waves: shaders/glsl100/wave.fs space.png
+shaders/shaders_vertex_displacement: shaders/glsl100/vertex_displacement.fs shaders/glsl100/vertex_displacement.vs
+models/models_animation_blend_custom: models/gltf/greenman.glb shaders/glsl100/skinning.fs shaders/glsl100/skinning.vs
+models/models_animation_blending: models/gltf/robot.glb shaders/glsl100/skinning.fs shaders/glsl100/skinning.vs
+models/models_animation_gpu_skinning: models/gltf/greenman.glb shaders/glsl100/skinning.fs shaders/glsl100/skinning.vs
+models/models_animation_timing: models/gltf/robot.glb
+models/models_basic_voxel:
+models/models_billboard_rendering: billboard.png
+models/models_bone_socket: models/gltf/greenman.glb models/gltf/greenman_hat.glb models/gltf/greenman_shield.glb models/gltf/greenman_sword.glb
+models/models_box_collisions:
+models/models_cubicmap_rendering: cubicmap.png cubicmap_atlas.png
+models/models_decals: models/obj/character.mtl models/obj/character.obj models/obj/character_diffuse.png raylib_logo.png
+models/models_directional_billboard: skillbot.png
+models/models_first_person_maze: cubicmap.png cubicmap_atlas.png
+models/models_geometric_shapes:
+models/models_heightmap_rendering: heightmap.png
+models/models_loading: models/obj/castle.obj models/obj/castle_diffuse.png
+models/models_loading_gltf: models/gltf/robot.glb
+models/models_loading_iqm: models/iqm/guy.iqm models/iqm/guyanim.iqm models/iqm/guytex.png
+models/models_loading_m3d: models/m3d/cesium_man.m3d
+models/models_loading_vox: models/vox/chr_knight.vox models/vox/chr_sword.vox models/vox/fez.vox models/vox/monu9.vox shaders/glsl100/voxel_lighting.fs shaders/glsl100/voxel_lighting.vs
+models/models_mesh_generation:
+models/models_mesh_picking: models/obj/turret.obj models/obj/turret_diffuse.png
+models/models_mesh_uv_painting:
+models/models_orthographic_projection:
+models/models_point_rendering:
+models/models_procedural_decals:
+models/models_rlgl_solar_system:
+models/models_rotating_cube: cubicmap_atlas.png
+models/models_skybox_rendering: dresden_square_2k.hdr shaders/glsl100/cubemap.fs shaders/glsl100/cubemap.vs shaders/glsl100/skybox.fs shaders/glsl100/skybox.vs skybox.png
+models/models_tesseract_view:
+models/models_textured_cube: cubicmap_atlas.png
+models/models_waving_cubes:
+models/models_yaw_pitch_roll: models/obj/plane.obj models/obj/plane_diffuse.png

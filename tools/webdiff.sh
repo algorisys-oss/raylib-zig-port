@@ -8,10 +8,12 @@
 # This script runs both in headless Chrome (tools/webdiff/run.mjs, WebGL 2 on
 # SwiftShader), reads back the final frame, and byte-compares the PNGs.
 #
-# Usage: webdiff.sh <c-dir> <zig-dir> <list-file> [name-filter]
+# Usage: webdiff.sh <c-dir> <zig-dir> <list-file> [name-filter] [frames-dir]
 #   <c-dir>/<name>/ and <zig-dir>/<name>/ hold <name>.js/.wasm(/.data).
 #   list-file: one example name per line.
 #   name-filter: only run examples whose name contains it ('' = all).
+#   frames-dir: copy each passing example's final frame there as <name>.png
+#     (the same in C and Zig; raylib-zig-web makes its thumbnails from them).
 # Env: WEBDIFF_FRAMES (default 240), WEBDIFF_KEEP=<dir> keeps both PNGs per example.
 set -uo pipefail
 
@@ -19,6 +21,8 @@ C_DIR="${1:?need C dir}"
 ZIG_DIR="${2:?need Zig dir}"
 LIST="${3:?need list file}"
 FILTER="${4:-}"
+FRAMES_DIR="${5:-}"
+[ -n "$FRAMES_DIR" ] && mkdir -p "$FRAMES_DIR"
 FRAMES="${WEBDIFF_FRAMES:-240}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,6 +59,7 @@ while read -r name; do
   fi
   if cmp -s "$c_png" "$z_png"; then
     echo "  PASS  $name"
+    [ -n "$FRAMES_DIR" ] && cp "$z_png" "$FRAMES_DIR/$name.png"
     pass=$((pass + 1))
   else
     echo "  FAIL  $name (final frames differ)"
