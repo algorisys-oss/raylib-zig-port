@@ -19,7 +19,6 @@ core/core_clipboard_text:
 core/core_compute_hash:
 core/core_custom_logging:
 core/core_delta_time:
-core/core_directory_files: *
 core/core_drop_files:
 core/core_highdpi_demo:
 core/core_highdpi_testbed:
@@ -205,3 +204,21 @@ models/models_tesseract_view:
 models/models_textured_cube: cubicmap_atlas.png
 models/models_waving_cubes:
 models/models_yaw_pitch_roll: models/obj/plane.obj models/obj/plane_diffuse.png
+audio/audio_amp_envelope:
+audio/audio_music_stream: country.mp3
+audio/audio_sound_loading: sound.wav target.ogg
+audio/audio_sound_multi: sound.wav
+audio/audio_sound_positioning: coin.wav
+others/embedded_files_loading: audio_data.h image_data.h
+others/gl_scissor_shapes:
+# Site demos only (not gated): the files their C source names.
+audio/audio_mixed_processor: coin.wav country.mp3
+audio/audio_module_playing: mini1111.xm
+audio/audio_raw_stream:
+audio/audio_spectrum_visualizer: country.mp3 shaders/glsl100/fft.fs
+audio/audio_stream_callback:
+audio/audio_stream_effects: country.mp3
+core/core_custom_frame_control:
+core/core_input_gestures_testbed:
+core/core_window_should_close:
+core/core_window_web:

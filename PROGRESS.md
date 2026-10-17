@@ -46,8 +46,8 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   `src/platforms/rcore_desktop_glfw.zig` (216 exports before and after).
 - `zig build webexamples`: browser gate, C oracle vs Zig-API translation in
   headless Chrome (SwiftShader), byte-compared. C-vs-C deterministic; negative
-  control fails. **202** (core 44 + shapes 45 + textures 32/33 + text 17 +
-  shaders 32/36 + models 32; 7 exclusions in docs/web.md), Debug and
+  control fails. **209** (every desktop-gated example but 8; exclusions in
+  docs/web.md; audio compared with playback stalled), Debug and
   ReleaseFast.
 - `zig build webdemos`: the same examples without the shim, for the site.
 - Two port bugs found (hidden by x86-64): libc `time_t`/`timespec`/`stat`/
@@ -74,6 +74,10 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   dirRead for emscripten is unimplemented (src/fs.zig uses std.Io.Dir);
   core_directory_files excluded until that is decided. Zig-API example C
   shims (core_screen_recording's msf_gif) are now linked on the web too.
+- Audio and others (2026-10-17): audio 5, embedded_files_loading,
+  gl_scissor_shapes in the gate; raylib_opengl_interop excluded (desktop GL
+  only). web_demos_only: 10 site demos that are not compared (build-only
+  examples + core_window_web).
 - Desktop gates after all of this: pixel 12/12, exdiff 217/217, apiexamples
   217/217, cdiff 4/4, audio 43/43, data, math/cam/gest, apitest, constaudit 0.
 

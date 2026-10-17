@@ -2,7 +2,7 @@
 // test/web_resources.list. build.zig preloads only those files into the
 // example's .data bundle (instead of its whole category's resources/).
 //
-//   node tools/webdiff/resources.mjs <c-dir> <list-file> <examples-root> <out>
+//   node tools/webdiff/resources.mjs <c-dir> <list-file> <examples-root> <out> [demos-list]
 //   (run by `zig build webresources`)
 //
 // A file is listed when either:
@@ -15,13 +15,17 @@
 // category's whole resources/, since what it shows depends on what is there.
 // The gate then runs C with the whole category and Zig with only the listed
 // files: a missing file shows up as a frame difference.
+//
+// demos-list: examples built only as site demos (build.zig web_demos_only).
+// They have no C build to run, so they get the files their source names.
+// Nothing proves those lists; a demo that misses a file shows an error.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const [cDir, listFile, examplesRoot, outPath] = process.argv.slice(2);
+const [cDir, listFile, examplesRoot, outPath, demosFile] = process.argv.slice(2);
 if (!cDir || !listFile || !examplesRoot || !outPath) {
   console.error('usage: resources.mjs <c-dir> <list-file> <examples-root> <out>');
   process.exit(2);
@@ -78,6 +82,17 @@ for (const entry of readFileSync(listFile, 'utf8').split('\n').filter(Boolean)) 
     : [...new Set([...opened, ...(existsSync(resources) ? named(source, resources) : [])])].sort();
   lines.push(`${entry}:${files.map((f) => ' ' + f).join('')}`);
   console.log(`  ${String(files.length).padStart(3)}  ${entry}`);
+}
+if (demosFile) {
+  lines.push('# Site demos only (not gated): the files their C source names.');
+  for (const entry of readFileSync(demosFile, 'utf8').split('\n').filter(Boolean)) {
+    const [category, name] = entry.split('/');
+    const resources = join(examplesRoot, category, 'resources');
+    const source = readFileSync(join(examplesRoot, category, `${name}.c`), 'utf8');
+    const files = existsSync(resources) ? [...new Set(named(source, resources))].sort() : [];
+    lines.push(`${entry}:${files.map((f) => ' ' + f).join('')}`);
+    console.log(`  ${String(files.length).padStart(3)}  ${entry} (demo only)`);
+  }
 }
 writeFileSync(outPath, lines.join('\n') + '\n');
 console.log(failed ? `FAIL  ${failed} example(s) did not run` : `wrote ${outPath}`);

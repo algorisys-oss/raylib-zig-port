@@ -538,6 +538,13 @@ const web_examples = [_][]const u8{
     "models/models_textured_cube",
     "models/models_waving_cubes",
     "models/models_yaw_pitch_roll",
+    "audio/audio_amp_envelope",
+    "audio/audio_music_stream",
+    "audio/audio_sound_loading",
+    "audio/audio_sound_multi",
+    "audio/audio_sound_positioning",
+    "others/embedded_files_loading",
+    "others/gl_scissor_shapes",
     // Browser exclusions, one per line as `// <entry>: <reason>` (docs/web.md):
     // textures/textures_to_image: WebGL 2 cannot glReadPixels an RGB texture (GL_INVALID_OPERATION); C and Zig both draw an unwritten buffer
     // shaders/shaders_rlgl_compute: compute shaders need desktop OpenGL 4.3; WebGL 2 has none
@@ -546,6 +553,7 @@ const web_examples = [_][]const u8{
     // shaders/shaders_raymarching_rendering: its GLSL 100 shader needs GL_OES_standard_derivatives (fwidth), which WebGL 2 does not offer to GLSL ES 1.00 shaders
     // core/core_window_web: its C version runs its frames through emscripten_set_main_loop, which the gate's frame counter (driven by WindowShouldClose) never sees; the Zig translation uses the normal loop
     // core/core_directory_files: port gap on the web: Zig std has no directory reading for emscripten (dirReadUnimplemented), so LoadDirectoryFiles returns nothing where C lists /tmp, /home, /dev, /proc and /resources
+    // others/raylib_opengl_interop: calls desktop OpenGL directly and includes GL headers only for PLATFORM_DESKTOP*; it does not compile for the web, in C or Zig
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
@@ -1233,6 +1241,61 @@ fn webResources(b: *std.Build) std.StringHashMapUnmanaged([]const []const u8) {
     return map;
 }
 
+/// Examples that run in the browser but cannot be compared with C there: the
+/// desktop gate's build-only examples (their C original does not give the same
+/// frame twice; reasons in test/examples.list) and core_window_web (see the
+/// exclusion comment in web_examples). The site gets a demo of each; the gate
+/// does not run them.
+const web_demos_only = api_examples_build_only ++ [_][]const u8{"core/core_window_web"};
+
+/// What every site demo (`zig build webdemos`) is built with.
+const WebDemo = struct {
+    b: *std.Build,
+    emcc_path: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: ?std.builtin.Optimize,
+    api: *std.Build.Module,
+    raygui: *std.Build.Module,
+    helpers: []const std.Build.Module.Import,
+    lib: *std.Build.Step.Compile,
+    js_library: std.Build.LazyPath,
+    sysroot_include: []const u8,
+    c_flags: []const []const u8,
+    step: *std.Build.Step,
+};
+
+/// One site demo: the Zig-API translation on the real API and the real main
+/// loop (no determinism shim), installed to zig-out/web/examples/<name>/.
+fn webDemo(demo: WebDemo, entry: []const u8, files: ?[]const []const u8) void {
+    const b = demo.b;
+    const category = entry[0..std.mem.indexOfScalar(u8, entry, '/').?];
+    const name = entry[category.len + 1 ..];
+    const mod = b.createModule(.{
+        .root_source_file = b.path(b.fmt("examples/zig/{s}.zig", .{entry})),
+        .target = demo.target,
+        .optimize = demo.optimize,
+        .link_libc = true,
+    });
+    mod.addImport("raylib", demo.api);
+    mod.addImport("raygui", demo.raygui);
+    for (demo.helpers) |helper| mod.addImport(helper.name, helper.module);
+    // The example's own C (e.g. a single-header library), as on the desktop.
+    for (api_example_c_shims) |shim| {
+        if (!std.mem.eql(u8, shim, entry)) continue;
+        mod.addIncludePath(b.path("vendor/raylib/src"));
+        mod.addSystemIncludePath(.{ .cwd_relative = demo.sysroot_include });
+        mod.addCSourceFile(.{ .file = b.path(b.fmt("examples/zig/{s}_shim.c", .{entry})), .flags = demo.c_flags });
+    }
+    const lib = b.addLibrary(.{ .name = b.fmt("{s}_demo", .{name}), .linkage = .static, .root_module = mod });
+    lib.use_llvm = true;
+    const out = emccLink(b, demo.emcc_path, name, category, &.{ lib, demo.lib }, demo.js_library, files);
+    demo.step.dependOn(&b.addInstallDirectory(.{
+        .source_dir = out,
+        .install_dir = .{ .custom = "web/examples" },
+        .install_subdir = name,
+    }).step);
+}
+
 /// `zig build web` and `zig build webexamples`: the port's web target.
 ///
 /// Zig compiles the library (Zig modules + the bundled C) for wasm32-emscripten,
@@ -1323,6 +1386,20 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
 
     const c_flags = [_][]const u8{ "-std=gnu99", "-DPLATFORM_WEB", "-ffp-contract=off", "-fno-sanitize=undefined", "-w" };
 
+    const demo: WebDemo = .{
+        .b = b,
+        .emcc_path = emcc_path,
+        .target = target,
+        .optimize = optimize,
+        .api = demo_api,
+        .raygui = demo_raygui,
+        .helpers = &demo_helpers,
+        .lib = lib,
+        .js_library = js_library,
+        .sysroot_include = sysroot_include,
+        .c_flags = &c_flags,
+        .step = demos_step,
+    };
     const c_dirs = b.addWriteFiles();
     const zig_dirs = b.addWriteFiles();
     var list_text: std.ArrayList(u8) = .empty;
@@ -1377,31 +1454,19 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         const z_out = emccLink(b, emcc_path, name, category, &.{ z_lib, lib }, js_library, files);
         _ = zig_dirs.addCopyDirectory(z_out, name, .{});
 
-        // The same translation for the site: the real API, the real main loop.
-        const d_mod = b.createModule(.{
-            .root_source_file = b.path(b.fmt("examples/zig/{s}.zig", .{entry})),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        });
-        d_mod.addImport("raylib", demo_api);
-        d_mod.addImport("raygui", demo_raygui);
-        for (demo_helpers) |helper| d_mod.addImport(helper.name, helper.module);
-        // The example's own C (e.g. a single-header library), as on the desktop.
-        for (api_example_c_shims) |shim| {
-            if (!std.mem.eql(u8, shim, entry)) continue;
-            d_mod.addIncludePath(b.path("vendor/raylib/src"));
-            d_mod.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
-            d_mod.addCSourceFile(.{ .file = b.path(b.fmt("examples/zig/{s}_shim.c", .{entry})), .flags = &c_flags });
-        }
-        const d_lib = b.addLibrary(.{ .name = b.fmt("{s}_demo", .{name}), .linkage = .static, .root_module = d_mod });
-        d_lib.use_llvm = true;
-        const d_out = emccLink(b, emcc_path, name, category, &.{ d_lib, lib }, js_library, files);
-        demos_step.dependOn(&b.addInstallDirectory(.{
-            .source_dir = d_out,
-            .install_dir = .{ .custom = "web/examples" },
-            .install_subdir = name,
-        }).step);
+        webDemo(demo, entry, files);
+    }
+    // Demos the gate cannot compare (see web_demos_only): built for the site,
+    // with the files their source names (test/web_resources.list).
+    var demo_entries_text: std.ArrayList(u8) = .empty;
+    for (web_demos_only) |entry| {
+        demo_entries_text.appendSlice(b.allocator, b.fmt("{s}\n", .{entry})) catch @panic("OOM");
+        const files = resources.get(entry) orelse files: {
+            const fail = b.addFail(b.fmt("{s} is not in test/web_resources.list: run zig build webresources -Demsdk=...", .{entry}));
+            demos_step.dependOn(&fail.step);
+            break :files null;
+        };
+        webDemo(demo, entry, files);
     }
     const list = b.addWriteFiles().add("webexamples.list", list_text.items);
 
@@ -1420,6 +1485,7 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
     record.addFileArg(b.addWriteFiles().add("webentries.list", entries_text.items));
     record.addArg(raylib_examples);
     record.addArg("test/web_resources.list"); // run from the project root, as webdiff.sh
+    record.addFileArg(b.addWriteFiles().add("webdemos.list", demo_entries_text.items));
     record.has_side_effects = true;
     resources_step.dependOn(&record.step);
 }

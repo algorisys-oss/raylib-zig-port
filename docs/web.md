@@ -6,11 +6,11 @@ This page explains how it is put together, how it is checked against C raylib,
 and what is not done yet.
 
 Status (2026-10-17): the platform backend and the OpenGL ES 3 path are ported.
-The browser gate covers 202 examples: core (44 of the 46 gated on the
-desktop), shapes (45), textures (32 of 33), text (17), shaders (32 of 36) and
-models (32). They pass in Debug and in ReleaseFast. The seven excluded
-examples, and why, are under "Browser exclusions" below; one of them
-(core_directory_files) is a port gap. Audio and others come next.
+The browser gate covers 209 examples: every example the desktop gate
+compares, except 8 left out with reasons under "Browser exclusions" below (one
+of them, core_directory_files, is a port gap). They pass in Debug and in
+ReleaseFast. Ten more are built as demos for the site but not compared (see
+"Demos that are not compared").
 
 ## What runs in the browser
 
@@ -208,6 +208,22 @@ defines: `-DPLATFORM_WEB` on the web (raygui reads the scroll wheel
 differently there), and without UBSan, which emcc has no runtime for. The Zig
 side once used the desktop flags, and every raygui example failed to link.
 
+## Audio in the gate
+
+Headless Chrome does not start an `AudioContext` without a user gesture, and
+the gate makes none. So the five audio examples in the gate run with playback
+stalled: what is compared is what they draw. The decoded audio itself is
+checked on the desktop (`zig build audiocheck`, PCM identical to C). On the
+site, pressing Run is a gesture, so the demos play sound.
+
+## Demos that are not compared
+
+`web_demos_only` in build.zig lists examples that run in the browser but have
+no C frame to compare against: the desktop gate's build-only examples (their C
+original does not give the same frame twice; reasons in test/examples.list)
+and core_window_web. `zig build webdemos` builds them for the site, with the
+resource files their C source names. The gate does not run them.
+
 ## Browser exclusions
 
 An example is left out of the browser gate only when it cannot give a correct
@@ -219,13 +235,14 @@ build.zig's `web_examples` and a row here.
 | `textures_to_image` | It reads an RGB texture back from the GPU (`LoadImageFromTexture`). On OpenGL ES, rlgl does that with `glReadPixels` in the texture's own format, and WebGL 2 accepts only RGBA there: the call fails with `GL_INVALID_OPERATION` in C and in Zig. Both then draw a buffer the GPU never wrote: leftover heap bytes in C, zeros in Zig. |
 | `core_directory_files` | **A port gap, not a browser limit.** `LoadDirectoryFiles` lists nothing on the web: `src/fs.zig` reads directories through `std.Io.Dir`, and in Zig 0.18.0-dev.246 std's directory reading for emscripten is `dirReadUnimplemented`. C raylib uses libc's `readdir`, which Emscripten provides, and lists `/tmp`, `/home`, `/dev`, `/proc` and `/resources`. Fixing it means calling libc's `readdir` on the web (a libc extern, which idiomaudit counts) or waiting for std. |
 | `core_window_web` | Its C version runs its frames through `emscripten_set_main_loop` on the web. The gate's determinism shim counts frames in `WindowShouldClose`, which that path never calls, so the C side never takes its screenshot. The Zig translation uses raylib's normal loop (Asyncify), so there is no matching pair to compare. |
+| `raylib_opengl_interop` | It mixes raylib with plain desktop OpenGL calls, and it includes OpenGL headers only on the desktop platforms. It does not compile for the web, in C or in Zig. |
 | `shaders_rlgl_compute` | Compute shaders need desktop OpenGL 4.3. WebGL 2 has none. |
 | `shaders_depth_writing`, `shaders_hybrid_rendering`, `shaders_raymarching_rendering` | Their `glsl100` shaders use `GL_EXT_frag_depth` or `GL_OES_standard_derivatives`. Those are WebGL 1 extensions; WebGL 2 does not offer them to GLSL ES 1.00 shaders, so the shader does not compile. C raylib then falls back to its default shader and draws something else; the Zig API returns the load error. Upstream raylib's own web build uses WebGL 1, where these shaders work. |
 
 ## Not done yet
 
-- The gate covers core, shapes, textures, text, shaders and models. Audio and
-  others come next, with each browser exclusion recorded and explained.
+- Every desktop-gated example is now tried in the browser. What is left is
+  the exclusions above, and audio that plays during the gate.
 - Speed: not measured yet. Size, for `core_basic_window` at ReleaseFast with
   `-sASYNCIFY` and emcc `-O2`: the Zig build is 107,469 bytes of wasm and
   159,896 of JS; the C build is 103,858 and 163,614. A frame-callback build
