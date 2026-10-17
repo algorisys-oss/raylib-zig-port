@@ -1,4 +1,4 @@
-# handoff.md — fresh-session bootstrap (written 2026-10-16 22:30 IST)
+# handoff.md — fresh-session bootstrap (written 2026-10-16 22:30 IST; state updated 2026-10-17 08:00 from the raylib-zig-web session)
 
 > Overwritten at the end of every run (CLAUDE.md). PROGRESS.md holds history.
 
@@ -18,6 +18,19 @@
 - Later (5cd8ae2, from the raylib-zig-web session): browser gate **78/78**
   Debug and ReleaseFast (+32 textures; textures_to_image excluded, docs/web.md);
   rmodels par_shapes extern fixed to f32; web links use -Wl,--fatal-warnings.
+- Later (a3623f9, raylib-zig-web session): browser gate **159/159** Debug and
+  ReleaseFast (+text 17, shaders 32/36, models 32; 5 exclusions in docs/web.md).
+  New: examples/zig/common/platform.zig (glsl_version), test/web_resources.list
+  + `zig build webresources` (per-example .data, proven by the gate),
+  gate frames in zig-out/web/frames, `tools/gen_api.py --json` ->
+  src/api/api.json, builds as a dependency (rlgl_impl_defs.h include fix).
+  Desktop re-run after it: pixel 12/12, apiexamples 217/217, exdiff 217/217.
+- Open: `python3 tools/gen_api.py` (full regen) no longer reproduces the
+  checked-in src/api/raylib.zig (zig fmt quoting, @fromBackingInt vs
+  @enumFromInt in a few wrappers). Do not regenerate until the generator is
+  brought in line; `--json` reads the checked-in file and is safe.
+- Open: core_basic_window web wasm is 258,589 bytes at ReleaseFast (docs/web.md
+  measured 107,469 before round 2); not investigated.
 
 ## 2. What this run did
 
@@ -38,9 +51,9 @@
 
 1. Owner: send the reviewer reply (docs/migration-status.md, appendix) and
    decide whether to report the BMFont use-after-free upstream.
-2. Phase W (web) resume list: text in `web_examples` (textures done); GLSL
-   version constant then shaders; per-example .data; example manifest;
-   Asyncify vs frame callback.
+2. Phase W (web) resume list: rest of core, audio, others in `web_examples`
+   (text, shaders, models done; after adding, run `zig build webresources`);
+   example manifest; Asyncify vs frame callback; the wasm size growth.
 3. Optional: idiomaudit `[*c]` count is dominated by export signatures and
    the generated src/api/c*.zig bindings; nothing actionable there.
 

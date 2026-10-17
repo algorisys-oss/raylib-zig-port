@@ -204,3 +204,4 @@
 12	2026-10-16	22:22:17	22:26:03	18	4978	4230250	3584	4238830	192641069	(in progress at record) pinned examples Debug+ReleaseFast 217/217; site e2e; docs; handoff
 # Session total so far ~192.1M main-loop (incl. cache reads) + ~1.98M in 5 module agents (rtext 0.32M, rtextures 0.42M, rmodels 0.67M, raudio 0.28M, rlgl 0.30M).
 # 2026-10-16 22:38-00:05 textures browser gate (78/78) + par_shapes fix from the raylib-zig-web session; tokens in raylib-zig-web/tokens.txt row 12.
+# 2026-10-17 05:00-08:00 browser gate to 159/159, per-example .data, api.json, dependency fix: from the raylib-zig-web session; tokens in raylib-zig-web/tokens.txt.
