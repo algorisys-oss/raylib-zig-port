@@ -16,6 +16,7 @@ the rules of docs/zig-api.md ("raygui" section), reusing gen_api.py's parser:
 
 Outputs: src/raygui/raygui.zig (binding) and src/raygui/c.zig (exact-C externs).
 Usage: python3 tools/gen_raygui.py
+       python3 tools/gen_raygui.py --json   (only src/raygui/api.json, for raylib-zig-web)
 """
 import pathlib
 import re
@@ -209,7 +210,40 @@ fn styleValue(value: anytype) c_int {
 '''
 
 
+def emit_json():
+    """src/raygui/api.json, in the shape of gen_api.py's src/api/api.json:
+    names, both signatures and raygui's comment per function. Signatures are
+    read from the checked-in src/raygui/raygui.zig."""
+    import json
+
+    src = HEADER.read_text()
+    decls = api.c_decls(src, "RAYGUIAPI ")
+    committed = api.committed_signatures(OUT_DIR / "raygui.zig")
+    records = []
+    for fname, ret, params, comment in api.parse_functions(src, "RAYGUIAPI "):
+        zname = api.camel(strip_gui(fname))
+        if f"rl.{zname}" not in committed:
+            raise ValueError(f"{fname}: {zname} is not in {OUT_DIR}/raygui.zig")
+        _, group, cdecl = decls[fname]
+        records.append({
+            "module": "raygui",
+            "group": group,
+            "c": fname,
+            "zig": f"gui.{zname}",
+            "zigSignature": committed[f"rl.{zname}"],
+            "cSignature": cdecl,
+            "doc": comment,
+            "zigDoc": [],
+        })
+    version = re.search(r'#define RAYGUI_VERSION\s+"([^"]+)"', src).group(1)
+    return json.dumps({"raygui": version, "functions": records}, indent=1) + "\n"
+
+
 def main():
+    if "--json" in sys.argv:
+        (OUT_DIR / "api.json").write_text(emit_json())
+        print(f"OK  {OUT_DIR}/api.json")
+        return
     gen = Gen(HEADER.read_text())
     zig = gen.emit()
     if gen.errors:

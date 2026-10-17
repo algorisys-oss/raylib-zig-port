@@ -443,6 +443,7 @@ zig build webexamples -Demsdk=$HOME/emsdk   # browser gate: C vs Zig in headless
 zig build webresources -Demsdk=$HOME/emsdk  # rewrite test/web_resources.list (after adding web examples)
 zig build webdemos -Demsdk=$HOME/emsdk      # the site's demos (zig-out/web/examples)
 python3 tools/gen_api.py --json             # src/api/api.json for the site's API reference
+python3 tools/gen_raygui.py --json          # src/raygui/api.json (raygui, same purpose)
 ```
 
 The oracle archive lives in the zig cache:

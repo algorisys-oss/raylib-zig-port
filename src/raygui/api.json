@@ -1,0 +1,615 @@
+{
+ "raygui": "5.1-dev",
+ "functions": [
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiEnable",
+   "zig": "gui.enable",
+   "zigSignature": "fn enable() void",
+   "cSignature": "void GuiEnable(void);",
+   "doc": "Enable gui controls (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiDisable",
+   "zig": "gui.disable",
+   "zigSignature": "fn disable() void",
+   "cSignature": "void GuiDisable(void);",
+   "doc": "Disable gui controls (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiLock",
+   "zig": "gui.lock",
+   "zigSignature": "fn lock() void",
+   "cSignature": "void GuiLock(void);",
+   "doc": "Lock gui controls (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiUnlock",
+   "zig": "gui.unlock",
+   "zigSignature": "fn unlock() void",
+   "cSignature": "void GuiUnlock(void);",
+   "doc": "Unlock gui controls (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiIsLocked",
+   "zig": "gui.isLocked",
+   "zigSignature": "fn isLocked() bool",
+   "cSignature": "bool GuiIsLocked(void);",
+   "doc": "Check if gui is locked (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiSetAlpha",
+   "zig": "gui.setAlpha",
+   "zigSignature": "fn setAlpha(alpha: f32) void",
+   "cSignature": "void GuiSetAlpha(float alpha);",
+   "doc": "Set gui controls alpha (global state), alpha goes from 0.0f to 1.0f",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiSetState",
+   "zig": "gui.setState",
+   "zigSignature": "fn setState(state: State) void",
+   "cSignature": "void GuiSetState(int state);",
+   "doc": "Set gui state (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Global gui state control functions",
+   "c": "GuiGetState",
+   "zig": "gui.getState",
+   "zigSignature": "fn getState() State",
+   "cSignature": "int GuiGetState(void);",
+   "doc": "Get gui state (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Font set/get functions",
+   "c": "GuiSetFont",
+   "zig": "gui.setFont",
+   "zigSignature": "fn setFont(font: Font) void",
+   "cSignature": "void GuiSetFont(Font font);",
+   "doc": "Set gui custom font (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Font set/get functions",
+   "c": "GuiGetFont",
+   "zig": "gui.getFont",
+   "zigSignature": "fn getFont() Font",
+   "cSignature": "Font GuiGetFont(void);",
+   "doc": "Get gui custom font (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Style set/get functions",
+   "c": "GuiSetStyle",
+   "zig": "gui.setStyle",
+   "zigSignature": "fn setStyle(control: Control, property: anytype, value: anytype) void",
+   "cSignature": "void GuiSetStyle(int control, int property, int value);",
+   "doc": "Set one style property",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Style set/get functions",
+   "c": "GuiGetStyle",
+   "zig": "gui.getStyle",
+   "zigSignature": "fn getStyle(control: Control, property: anytype) i32",
+   "cSignature": "int GuiGetStyle(int control, int property);",
+   "doc": "Get one style property",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Styles loading functions",
+   "c": "GuiLoadStyle",
+   "zig": "gui.loadStyle",
+   "zigSignature": "fn loadStyle(fileName: ?[:0]const u8) void",
+   "cSignature": "void GuiLoadStyle(const char *fileName);",
+   "doc": "Load style file over global style variable (.rgs)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Styles loading functions",
+   "c": "GuiLoadStyleFromMemory",
+   "zig": "gui.loadStyleFromMemory",
+   "zigSignature": "fn loadStyleFromMemory(fileData: []const u8) void",
+   "cSignature": "void GuiLoadStyleFromMemory(const unsigned char *fileData, int dataSize);",
+   "doc": "Load style from memory (binary only)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Styles loading functions",
+   "c": "GuiLoadStyleDefault",
+   "zig": "gui.loadStyleDefault",
+   "zigSignature": "fn loadStyleDefault() void",
+   "cSignature": "void GuiLoadStyleDefault(void);",
+   "doc": "Load style default over global style",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Tooltips management functions",
+   "c": "GuiEnableTooltip",
+   "zig": "gui.enableTooltip",
+   "zigSignature": "fn enableTooltip() void",
+   "cSignature": "void GuiEnableTooltip(void);",
+   "doc": "Enable gui tooltips (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Tooltips management functions",
+   "c": "GuiDisableTooltip",
+   "zig": "gui.disableTooltip",
+   "zigSignature": "fn disableTooltip() void",
+   "cSignature": "void GuiDisableTooltip(void);",
+   "doc": "Disable gui tooltips (global state)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Tooltips management functions",
+   "c": "GuiSetTooltip",
+   "zig": "gui.setTooltip",
+   "zigSignature": "fn setTooltip(tooltip: ?[:0]const u8) void",
+   "cSignature": "void GuiSetTooltip(const char *tooltip);",
+   "doc": "Set tooltip string",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Icons functionality",
+   "c": "GuiIconText",
+   "zig": "gui.iconText",
+   "zigSignature": "fn iconText(iconId: IconName, text: ?[:0]const u8) [:0]const u8",
+   "cSignature": "const char *GuiIconText(int iconId, const char *text);",
+   "doc": "Get text with icon id prepended (if supported)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Icons functionality",
+   "c": "GuiSetIconScale",
+   "zig": "gui.setIconScale",
+   "zigSignature": "fn setIconScale(scale: i32) void",
+   "cSignature": "void GuiSetIconScale(int scale);",
+   "doc": "Set default icon drawing size",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Icons functionality",
+   "c": "GuiGetIcons",
+   "zig": "gui.getIcons",
+   "zigSignature": "fn getIcons() [*]u32",
+   "cSignature": "unsigned int *GuiGetIcons(void);",
+   "doc": "Get raygui icons data pointer",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Icons functionality",
+   "c": "GuiLoadIcons",
+   "zig": "gui.loadIcons",
+   "zigSignature": "fn loadIcons(fileName: ?[:0]const u8, loadIconsName: bool) ?[*][*:0]u8",
+   "cSignature": "char **GuiLoadIcons(const char *fileName, bool loadIconsName);",
+   "doc": "Load raygui icons file (.rgi) into internal icons data",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Icons functionality",
+   "c": "GuiLoadIconsFromMemory",
+   "zig": "gui.loadIconsFromMemory",
+   "zigSignature": "fn loadIconsFromMemory(fileData: []const u8, loadIconsName: bool) ?[*][*:0]u8",
+   "cSignature": "char **GuiLoadIconsFromMemory(const unsigned char *fileData, int dataSize, bool loadIconsName);",
+   "doc": "Load raygui icons file (.rgi) from memory into internal icons data",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Icons functionality",
+   "c": "GuiDrawIcon",
+   "zig": "gui.drawIcon",
+   "zigSignature": "fn drawIcon(iconId: IconName, posX: i32, posY: i32, pixelSize: i32, color: Color) void",
+   "cSignature": "void GuiDrawIcon(int iconId, int posX, int posY, int pixelSize, Color color);",
+   "doc": "Draw icon using pixel size at specified position",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Utility functions",
+   "c": "GuiGetTextWidth",
+   "zig": "gui.getTextWidth",
+   "zigSignature": "fn getTextWidth(text: ?[:0]const u8) i32",
+   "cSignature": "int GuiGetTextWidth(const char *text);",
+   "doc": "Get text width considering gui style and icon size (if required)",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Container/separator controls, useful for controls organization",
+   "c": "GuiWindowBox",
+   "zig": "gui.windowBox",
+   "zigSignature": "fn windowBox(bounds: Rectangle, title: ?[:0]const u8) i32",
+   "cSignature": "int GuiWindowBox(Rectangle bounds, const char *title);",
+   "doc": "Window Box control, shows a window that can be closed",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Container/separator controls, useful for controls organization",
+   "c": "GuiGroupBox",
+   "zig": "gui.groupBox",
+   "zigSignature": "fn groupBox(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiGroupBox(Rectangle bounds, const char *text);",
+   "doc": "Group Box control with text name",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Container/separator controls, useful for controls organization",
+   "c": "GuiLine",
+   "zig": "gui.line",
+   "zigSignature": "fn line(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiLine(Rectangle bounds, const char *text);",
+   "doc": "Line separator control, could contain text",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Container/separator controls, useful for controls organization",
+   "c": "GuiPanel",
+   "zig": "gui.panel",
+   "zigSignature": "fn panel(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiPanel(Rectangle bounds, const char *text);",
+   "doc": "Panel control, useful to group controls",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Container/separator controls, useful for controls organization",
+   "c": "GuiScrollPanel",
+   "zig": "gui.scrollPanel",
+   "zigSignature": "fn scrollPanel(bounds: Rectangle, text: ?[:0]const u8, content: Rectangle, scroll: *Vector2, view: *Rectangle) i32",
+   "cSignature": "int GuiScrollPanel(Rectangle bounds, const char *text, Rectangle content, Vector2 *scroll, Rectangle *view);",
+   "doc": "Scroll Panel control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiLabel",
+   "zig": "gui.label",
+   "zigSignature": "fn label(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiLabel(Rectangle bounds, const char *text);",
+   "doc": "Label control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiButton",
+   "zig": "gui.button",
+   "zigSignature": "fn button(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiButton(Rectangle bounds, const char *text);",
+   "doc": "Button control, returns true when clicked",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiLabelButton",
+   "zig": "gui.labelButton",
+   "zigSignature": "fn labelButton(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiLabelButton(Rectangle bounds, const char *text);",
+   "doc": "Label button control, returns true when clicked",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiToggle",
+   "zig": "gui.toggle",
+   "zigSignature": "fn toggle(bounds: Rectangle, text: ?[:0]const u8, active: *bool) i32",
+   "cSignature": "int GuiToggle(Rectangle bounds, const char *text, bool *active);",
+   "doc": "Toggle Button control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiToggleGroup",
+   "zig": "gui.toggleGroup",
+   "zigSignature": "fn toggleGroup(bounds: Rectangle, text: ?[:0]const u8, active: *i32) i32",
+   "cSignature": "int GuiToggleGroup(Rectangle bounds, const char *text, int *active);",
+   "doc": "Toggle Group control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiToggleSlider",
+   "zig": "gui.toggleSlider",
+   "zigSignature": "fn toggleSlider(bounds: Rectangle, text: ?[:0]const u8, active: *i32) i32",
+   "cSignature": "int GuiToggleSlider(Rectangle bounds, const char *text, int *active);",
+   "doc": "Toggle Slider control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiCheckBox",
+   "zig": "gui.checkBox",
+   "zigSignature": "fn checkBox(bounds: Rectangle, text: ?[:0]const u8, checked: *bool) i32",
+   "cSignature": "int GuiCheckBox(Rectangle bounds, const char *text, bool *checked);",
+   "doc": "Check Box control, returns true when active",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiComboBox",
+   "zig": "gui.comboBox",
+   "zigSignature": "fn comboBox(bounds: Rectangle, text: ?[:0]const u8, active: *i32) i32",
+   "cSignature": "int GuiComboBox(Rectangle bounds, const char *text, int *active);",
+   "doc": "Combo Box control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiDropdownBox",
+   "zig": "gui.dropdownBox",
+   "zigSignature": "fn dropdownBox(bounds: Rectangle, text: ?[:0]const u8, active: *i32, editMode: bool) i32",
+   "cSignature": "int GuiDropdownBox(Rectangle bounds, const char *text, int *active, bool editMode);",
+   "doc": "Dropdown Box control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiSpinner",
+   "zig": "gui.spinner",
+   "zigSignature": "fn spinner(bounds: Rectangle, text: ?[:0]const u8, value: *i32, minValue: i32, maxValue: i32, editMode: bool) i32",
+   "cSignature": "int GuiSpinner(Rectangle bounds, const char *text, int *value, int minValue, int maxValue, bool editMode);",
+   "doc": "Spinner control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiValueBox",
+   "zig": "gui.valueBox",
+   "zigSignature": "fn valueBox(bounds: Rectangle, text: ?[:0]const u8, value: *i32, minValue: i32, maxValue: i32, editMode: bool) i32",
+   "cSignature": "int GuiValueBox(Rectangle bounds, const char *text, int *value, int minValue, int maxValue, bool editMode);",
+   "doc": "Value Box control, updates input text with numbers",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiValueBoxFloat",
+   "zig": "gui.valueBoxFloat",
+   "zigSignature": "fn valueBoxFloat(bounds: Rectangle, text: ?[:0]const u8, textValue: [*]u8, value: *f32, editMode: bool) i32",
+   "cSignature": "int GuiValueBoxFloat(Rectangle bounds, const char *text, char *textValue, float *value, bool editMode);",
+   "doc": "Value box control for float values",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiTextBox",
+   "zig": "gui.textBox",
+   "zigSignature": "fn textBox(bounds: Rectangle, text: ?[]u8, editMode: bool) i32",
+   "cSignature": "int GuiTextBox(Rectangle bounds, char *text, int textSize, bool editMode);",
+   "doc": "Text Box control, updates input text",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiSlider",
+   "zig": "gui.slider",
+   "zigSignature": "fn slider(bounds: Rectangle, textLeft: ?[:0]const u8, textRight: ?[:0]const u8, value: *f32, minValue: f32, maxValue: f32) i32",
+   "cSignature": "int GuiSlider(Rectangle bounds, const char *textLeft, const char *textRight, float *value, float minValue, float maxValue);",
+   "doc": "Slider control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiSliderBar",
+   "zig": "gui.sliderBar",
+   "zigSignature": "fn sliderBar(bounds: Rectangle, textLeft: ?[:0]const u8, textRight: ?[:0]const u8, value: *f32, minValue: f32, maxValue: f32) i32",
+   "cSignature": "int GuiSliderBar(Rectangle bounds, const char *textLeft, const char *textRight, float *value, float minValue, float maxValue);",
+   "doc": "Slider Bar control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiProgressBar",
+   "zig": "gui.progressBar",
+   "zigSignature": "fn progressBar(bounds: Rectangle, textLeft: ?[:0]const u8, textRight: ?[:0]const u8, value: *f32, minValue: f32, maxValue: f32) i32",
+   "cSignature": "int GuiProgressBar(Rectangle bounds, const char *textLeft, const char *textRight, float *value, float minValue, float maxValue);",
+   "doc": "Progress Bar control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiStatusBar",
+   "zig": "gui.statusBar",
+   "zigSignature": "fn statusBar(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiStatusBar(Rectangle bounds, const char *text);",
+   "doc": "Status Bar control, shows info text",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiDummyRec",
+   "zig": "gui.dummyRec",
+   "zigSignature": "fn dummyRec(bounds: Rectangle, text: ?[:0]const u8) i32",
+   "cSignature": "int GuiDummyRec(Rectangle bounds, const char *text);",
+   "doc": "Dummy control for placeholders",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Basic controls set",
+   "c": "GuiGrid",
+   "zig": "gui.grid",
+   "zigSignature": "fn grid(bounds: Rectangle, text: ?[:0]const u8, spacing: f32, subdivs: i32, mouseCell: *Vector2) i32",
+   "cSignature": "int GuiGrid(Rectangle bounds, const char *text, float spacing, int subdivs, Vector2 *mouseCell);",
+   "doc": "Grid control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiListView",
+   "zig": "gui.listView",
+   "zigSignature": "fn listView(bounds: Rectangle, text: ?[:0]const u8, scrollIndex: *i32, active: *i32) i32",
+   "cSignature": "int GuiListView(Rectangle bounds, const char *text, int *scrollIndex, int *active);",
+   "doc": "List View control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiListViewEx",
+   "zig": "gui.listViewEx",
+   "zigSignature": "fn listViewEx(bounds: Rectangle, text: []const [*:0]const u8, scrollIndex: *i32, active: *i32, focus: *i32) i32",
+   "cSignature": "int GuiListViewEx(Rectangle bounds, char **text, int count, int *scrollIndex, int *active, int *focus);",
+   "doc": "List View control, using text entries list and returning focus entry",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiTabBar",
+   "zig": "gui.tabBar",
+   "zigSignature": "fn tabBar(bounds: Rectangle, text: ?[:0]const u8, hscroll: *i32, active: *i32) i32",
+   "cSignature": "int GuiTabBar(Rectangle bounds, const char *text, int *hscroll, int *active);",
+   "doc": "Tab Bar control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiTabBarEx",
+   "zig": "gui.tabBarEx",
+   "zigSignature": "fn tabBarEx(bounds: Rectangle, text: []const [*:0]const u8, hscroll: *i32, active: *i32, focus: *i32) i32",
+   "cSignature": "int GuiTabBarEx(Rectangle bounds, char **text, int count, int *hscroll, int *active, int *focus);",
+   "doc": "Tab Bar control, using text entries list and returning focus entry",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiMessageBox",
+   "zig": "gui.messageBox",
+   "zigSignature": "fn messageBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u8, btnText: ?[:0]const u8, btnActive: *i32) i32",
+   "cSignature": "int GuiMessageBox(Rectangle bounds, const char *title, const char *message, const char *btnText, int *btnActive);",
+   "doc": "Message Box control, displays a message",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiTextInputBox",
+   "zig": "gui.textInputBox",
+   "zigSignature": "fn textInputBox(bounds: Rectangle, title: ?[:0]const u8, message: ?[:0]const u8, text: ?[]u8, btnText: ?[:0]const u8, btnActive: *i32, secretViewActive: *bool) i32",
+   "cSignature": "int GuiTextInputBox(Rectangle bounds, const char *title, const char *message, char *text, int textSize, const char *btnText, int *btnActive, bool *secretViewActive);",
+   "doc": "Text Input Box control, ask for text, supports secret",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiColorPicker",
+   "zig": "gui.colorPicker",
+   "zigSignature": "fn colorPicker(bounds: Rectangle, text: ?[:0]const u8, color: *Color) i32",
+   "cSignature": "int GuiColorPicker(Rectangle bounds, const char *text, Color *color);",
+   "doc": "Color Picker control, includes Color bar controls",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiColorPanel",
+   "zig": "gui.colorPanel",
+   "zigSignature": "fn colorPanel(bounds: Rectangle, text: ?[:0]const u8, color: *Color) i32",
+   "cSignature": "int GuiColorPanel(Rectangle bounds, const char *text, Color *color);",
+   "doc": "Color Panel control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiColorBarAlpha",
+   "zig": "gui.colorBarAlpha",
+   "zigSignature": "fn colorBarAlpha(bounds: Rectangle, text: ?[:0]const u8, alpha: *f32) i32",
+   "cSignature": "int GuiColorBarAlpha(Rectangle bounds, const char *text, float *alpha);",
+   "doc": "Color Bar Alpha control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiColorBarHue",
+   "zig": "gui.colorBarHue",
+   "zigSignature": "fn colorBarHue(bounds: Rectangle, text: ?[:0]const u8, value: *f32) i32",
+   "cSignature": "int GuiColorBarHue(Rectangle bounds, const char *text, float *value);",
+   "doc": "Color Bar Hue control",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiColorPickerHSV",
+   "zig": "gui.colorPickerHSV",
+   "zigSignature": "fn colorPickerHSV(bounds: Rectangle, text: ?[:0]const u8, colorHsv: *Vector3) i32",
+   "cSignature": "int GuiColorPickerHSV(Rectangle bounds, const char *text, Vector3 *colorHsv);",
+   "doc": "Color Picker control, using Hue-Saturation-Value color data, includes Color bar controls",
+   "zigDoc": []
+  },
+  {
+   "module": "raygui",
+   "group": "Advance controls set",
+   "c": "GuiColorPanelHSV",
+   "zig": "gui.colorPanelHSV",
+   "zigSignature": "fn colorPanelHSV(bounds: Rectangle, text: ?[:0]const u8, colorHsv: *Vector3) i32",
+   "cSignature": "int GuiColorPanelHSV(Rectangle bounds, const char *text, Vector3 *colorHsv);",
+   "doc": "Color Panel control, using Hue-Saturation-Value color data",
+   "zigDoc": []
+  }
+ ]
+}

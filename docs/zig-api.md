@@ -142,7 +142,8 @@ function, its module and header group, C and Zig names, both signatures,
 raylib's comment, and any doc lines the Zig wrapper adds. Signatures are read
 from the checked-in `src/api/raylib.zig`, so the file describes the code that
 is compiled. raylib-zig-web builds its API reference and cheatsheet from it.
-Run it after any change to the API.
+Run it after any change to the API. `python3 tools/gen_raygui.py --json`
+writes `src/raygui/api.json`, the same for raygui.
 
 ## Gate
 
