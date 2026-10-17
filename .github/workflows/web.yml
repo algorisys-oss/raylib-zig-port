@@ -1,0 +1,108 @@
+name: Web gate & demos
+
+# The browser build of the port, checked and packaged for the documentation
+# site (algorisys-oss/raylib-zig-web). On every push that can change what runs
+# in the browser:
+#   1. the browser gate: each web example built from upstream C raylib and from
+#      the Zig port, run in headless Chrome, final frames byte-compared;
+#   2. the site's demos: the Zig-API translations without the gate's shim.
+# When both pass on main, the demos, the gate's frames (for thumbnails) and a
+# manifest naming this commit are uploaded to the `web-latest` release. The
+# site's CI downloads that and builds against this repo at the same commit.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "build.zig"
+      - "build.zig.zon"
+      - "src/**"
+      - "vendor/**"
+      - "examples/zig/**"
+      - "tools/webdiff.sh"
+      - "tools/webdiff/**"
+      - "tools/exdiff/**"
+      - "test/web_resources.list"
+      - ".github/workflows/web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write # the web-latest release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The exact compiler the port is built and gated on (CLAUDE.md). Zig master
+  # moves daily; the port moves to a new master on purpose, not by accident.
+  ZIG_VERSION: 0.18.0-dev.246+05671ced9
+  EMSDK_VERSION: 6.0.4
+  RAYLIB_TAG: "6.2"
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: tools/webdiff/package-lock.json
+
+      # The C oracle and every example's resources come from upstream raylib
+      # at the tag the port follows.
+      - name: raylib ${{ env.RAYLIB_TAG }} (oracle sources)
+        run: git clone --depth 1 --branch "$RAYLIB_TAG" https://github.com/raysan5/raylib "$RUNNER_TEMP/raylib"
+
+      - name: Emscripten SDK ${{ env.EMSDK_VERSION }}
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Headless Chrome for the gate
+        working-directory: tools/webdiff
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Browser gate (C vs Zig, ReleaseFast)
+        run: >
+          zig build webexamples -Doptimize=ReleaseFast
+          -Demsdk="$RUNNER_TEMP/emsdk" -Draylib-examples="$RUNNER_TEMP/raylib/examples"
+
+      - name: Site demos (ReleaseFast)
+        run: >
+          zig build webdemos -Doptimize=ReleaseFast
+          -Demsdk="$RUNNER_TEMP/emsdk" -Draylib-examples="$RUNNER_TEMP/raylib/examples"
+
+      - name: Package
+        run: |
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "zig=$ZIG_VERSION"
+            echo "emsdk=$EMSDK_VERSION"
+            echo "raylib=$RAYLIB_TAG"
+            echo "demos=$(ls zig-out/web/examples | wc -l)"
+            echo "frames=$(ls zig-out/web/frames | wc -l)"
+          } > zig-out/web/MANIFEST
+          cat zig-out/web/MANIFEST >> "$GITHUB_STEP_SUMMARY"
+          tar -C zig-out -czf raylib-zig-web.tar.gz web
+
+      # One moving release: the site always builds from the last green main.
+      - name: Upload to the web-latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view web-latest >/dev/null 2>&1 || gh release create web-latest --prerelease \
+            --title "Web demos (latest main)" \
+            --notes "Browser builds of the examples for raylib-zig-web, from the last green main. MANIFEST names the commit."
+          gh release upload web-latest raylib-zig-web.tar.gz zig-out/web/MANIFEST --clobber

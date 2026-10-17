@@ -224,6 +224,15 @@ original does not give the same frame twice; reasons in test/examples.list)
 and core_window_web. `zig build webdemos` builds them for the site, with the
 resource files their C source names. The gate does not run them.
 
+## CI
+
+`.github/workflows/web.yml` runs on pushes to main that touch the port (and by
+hand): pinned Zig, Emscripten 6.0.4 and raylib 6.2 from GitHub, then
+`zig build webexamples` and `zig build webdemos` at ReleaseFast. When both
+pass, the demos, the gate's frames and a MANIFEST naming the commit go to the
+`web-latest` release. raylib-zig-web's CI builds the site from that release
+and from this repo at the commit the MANIFEST names.
+
 ## Browser exclusions
 
 An example is left out of the browser gate only when it cannot give a correct

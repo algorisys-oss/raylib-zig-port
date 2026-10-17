@@ -820,6 +820,8 @@ fn apiExample(b: *std.Build, gate: ApiGate, entry: []const u8, name: []const u8)
 }
 
 pub fn build(b: *std.Build) void {
+    raylib_examples = b.option([]const u8, "raylib-examples", "raylib 6.2's examples/ directory (default: $RAYLIB_EXAMPLES, then the author's checkout)") orelse
+        b.graph.environ_map.get("RAYLIB_EXAMPLES") orelse raylib_examples;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -1009,7 +1011,7 @@ pub fn build(b: *std.Build) void {
     // the pair with identical args and byte-diffs stdout.
     {
         const cdiff_step = b.step("cdiff", "C-vs-Zig differentials for paths the examples can't reach");
-        const fonts_dir = "/home/rajesh/opensource/graphics/raylib-6.2/examples/text/resources";
+        const fonts_dir = b.fmt("{s}/text/resources", .{raylib_examples});
         const programs = [_]struct { name: []const u8, args: []const []const u8 }{
             .{ .name = "text_strings", .args = &.{} },
             .{ .name = "core_files", .args = &.{} },
@@ -1019,14 +1021,14 @@ pub fn build(b: *std.Build) void {
             .{ .name = "rlgl_paths", .args = &.{} },
             .{ .name = "shapes_paths", .args = &.{} },
             .{ .name = "audio_wave", .args = &.{} },
-            .{ .name = "image_ops", .args = &.{"/home/rajesh/opensource/graphics/raylib-6.2/examples/textures/resources/scarfy_run.gif"} },
+            .{ .name = "image_ops", .args = &.{b.fmt("{s}/textures/resources/scarfy_run.gif", .{raylib_examples})} },
             .{ .name = "text_fonts", .args = &.{fonts_dir} },
-            .{ .name = "models_data", .args = &.{"/home/rajesh/opensource/graphics/raylib-6.2/examples"} },
+            .{ .name = "models_data", .args = &.{raylib_examples} },
             .{ .name = "font_data", .args = &.{
-                fonts_dir ++ "/anonymous_pro_bold.ttf",
-                fonts_dir ++ "/pixantiqua.ttf",
-                fonts_dir ++ "/NotoSansTC-Regular.ttf",
-                fonts_dir ++ "/DotGothic16-Regular.ttf",
+                b.fmt("{s}/anonymous_pro_bold.ttf", .{fonts_dir}),
+                b.fmt("{s}/pixantiqua.ttf", .{fonts_dir}),
+                b.fmt("{s}/NotoSansTC-Regular.ttf", .{fonts_dir}),
+                b.fmt("{s}/DotGothic16-Regular.ttf", .{fonts_dir}),
             } },
         };
         for (programs) |p| {
@@ -1222,7 +1224,10 @@ fn emccLink(
     return emcc.addOutputFileArg(b.fmt("{s}.js", .{name})).dirname();
 }
 
-const raylib_examples = "/home/rajesh/opensource/graphics/raylib-6.2/examples";
+/// raylib 6.2's examples/ directory: the C sources and resources the gates
+/// compare against. Set once at the start of `build` from -Draylib-examples,
+/// then $RAYLIB_EXAMPLES, then this machine's checkout (CI passes the option).
+var raylib_examples: []const u8 = "/home/rajesh/opensource/graphics/raylib-6.2/examples";
 
 /// test/web_resources.list (written by `zig build webresources`): for each web
 /// example, the resource files it loads. Lines are `<category>/<name>: <file>...`.

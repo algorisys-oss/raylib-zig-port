@@ -446,6 +446,12 @@ python3 tools/gen_api.py --json             # src/api/api.json for the site's AP
 python3 tools/gen_raygui.py --json          # src/raygui/api.json (raygui, same purpose)
 ```
 
+The raylib 6.2 examples tree defaults to the author's checkout; elsewhere pass
+`-Draylib-examples=/path/to/raylib/examples` (or set `$RAYLIB_EXAMPLES`).
+CI: `.github/workflows/web.yml` runs the browser gate and the site demos on
+pushes that touch the port, and on main uploads them to the `web-latest`
+release, which raylib-zig-web's CI builds the site from.
+
 The oracle archive lives in the zig cache:
 `find .zig-cache ~/.cache/zig-local -name libraylib_oracle.a` (newest). The web
 build makes a wasm archive of the same name: the desktop one is the archive
