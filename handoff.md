@@ -34,6 +34,11 @@
   with playback stalled (no AudioContext without a gesture in headless
   Chrome). `web_demos_only`: 10 site demos that are not compared. raygui JSON
   (`tools/gen_raygui.py --json`).
+- CI (740a8e2, 2026-10-17): `.github/workflows/web.yml` (path-filtered pushes
+  to main + manual). First run green in ~30 min: browser gate **209/209** on a
+  GitHub runner (so it is not machine-specific), demos + frames + MANIFEST
+  uploaded to the `web-latest` release. raylib-zig-web's CI builds from it.
+  `-Draylib-examples` (or `$RAYLIB_EXAMPLES`) replaces the hard-coded path.
 - Open, owner's call: **LoadDirectoryFiles lists nothing on the web.** Zig
   std's dirRead for emscripten is `dirReadUnimplemented`; src/fs.zig uses
   std.Io.Dir. Fix = libc readdir on the web (a libc extern, idiomaudit counts
