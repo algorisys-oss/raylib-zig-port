@@ -11,6 +11,8 @@
 //   - the C source names it as a "resources/..." string literal (with GLSL
 //     version %i as 100, the web's), which catches files loaded only on a key
 //     press, which the gate never makes.
+// An example that lists `/` or a directory under resources/ gets `*`: its
+// category's whole resources/, since what it shows depends on what is there.
 // The gate then runs C with the whole category and Zig with only the listed
 // files: a missing file shows up as a frame difference.
 import { execFileSync } from 'node:child_process';
@@ -70,7 +72,10 @@ for (const entry of readFileSync(listFile, 'utf8').split('\n').filter(Boolean)) 
   }
   const opened = JSON.parse(readFileSync(filesOut, 'utf8'));
   const source = readFileSync(join(examplesRoot, category, `${name}.c`), 'utf8');
-  const files = [...new Set([...opened, ...(existsSync(resources) ? named(source, resources) : [])])].sort();
+  // "*": the example lists a directory, so it gets its category's whole resources/.
+  const files = opened.includes('*')
+    ? ['*']
+    : [...new Set([...opened, ...(existsSync(resources) ? named(source, resources) : [])])].sort();
   lines.push(`${entry}:${files.map((f) => ' ' + f).join('')}`);
   console.log(`  ${String(files.length).padStart(3)}  ${entry}`);
 }

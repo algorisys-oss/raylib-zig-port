@@ -2,7 +2,51 @@
 # its category's resources/ directory. Written by `zig build webresources`
 # (tools/webdiff/resources.mjs); do not edit by hand. build.zig preloads only
 # these into the Zig builds; the browser gate proves they are enough.
+core/core_2d_camera:
+core/core_2d_camera_mouse_zoom:
+core/core_2d_camera_platformer:
+core/core_2d_camera_split_screen:
+core/core_3d_camera_first_person:
+core/core_3d_camera_fps:
+core/core_3d_camera_free:
+core/core_3d_camera_mode:
+core/core_3d_camera_split_screen:
+core/core_3d_picking:
+core/core_automation_events:
+core/core_basic_screen_manager:
 core/core_basic_window:
+core/core_clipboard_text:
+core/core_compute_hash:
+core/core_custom_logging:
+core/core_delta_time:
+core/core_directory_files: *
+core/core_drop_files:
+core/core_highdpi_demo:
+core/core_highdpi_testbed:
+core/core_input_actions:
+core/core_input_gamepad: ps3.png xbox.png
+core/core_input_gestures:
+core/core_input_keys:
+core/core_input_mouse:
+core/core_input_mouse_wheel:
+core/core_input_multitouch:
+core/core_input_virtual_controls:
+core/core_keyboard_testbed:
+core/core_monitor_detector:
+core/core_random_sequence:
+core/core_random_values:
+core/core_render_texture:
+core/core_scissor_test:
+core/core_screen_recording:
+core/core_smooth_pixelperfect:
+core/core_storage_values:
+core/core_text_file_loading: text_file.txt
+core/core_undo_redo:
+core/core_viewport_scaling:
+core/core_vr_simulator: shaders/glsl100/distortion.fs
+core/core_window_flags:
+core/core_window_letterbox:
+core/core_world_screen:
 shapes/shapes_ball_physics:
 shapes/shapes_basic_shapes:
 shapes/shapes_bouncing_ball:

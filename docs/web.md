@@ -6,11 +6,11 @@ This page explains how it is put together, how it is checked against C raylib,
 and what is not done yet.
 
 Status (2026-10-17): the platform backend and the OpenGL ES 3 path are ported.
-The browser gate covers 159 examples: `core_basic_window` and the shapes (45),
-textures (32 of 33), text (17), shaders (32 of 36) and models (32) categories.
-All 159 pass in Debug and in ReleaseFast. The five excluded examples, and why,
-are under "Browser exclusions" below. The rest of core, audio and others come
-next.
+The browser gate covers 202 examples: core (44 of the 46 gated on the
+desktop), shapes (45), textures (32 of 33), text (17), shaders (32 of 36) and
+models (32). They pass in Debug and in ReleaseFast. The seven excluded
+examples, and why, are under "Browser exclusions" below; one of them
+(core_directory_files) is a port gap. Audio and others come next.
 
 ## What runs in the browser
 
@@ -119,7 +119,9 @@ Each example's `.data` bundle holds only the resource files it loads, listed
 in `test/web_resources.list`. `zig build webresources` writes that list: it
 runs every C example once and records the files it opens, and adds every
 `resources/...` path the C source names (so a file loaded only on a key press
-is there too). The C oracle still gets its category's whole `resources/`
+is there too). An example that lists `/` or a directory under `resources/`
+(core_directory_files does) gets `*`, the whole category, because what it
+shows depends on what is there. The C oracle still gets its category's whole `resources/`
 directory and the Zig build gets only the listed files, so a missing file
 shows up in the gate as a frame difference. A web example with no entry in
 the list fails the build. The gate also copies each passing example's final
@@ -215,17 +217,20 @@ build.zig's `web_examples` and a row here.
 | Example | Reason |
 |---|---|
 | `textures_to_image` | It reads an RGB texture back from the GPU (`LoadImageFromTexture`). On OpenGL ES, rlgl does that with `glReadPixels` in the texture's own format, and WebGL 2 accepts only RGBA there: the call fails with `GL_INVALID_OPERATION` in C and in Zig. Both then draw a buffer the GPU never wrote: leftover heap bytes in C, zeros in Zig. |
+| `core_directory_files` | **A port gap, not a browser limit.** `LoadDirectoryFiles` lists nothing on the web: `src/fs.zig` reads directories through `std.Io.Dir`, and in Zig 0.18.0-dev.246 std's directory reading for emscripten is `dirReadUnimplemented`. C raylib uses libc's `readdir`, which Emscripten provides, and lists `/tmp`, `/home`, `/dev`, `/proc` and `/resources`. Fixing it means calling libc's `readdir` on the web (a libc extern, which idiomaudit counts) or waiting for std. |
+| `core_window_web` | Its C version runs its frames through `emscripten_set_main_loop` on the web. The gate's determinism shim counts frames in `WindowShouldClose`, which that path never calls, so the C side never takes its screenshot. The Zig translation uses raylib's normal loop (Asyncify), so there is no matching pair to compare. |
 | `shaders_rlgl_compute` | Compute shaders need desktop OpenGL 4.3. WebGL 2 has none. |
 | `shaders_depth_writing`, `shaders_hybrid_rendering`, `shaders_raymarching_rendering` | Their `glsl100` shaders use `GL_EXT_frag_depth` or `GL_OES_standard_derivatives`. Those are WebGL 1 extensions; WebGL 2 does not offer them to GLSL ES 1.00 shaders, so the shader does not compile. C raylib then falls back to its default shader and draws something else; the Zig API returns the load error. Upstream raylib's own web build uses WebGL 1, where these shaders work. |
 
 ## Not done yet
 
-- The gate covers core_basic_window, shapes, textures, text, shaders and
-  models. The rest of core, audio and others come next, with each browser
-  exclusion recorded and explained.
+- The gate covers core, shapes, textures, text, shaders and models. Audio and
+  others come next, with each browser exclusion recorded and explained.
 - Speed: not measured yet. Size, for `core_basic_window` at ReleaseFast with
   `-sASYNCIFY` and emcc `-O2`: the Zig build is 107,469 bytes of wasm and
   159,896 of JS; the C build is 103,858 and 163,614. A frame-callback build
   for comparison is still to do.
+- `LoadDirectoryFiles` and `LoadDirectoryFilesEx` return nothing on the web
+  (see `core_directory_files` under "Browser exclusions").
 - `PLATFORM_WEB_EMSCRIPTEN` and `PLATFORM_WEB_RGFW` (raylib's other two web
   backends) are not ported. Only `PLATFORM_WEB` is.

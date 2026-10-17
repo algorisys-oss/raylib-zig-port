@@ -78,11 +78,16 @@ try {
   if (result.error) throw new Error(result.error);
 
   // WEBDIFF_FILES=<path>: also write the resource files the program opened,
-  // as paths under resources/ that exist (tools/webdiff/resources.mjs).
+  // as paths under resources/ that exist (tools/webdiff/resources.mjs). A
+  // program that lists `/` or a directory under resources/ sees which files
+  // are there, so it is given all of them: the list is then ["*"].
   if (process.env.WEBDIFF_FILES) {
     const files = await page.evaluate(() => {
       const fs = window.webdiff.module.FS;
+      const listed = [...window.webdiff.opened].filter((p) => p.startsWith('dir:')).map((p) => p.slice(4).replace(/\/+$/, ''));
+      if (listed.some((d) => d === '' || d === '.' || d === '/resources' || d.startsWith('/resources/') || d.startsWith('resources'))) return ['*'];
       return [...window.webdiff.opened]
+        .filter((p) => !p.startsWith('dir:'))
         .map((p) => p.replace(/^\/+/, '').replace(/^(\.\/)+/, ''))
         .filter((p) => p.startsWith('resources/') && fs.analyzePath('/' + p).exists && !fs.isDir(fs.stat('/' + p).mode))
         .map((p) => p.slice('resources/'.length));

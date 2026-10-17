@@ -336,7 +336,50 @@ const api_examples = [_][]const u8{
 /// Chrome twice, as upstream C on the all-C library and as the Zig-API translation
 /// on the Zig library, and the final frames must be byte-identical.
 const web_examples = [_][]const u8{
+    "core/core_2d_camera",
+    "core/core_2d_camera_mouse_zoom",
+    "core/core_2d_camera_platformer",
+    "core/core_2d_camera_split_screen",
+    "core/core_3d_camera_first_person",
+    "core/core_3d_camera_fps",
+    "core/core_3d_camera_free",
+    "core/core_3d_camera_mode",
+    "core/core_3d_camera_split_screen",
+    "core/core_3d_picking",
+    "core/core_automation_events",
+    "core/core_basic_screen_manager",
     "core/core_basic_window",
+    "core/core_clipboard_text",
+    "core/core_compute_hash",
+    "core/core_custom_logging",
+    "core/core_delta_time",
+    "core/core_drop_files",
+    "core/core_highdpi_demo",
+    "core/core_highdpi_testbed",
+    "core/core_input_actions",
+    "core/core_input_gamepad",
+    "core/core_input_gestures",
+    "core/core_input_keys",
+    "core/core_input_mouse",
+    "core/core_input_mouse_wheel",
+    "core/core_input_multitouch",
+    "core/core_input_virtual_controls",
+    "core/core_keyboard_testbed",
+    "core/core_monitor_detector",
+    "core/core_random_sequence",
+    "core/core_random_values",
+    "core/core_render_texture",
+    "core/core_scissor_test",
+    "core/core_screen_recording",
+    "core/core_smooth_pixelperfect",
+    "core/core_storage_values",
+    "core/core_text_file_loading",
+    "core/core_undo_redo",
+    "core/core_viewport_scaling",
+    "core/core_vr_simulator",
+    "core/core_window_flags",
+    "core/core_window_letterbox",
+    "core/core_world_screen",
     "shapes/shapes_ball_physics",
     "shapes/shapes_basic_shapes",
     "shapes/shapes_bouncing_ball",
@@ -501,6 +544,8 @@ const web_examples = [_][]const u8{
     // shaders/shaders_depth_writing: its GLSL 100 shader needs GL_EXT_frag_depth, which WebGL 2 does not offer to GLSL ES 1.00 shaders
     // shaders/shaders_hybrid_rendering: its GLSL 100 shader needs GL_EXT_frag_depth and GL_OES_standard_derivatives, which WebGL 2 does not offer to GLSL ES 1.00 shaders
     // shaders/shaders_raymarching_rendering: its GLSL 100 shader needs GL_OES_standard_derivatives (fwidth), which WebGL 2 does not offer to GLSL ES 1.00 shaders
+    // core/core_window_web: its C version runs its frames through emscripten_set_main_loop, which the gate's frame counter (driven by WindowShouldClose) never sees; the Zig translation uses the normal loop
+    // core/core_directory_files: port gap on the web: Zig std has no directory reading for emscripten (dirReadUnimplemented), so LoadDirectoryFiles returns nothing where C lists /tmp, /home, /dev, /proc and /resources
 };
 
 const sys_libs = [_][]const u8{ "X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "GL", "m", "pthread", "dl", "rt" };
@@ -1158,8 +1203,10 @@ fn emccLink(
     // Examples load "resources/..." relative to the working directory, which is
     // MEMFS's root on the web.
     const resources = b.fmt("{s}/{s}/resources", .{ raylib_examples, category });
-    if (files) |list| {
-        for (list) |file| emcc.addArgs(&.{ "--preload-file", b.fmt("{s}/{s}@resources/{s}", .{ resources, file, file }) });
+    // `*` (an example that lists a directory) means the whole resources/.
+    const whole = if (files) |list| list.len == 1 and std.mem.eql(u8, list[0], "*") else true;
+    if (!whole) {
+        for (files.?) |file| emcc.addArgs(&.{ "--preload-file", b.fmt("{s}/{s}@resources/{s}", .{ resources, file, file }) });
     } else if (std.Io.Dir.cwd().access(b.graph.io, resources, .{})) |_| {
         emcc.addArgs(&.{ "--preload-file", b.fmt("{s}@resources", .{resources}) });
     } else |_| {}
@@ -1322,6 +1369,9 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         z_mod.addIncludePath(b.path("vendor/raylib/src"));
         z_mod.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
         z_mod.addCSourceFile(.{ .file = b.path("tools/exdiff/hooks.c"), .flags = &c_flags });
+        for (api_example_c_shims) |shim| {
+            if (std.mem.eql(u8, shim, entry)) z_mod.addCSourceFile(.{ .file = b.path(b.fmt("examples/zig/{s}_shim.c", .{entry})), .flags = &c_flags });
+        }
         const z_lib = b.addLibrary(.{ .name = name, .linkage = .static, .root_module = z_mod });
         z_lib.use_llvm = true;
         const z_out = emccLink(b, emcc_path, name, category, &.{ z_lib, lib }, js_library, files);
@@ -1337,6 +1387,13 @@ fn addWeb(b: *std.Build, optimize: ?std.builtin.Optimize, cfg_mod: *std.Build.Mo
         d_mod.addImport("raylib", demo_api);
         d_mod.addImport("raygui", demo_raygui);
         for (demo_helpers) |helper| d_mod.addImport(helper.name, helper.module);
+        // The example's own C (e.g. a single-header library), as on the desktop.
+        for (api_example_c_shims) |shim| {
+            if (!std.mem.eql(u8, shim, entry)) continue;
+            d_mod.addIncludePath(b.path("vendor/raylib/src"));
+            d_mod.addSystemIncludePath(.{ .cwd_relative = sysroot_include });
+            d_mod.addCSourceFile(.{ .file = b.path(b.fmt("examples/zig/{s}_shim.c", .{entry})), .flags = &c_flags });
+        }
         const d_lib = b.addLibrary(.{ .name = b.fmt("{s}_demo", .{name}), .linkage = .static, .root_module = d_mod });
         d_lib.use_llvm = true;
         const d_out = emccLink(b, emcc_path, name, category, &.{ d_lib, lib }, js_library, files);

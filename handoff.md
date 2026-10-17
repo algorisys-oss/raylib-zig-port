@@ -25,6 +25,14 @@
   gate frames in zig-out/web/frames, `tools/gen_api.py --json` ->
   src/api/api.json, builds as a dependency (rlgl_impl_defs.h include fix).
   Desktop re-run after it: pixel 12/12, apiexamples 217/217, exdiff 217/217.
+- Later still (raylib-zig-web session, 2026-10-17 08:50): core in the browser
+  gate, **202** examples (core 44/46; core_window_web excluded; Debug and
+  ReleaseFast run on the core subset, the other 158 unchanged since their
+  159/159 run). Web example C shims are linked (core_screen_recording).
+- Open, owner's call: **LoadDirectoryFiles lists nothing on the web.** Zig
+  std's dirRead for emscripten is `dirReadUnimplemented`; src/fs.zig uses
+  std.Io.Dir. Fix = libc readdir on the web (a libc extern, idiomaudit counts
+  it) or wait for std. core_directory_files is excluded until then.
 - Open: `python3 tools/gen_api.py` (full regen) no longer reproduces the
   checked-in src/api/raylib.zig (zig fmt quoting, @fromBackingInt vs
   @enumFromInt in a few wrappers). Do not regenerate until the generator is

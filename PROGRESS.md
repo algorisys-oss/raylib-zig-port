@@ -46,8 +46,8 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   `src/platforms/rcore_desktop_glfw.zig` (216 exports before and after).
 - `zig build webexamples`: browser gate, C oracle vs Zig-API translation in
   headless Chrome (SwiftShader), byte-compared. C-vs-C deterministic; negative
-  control fails. **159/159** (`core_basic_window` + shapes 45 + textures 32/33
-  + text 17 + shaders 32/36 + models 32; 5 exclusions in docs/web.md), Debug and
+  control fails. **202** (core 44 + shapes 45 + textures 32/33 + text 17 +
+  shaders 32/36 + models 32; 7 exclusions in docs/web.md), Debug and
   ReleaseFast.
 - `zig build webdemos`: the same examples without the shim, for the site.
 - Two port bugs found (hidden by x86-64): libc `time_t`/`timespec`/`stat`/
@@ -68,6 +68,12 @@ The browser build of the port, for the documentation site. Details: docs/web.md.
   cwd-relative `-includesrc/c/rlgl_impl_defs.h`); checked by
   raylib-zig-web's tools/check-getting-started.sh. `tools/gen_api.py --json`
   writes src/api/api.json (940 functions) for the site's API reference.
+- Core on the web (2026-10-17): 44 of 46. core_window_web excluded (its C web
+  path uses emscripten_set_main_loop, which the shim never sees). Port gap
+  found: LoadDirectoryFiles lists nothing on the web, because Zig std's
+  dirRead for emscripten is unimplemented (src/fs.zig uses std.Io.Dir);
+  core_directory_files excluded until that is decided. Zig-API example C
+  shims (core_screen_recording's msf_gif) are now linked on the web too.
 - Desktop gates after all of this: pixel 12/12, exdiff 217/217, apiexamples
   217/217, cdiff 4/4, audio 43/43, data, math/cam/gest, apitest, constaudit 0.
 

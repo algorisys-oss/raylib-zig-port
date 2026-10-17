@@ -48,6 +48,12 @@
           if (recording) window.webdiff.opened.add(String(path));
           return open.call(this, path, ...rest);
         };
+        // A directory listing is recorded as `dir:<path>` (see run.mjs).
+        const readdir = module.FS.readdir;
+        module.FS.readdir = function (path, ...rest) {
+          if (recording) window.webdiff.opened.add('dir:' + String(path));
+          return readdir.call(this, path, ...rest);
+        };
       }],
     }).then((module) => {
       window.webdiff.module = module;
