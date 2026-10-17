@@ -29,6 +29,11 @@
   gate, **202** examples (core 44/46; core_window_web excluded; Debug and
   ReleaseFast run on the core subset, the other 158 unchanged since their
   159/159 run). Web example C shims are linked (core_screen_recording).
+- Later (924f6d3 / 4559e4b, 2026-10-17 11:15): browser gate **209**: every
+  desktop-gated example but 8 (exclusions in docs/web.md). Audio is compared
+  with playback stalled (no AudioContext without a gesture in headless
+  Chrome). `web_demos_only`: 10 site demos that are not compared. raygui JSON
+  (`tools/gen_raygui.py --json`).
 - Open, owner's call: **LoadDirectoryFiles lists nothing on the web.** Zig
   std's dirRead for emscripten is `dirReadUnimplemented`; src/fs.zig uses
   std.Io.Dir. Fix = libc readdir on the web (a libc extern, idiomaudit counts
@@ -59,9 +64,9 @@
 
 1. Owner: send the reviewer reply (docs/migration-status.md, appendix) and
    decide whether to report the BMFont use-after-free upstream.
-2. Phase W (web) resume list: rest of core, audio, others in `web_examples`
-   (text, shaders, models done; after adding, run `zig build webresources`);
-   example manifest; Asyncify vs frame callback; the wasm size growth.
+2. Phase W (web): all categories are in. Left: the LoadDirectoryFiles web gap,
+   audio that plays during the gate (would need a deterministic audio clock),
+   Asyncify vs frame callback, the wasm size growth.
 3. Optional: idiomaudit `[*c]` count is dominated by export signatures and
    the generated src/api/c*.zig bindings; nothing actionable there.
 
